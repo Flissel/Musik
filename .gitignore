@@ -1,0 +1,36 @@
+# Secrets — Suno-API-Key gehört hier rein, nicht ins Repo
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.vite/
+npm-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Audio- und Analyse-Artefakte
+/tracks/
+/generated/
+*.wav
+*.mp3
+*.flac
+*.aiff
+*.m4a
+*.ogg
+*.waveform.json
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
