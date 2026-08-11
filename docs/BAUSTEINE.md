@@ -14,6 +14,10 @@ Weitergabe, nicht bei Nutzung.** Solange das Tool auf dem eigenen Rechner läuft
 und nicht verteilt wird, entstehen aus GPL-Abhängigkeiten überhaupt keine
 Pflichten.
 
+**Aktueller Stand: reine Eigennutzung, Weitergabe nicht geplant.** Damit ist die
+Bibliothekswahl frei — auch Rubber Band, die beste der Stretching-Bibliotheken.
+Eine `LICENSE`-Datei braucht das Repo in diesem Zustand nicht.
+
 | Bibliothek | Lizenz | Für dieses Projekt |
 | --- | --- | --- |
 | Essentia | AGPL | Nutzbar — siehe AGPL-Hinweis unten |

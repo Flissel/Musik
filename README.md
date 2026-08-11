@@ -99,7 +99,12 @@ genaue Grund ist enger als „nicht kommerziell" — Copyleft greift bei
 *Weitergabe*, nicht bei Nutzung. Solange das Tool auf dem eigenen Rechner
 bleibt, entstehen gar keine Pflichten.
 
-Zwei Dinge bleiben trotzdem zu beachten, Details in
+**Aktueller Stand: reine Eigennutzung, keine Weitergabe geplant.** Damit gibt es
+derzeit überhaupt keine Lizenzpflichten aus den Abhängigkeiten, und deshalb
+liegt auch bewusst keine `LICENSE`-Datei im Repo.
+
+Die folgenden zwei Punkte sind Merkposten für den Fall, dass sich das ändert —
+Details in
 [docs/BAUSTEINE.md](docs/BAUSTEINE.md#lizenzen--entschärft-nicht-erledigt):
 
 - Wird das Tool je weitergegeben, auch kostenlos, müsste der eigene Code unter
