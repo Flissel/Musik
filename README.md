@@ -90,10 +90,11 @@ und der Werkzeugkasten sollte sie nicht vorwegnehmen.
 | `rustfft` | MIT/Apache-2.0 | STFT für die Onset-Erkennung |
 | `blake3`, `serde`, `base64` | permissiv | Fingerabdruck und Sidecar |
 
-Zeitstreckung (WSOLA) und Tempoerkennung sind selbst implementiert. Rubber Band
-ist beim Stretching besser und steht inzwischen offen (GPL, nicht kommerzielles
-Projekt) — der Tausch lohnt aber erst, wenn die eigene Variante hörbar nicht
-reicht. Details in
+Zeitstreckung (WSOLA) und Tempoerkennung sind selbst implementiert — damit ist
+der gesamte Stack MIT-verträglich. Rubber Band wäre beim Stretching besser, ist
+aber GPL und würde einen späteren Anschluss an VibeMind verbauen (siehe unten).
+Reicht die eigene Variante hörbar nicht, ist `signalsmith-stretch` (MIT) der
+Weg, der beide Optionen offenlässt. Details in
 [docs/BAUSTEINE.md](docs/BAUSTEINE.md#phase-0-was-gebaut-ist).
 
 **UI: egui/eframe**, entschieden. Begründung und die verworfenen Alternativen
@@ -111,24 +112,20 @@ reicht. Details in
 
 **Nativ in Rust** (Phase 0) und **nicht kommerziell.**
 
-Die zweite Entscheidung entspannt die Lizenzlage deutlich: GPL-Bibliotheken wie
-Rubber Band und aubio stehen offen, ebenso CC-BY-NC-Samples von Freesound. Der
-genaue Grund ist enger als „nicht kommerziell" — Copyleft greift bei
-*Weitergabe*, nicht bei Nutzung. Solange das Tool auf dem eigenen Rechner
-bleibt, entstehen gar keine Pflichten.
+Die zweite Entscheidung entspannt die Lizenzlage: Copyleft greift bei
+*Weitergabe*, nicht bei Nutzung. Solange das Tool auf dem eigenen Rechner bleibt
+und nicht verteilt wird, entstehen aus GPL-Abhängigkeiten überhaupt keine
+Pflichten — deshalb liegt auch bewusst keine `LICENSE`-Datei im Repo.
 
-**Aktueller Stand: reine Eigennutzung, keine Weitergabe geplant.** Damit gibt es
-derzeit überhaupt keine Lizenzpflichten aus den Abhängigkeiten, und deshalb
-liegt auch bewusst keine `LICENSE`-Datei im Repo.
+⚠️ **Trotzdem bleibt der Stack permissiv.** Ein späterer Anschluss an
+[VibeMind](https://github.com/Flissel/Vibemind_V1) steht im Raum, und das ist
+MIT und zur Veröffentlichung vorgesehen — also Weitergabe. Damit fielen
+Rubber Band, aubio und Essentia wieder aus, und CC-BY-NC-Samples dürften nicht
+mitgeliefert werden. Solange die Frage offen ist, ist jede GPL-Abhängigkeit eine
+Tür, die hinter einem zufällt. Details in
+[docs/VIBEMIND.md](docs/VIBEMIND.md#1-die-lizenzlage-kippt-zurück).
 
-Die folgenden zwei Punkte sind Merkposten für den Fall, dass sich das ändert —
-Details in
-[docs/BAUSTEINE.md](docs/BAUSTEINE.md#lizenzen--entschärft-nicht-erledigt):
-
-- Wird das Tool je weitergegeben, auch kostenlos, müsste der eigene Code unter
-  GPL stehen.
-- AGPL (Essentia) löst schon bei Netzwerknutzung aus — relevant, falls die
-  Agenten-Schicht je als Dienst läuft.
+Der aktuelle Stand ist sauber: alles im Repo ist MIT-verträglich.
 
 ## Offene Entscheidungen
 
