@@ -87,13 +87,13 @@ ein Deck als Tempo-Master hängt.
 
 ```
 crates/
-  audio-core/    steht — Dekodierung, WSOLA, ein Deck, CPAL-Ausgabe
-  audio-engine/  NEU — Mehrdeck-Graph, Mixer, Cue-Bus, Effekte, Master
-  analysis/      NEU — BPM, Beatgrid, Tonart, Waveform-Peaks (offline)
-  library/       NEU — SQLite, Metadaten, Playlists, Traktor-Import
-  sources/       NEU — Trackquellen: Datei, später Generierung
-  musik-app/     NEU — UI
-  musik-cli/     steht — bleibt als Testwerkzeug
+  audio-core/    steht — Dekodierung, WSOLA, Deck, Beatgrid, Cues, Loops
+  audio-engine/  steht — Mixer, Kanalzüge, Cue-Bus, AUX, Sync, Begrenzer
+  analysis/      steht — BPM, Beatgrid, Waveform-Peaks, Sidecar-Cache
+  library/       steht — SQLite, Suche, Playlists, Traktor-Import
+  musik-cli/     steht — Deck, Analyse, Offline-Mix, Sammlung
+  musik-app/     OFFEN — UI (egui), Phase 3
+  Effekte, Stems und MIDI kommen in audio-engine bzw. analysis dazu.
 ```
 
 `audio-core` behält seine Rolle als Deck-Innenleben; `audio-engine` ist alles
@@ -172,9 +172,9 @@ Ordner liegen. Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 | 1 | Mehrdeck-Engine, Mixer, Cue-Bus, AUX | Code steht ✅ · Abnahme offen: Cue muss hörbar getrennt auf 3/4 liegen | M | 4-Kanal-Interface |
 | ~~2~~ | ~~Analyse-Pipeline~~ ✅ | BPM und Grid reproduzierbar als Sidecar, Peaks vorhanden | M | — |
 | 3 | UI-Grundgerüst | Zwei Decks mit Waveform, Mixer bedienbar, stabile 60 fps | L | 1, 2 |
-| 4 | Sync und Beatmatching | Zwei Tracks bleiben über 5 Minuten im Takt, Phase korrekt | M | 2 |
-| 5 | Hot Cues und Loops | 8 Cues pro Deck, Loop in/out, beat-quantisiert | M | 4 |
-| 6 | Library | Import, Suche, Playlists, Traktor-`collection.nml` | L | 2 |
+| ~~4~~ | ~~Sync und Beatmatching~~ ✅ | Zwei Tracks bleiben über 5 Minuten im Takt — als Test abgesichert | M | 2 |
+| ~~5~~ | ~~Hot Cues und Loops~~ ✅ | 8 Cues pro Deck, Loop beat-quantisiert · Bedienung fehlt noch (Phase 3) | M | 4 |
+| ~~6~~ | ~~Library~~ ✅ | Import, Suche, Playlists, Traktor-`collection.nml` | L | 2 |
 | 7 | Effekte | 6–8 gute Effekte, Mixer-FX post-fader | M | 1 |
 | 8 | Stems | Beim Import vorberechnet, Stem-Deck-Modus | L | 6 |
 | 9 | Mitschnitt | Master-Bus als WAV/FLAC, ohne Aussetzer | S | 1 |
@@ -188,6 +188,19 @@ Ab Phase 6 ist die Software als DJ-Werkzeug benutzbar. 7 bis 10 machen sie gut.
 **Wenige gute Effekte statt vierzig.** Traktor hat über 40; die meisten davon
 benutzt niemand. Sinnvoll sind Filter, Delay, Reverb, Beatmasher/Gater, Flanger
 und ein Bitcrusher — richtig gebaut und mit vernünftigen Regelwegen.
+
+## Was inzwischen steht
+
+Sechs von zehn Phasen sind gebaut. Was fehlt, ist vor allem die Oberfläche —
+alles Bisherige lässt sich nur über die Kommandozeile und über Tests bedienen.
+
+| Crate | Inhalt |
+| --- | --- |
+| `audio-core` | Deck: Dekodierung, WSOLA, Beatgrid, Hot Cues, Loops |
+| `audio-engine` | Mixer: Kanalzüge, EQ, Filter, Crossfader, Cue-Bus, Begrenzer, AUX, Sync |
+| `analysis` | Tempo, Beatgrid, Wellenform-Spitzen, Sidecar-Cache |
+| `library` | SQLite-Sammlung, Suche, Playlists, Traktor-Import |
+| `musik-cli` | Deck fahren, analysieren, Mix rendern, Sammlung verwalten |
 
 ## Offene Entscheidungen
 

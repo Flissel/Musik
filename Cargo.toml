@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/analysis","crates/audio-core", "crates/audio-engine", "crates/musik-cli"]
+members = ["crates/analysis","crates/audio-core", "crates/audio-engine", "crates/library", "crates/musik-cli"]
 
 [workspace.package]
 edition = "2021"
@@ -10,3 +10,4 @@ publish = false
 analysis = { path = "crates/analysis" }
 audio-core = { path = "crates/audio-core" }
 audio-engine = { path = "crates/audio-engine" }
+library = { path = "crates/library" }

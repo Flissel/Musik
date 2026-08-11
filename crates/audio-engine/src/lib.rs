@@ -20,6 +20,7 @@ pub mod limiter;
 pub mod mixer;
 pub mod source;
 pub mod svf;
+pub mod sync;
 
 #[cfg(test)]
 pub(crate) mod testing;
@@ -32,3 +33,4 @@ pub use filter::DjFilter;
 pub use limiter::Limiter;
 pub use mixer::{assign_deck_pair, Engine};
 pub use source::{DeckSource, LoopSource, SilentSource, Source};
+pub use sync::{phase_error, sync, sync_tempo_only, SyncPlan};

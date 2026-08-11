@@ -4,10 +4,10 @@ Traktor-artiges DJ-/Musik-Tool, das generative Musik als gleichberechtigte
 Quelle behandelt — mit dem Fernziel eines Agenten-Teams, das Musik aus den
 Reaktionen der Crowd formt.
 
-Status: **Phasen 0–2.** Ein Deck läuft (Wiedergabe, Tempo mit und ohne
-Keylock, Springen), die Analyse erkennt Tempo, Beatgrid und Wellenform-Spitzen,
-und der Mixer mischt mehrere Kanäle inklusive AUX auf Master und Kopfhörer.
-Nativ in Rust.
+Status: **sechs von zehn Phasen gebaut.** Decks mit Keylock, Hot Cues und
+Loops; Mixer mit EQ, Filter, Crossfader, Cue-Bus und AUX; Analyse für Tempo,
+Beatgrid und Wellenform; Sync über Tempo *und* Phase; Sammlung mit
+Traktor-Import. Nativ in Rust — was fehlt, ist die Oberfläche.
 
 ## Zielbild
 
@@ -50,8 +50,8 @@ Alternativenvergleich in [docs/APIS.md](docs/APIS.md).
 
 ## Roadmap
 
-**Phasen 0 und 2 stehen** ✅, **Phase 1 zur Hälfte** ⚙️ — der Mixer ist gebaut
-und getestet, abnehmen lässt er sich erst mit einem 4-Kanal-Interface.
+**Sechs von zehn Phasen sind gebaut.** Was jetzt fehlt, ist vor allem die
+Oberfläche — bedienen lässt sich alles bisher nur über die Kommandozeile.
 
 Der ausführliche Bauplan der DJ-Software mit Architektur, Abnahmekriterien und
 Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
@@ -60,11 +60,14 @@ Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
 | --- | --- |
 | 1 ⚙️ | Mehrdeck-Engine mit Mixer, Cue-Bus und AUX — Code steht, Abnahme braucht Hardware |
 | ~~2~~ ✅ | ~~Analyse-Pipeline (BPM, Grid, Peaks)~~ |
-| 3–5 | UI mit Waveforms · Sync und Beatmatching · Hot Cues und Loops |
-| 6–7 | Library inkl. Traktor-Import · Effekte |
-| 8–10 | Stems · Mitschnitt · MIDI-Controller |
+| **3** | **UI mit Waveforms — das größte offene Stück** |
+| ~~4~~ ✅ | ~~Sync und Beatmatching über Tempo und Phase~~ |
+| ~~5~~ ✅ | ~~Hot Cues und Loops~~ (Bedienung kommt mit Phase 3) |
+| ~~6~~ ✅ | ~~Library inkl. Traktor-Import~~ |
+| 7–10 | Effekte · Stems · Mitschnitt · MIDI-Controller |
 
-Ab Phase 6 ist die Software als DJ-Werkzeug benutzbar.
+Zum Auflegen fehlt vor allem Phase 3: Ohne Oberfläche mit Waveforms lässt sich
+das Vorhandene zwar testen, aber nicht spielen.
 
 Darauf setzen die beiden Schichten aus dem Zielbild auf:
 
@@ -88,6 +91,8 @@ und der Werkzeugkasten sollte sie nicht vorwegnehmen.
 | Crate | Lizenz | Wofür |
 | --- | --- | --- |
 | `cpal` | Apache-2.0 | Audioausgabe |
+| `rusqlite` | MIT | Sammlung als SQLite-Datei |
+| `quick-xml` | MIT | Traktor-`collection.nml` lesen |
 | `symphonia` | MPL-2.0 | MP3, FLAC, WAV, AAC/M4A, OGG |
 | `rustfft` | MIT/Apache-2.0 | STFT für die Onset-Erkennung |
 | `rtrb` | MIT/Apache-2.0 | Lock-freier Ringpuffer für AUX |
@@ -192,5 +197,19 @@ Bass-Swap und schreibt das Ergebnis als WAV. Ohne `--a`/`--b` nimmt es
 synthetische Loops — praktisch, um die Engine zu hören, wenn gerade keine
 Musik zur Hand ist. `--aux <datei>` legt einen dritten Kanal auf Thru dazu,
 der den Crossfader unbeschadet übersteht.
+
+Sammlung aufbauen — ebenfalls **ohne** Audiogerät:
+
+```sh
+cargo run -p musik-cli --bin musik-lib -- scan ~/Musik
+cargo run -p musik-cli --bin musik-lib -- import-traktor ~/Documents/Native\ Instruments/Traktor/collection.nml
+cargo run -p musik-cli --bin musik-lib -- mixable 128
+```
+
+`scan` dekodiert, analysiert und legt Tempo, Beatgrid und Inhalts-Hash in einer
+SQLite-Datei ab. `import-traktor` übernimmt Tempo, Beatgrid und Hot Cues aus
+einer bestehenden Traktor-Sammlung — ⚠️ gegen eine *echte* `collection.nml` ist
+das noch nicht geprüft, nur gegen selbst geschriebene Beispiele. Der erste Lauf
+gehört stichprobenartig nachgesehen.
 
 Für API-Keys siehe [`.env.example`](.env.example).
