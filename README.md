@@ -32,6 +32,7 @@ es nichts, was Agenten steuern könnten.
 | [docs/BAUSTEINE.md](docs/BAUSTEINE.md) | Fertige Bibliotheken für Audio, Analyse, Stems — inkl. Lizenzfallen |
 | [docs/APIS.md](docs/APIS.md) | Generierungs-APIs und Sample-Quellen, Zugangsstatus |
 | [docs/AGENTEN.md](docs/AGENTEN.md) | Multi-Agenten-Team und Crowd-Feedback-Schleife |
+| [docs/VIBEMIND.md](docs/VIBEMIND.md) | Anschluss an VibeMind — MCP, Arbeitsteilung, Lizenzfolgen |
 | [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md) | Bausteine und Schnittstellen |
 
 ## Aktuelle Blocker

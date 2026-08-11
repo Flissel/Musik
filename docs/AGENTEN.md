@@ -44,6 +44,16 @@ Beschilderung, Opt-out und Löschfristen. **Empfehlung: mit anonymen,
 aggregierten Signalen starten** (Bewegungsenergie im Bild ohne Personenbezug,
 Pegel, Votes). Das liefert überraschend viel und vermeidet den ganzen Komplex.
 
+## Erst prüfen: nicht selbst bauen
+
+Bevor hier ein Agenten-Framework entsteht — VibeMind hat mit Brain und OpenFang
+genau diese Schicht bereits: Intent, Planung, Routing, Freigabe, Ausführung.
+Die naheliegende Arbeitsteilung ist, hier nur die Werkzeuge zu liefern und die
+Agenten dort laufen zu lassen. Siehe [VIBEMIND.md](VIBEMIND.md).
+
+Die folgenden Rollen bleiben als fachlicher Entwurf gültig, unabhängig davon,
+wo sie am Ende ausgeführt werden.
+
 ## Agentenrollen (Entwurf)
 
 ```

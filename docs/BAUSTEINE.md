@@ -15,8 +15,14 @@ und nicht verteilt wird, entstehen aus GPL-Abhängigkeiten überhaupt keine
 Pflichten.
 
 **Aktueller Stand: reine Eigennutzung, Weitergabe nicht geplant.** Damit ist die
-Bibliothekswahl frei — auch Rubber Band, die beste der Stretching-Bibliotheken.
-Eine `LICENSE`-Datei braucht das Repo in diesem Zustand nicht.
+Bibliothekswahl formal frei — auch Rubber Band. Eine `LICENSE`-Datei braucht das
+Repo in diesem Zustand nicht.
+
+⚠️ **Trotzdem ist Zurückhaltung geboten.** Ein Anschluss an VibeMind (MIT,
+zur Veröffentlichung vorgesehen) steht im Raum, und der wäre Weitergabe — dann
+gilt die Entlastung nicht mehr. Solange diese Frage offen ist, ist jede
+GPL-Abhängigkeit eine Tür, die sich hinter einem schließt. Siehe
+[VIBEMIND.md](VIBEMIND.md#1-die-lizenzlage-kippt-zurück).
 
 | Bibliothek | Lizenz | Für dieses Projekt |
 | --- | --- | --- |
