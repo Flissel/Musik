@@ -65,17 +65,18 @@ lassen sich auch gegen eine reine Datei-Library testen.
 
 **Nativ, in Rust.** Ausschlaggebend war der getrennte Kopfhörer-Cue-Ausgang,
 nicht die Latenz — ohne Vorhören ist ernsthaftes DJing nicht möglich, und im
-Browser gibt es das nicht sauber. Rust statt C++ wegen der Lizenzen: der ganze
-Stack ist permissiv, damit die offene Frage „wird das kommerziell?" nicht vom
-Werkzeugkasten vorentschieden wird.
+Browser gibt es das nicht sauber. Rust statt C++, weil der Stack damit klein und
+permissiv bleibt — zum Entscheidungszeitpunkt war die Lizenzfrage noch offen,
+und der Werkzeugkasten sollte sie nicht vorwegnehmen.
 
 | Crate | Lizenz | Wofür |
 | --- | --- | --- |
 | `cpal` | Apache-2.0 | Audioausgabe |
 | `symphonia` | MPL-2.0 | MP3, FLAC, WAV, AAC/M4A, OGG |
 
-Die Zeitstreckung (WSOLA) ist selbst implementiert — Rubber Band wäre besser,
-ist aber GPL. Details und Begründung in
+Die Zeitstreckung (WSOLA) ist selbst implementiert. Rubber Band ist besser und
+steht inzwischen offen (GPL, nicht kommerzielles Projekt) — der Tausch lohnt
+aber erst, wenn die eigene Variante hörbar nicht reicht. Details in
 [docs/BAUSTEINE.md](docs/BAUSTEINE.md#phase-0-was-gebaut-ist).
 
 UI ist noch offen und kommt frühestens mit Phase 1.
@@ -88,14 +89,29 @@ UI ist noch offen und kommt frühestens mit Phase 1.
 - Keine Echtzeit-Stem-Separation — beim Import vorberechnen (siehe
   [docs/BAUSTEINE.md](docs/BAUSTEINE.md#stem-separation))
 
+## Entschieden
+
+**Nativ in Rust** (Phase 0) und **nicht kommerziell.**
+
+Die zweite Entscheidung entspannt die Lizenzlage deutlich: GPL-Bibliotheken wie
+Rubber Band und aubio stehen offen, ebenso CC-BY-NC-Samples von Freesound. Der
+genaue Grund ist enger als „nicht kommerziell" — Copyleft greift bei
+*Weitergabe*, nicht bei Nutzung. Solange das Tool auf dem eigenen Rechner
+bleibt, entstehen gar keine Pflichten.
+
+Zwei Dinge bleiben trotzdem zu beachten, Details in
+[docs/BAUSTEINE.md](docs/BAUSTEINE.md#lizenzen--entschärft-nicht-erledigt):
+
+- Wird das Tool je weitergegeben, auch kostenlos, müsste der eigene Code unter
+  GPL stehen.
+- AGPL (Essentia) löst schon bei Netzwerknutzung aus — relevant, falls die
+  Agenten-Schicht je als Dienst läuft.
+
 ## Offene Entscheidungen
 
-1. **Wird das Produkt kommerziell?** Davon hängt die gesamte Lizenzstrategie ab,
-   und zwar rückwirkend teuer — bei den Bibliotheken (AGPL/GPL), bei den
-   Samples (CC BY-NC) und bei den Generierungs-Anbietern (Suno und Udio haben
-   ungeklärte Lizenzlage).
-2. **Wieviel Kontrolle behält der Mensch am Pult?** Vollautomat oder Assistent —
+1. **Wieviel Kontrolle behält der Mensch am Pult?** Vollautomat oder Assistent —
    prägt das Agenten-Design.
+2. **UI-Schicht.** Frühestens ab Phase 1.
 
 ## Setup
 

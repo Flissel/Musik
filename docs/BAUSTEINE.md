@@ -3,28 +3,45 @@
 Was es an fertigen Bibliotheken gibt, damit wir nichts nachbauen, was es schon
 gibt. Recherchestand August 2026, nicht selbst getestet.
 
-## ⚠️ Lizenzen zuerst lesen
+## Lizenzen — entschärft, nicht erledigt
 
-Der Audio-Bereich ist voll von **(A)GPL-Bibliotheken mit kommerzieller
-Zweitlizenz**. Das ist kein Randthema: Wer Essentia oder Rubber Band einbaut und
-das Produkt später verkaufen will, steht vor der Wahl, den eigenen Code
-offenzulegen oder eine Lizenz zu kaufen. Diese Entscheidung fällt **vor** der
-Bibliotheksauswahl, nicht danach.
+**Das Projekt ist nicht kommerziell.** Damit fällt die Sperre weg, die den
+Audio-Bereich sonst prägt: (A)GPL-Bibliotheken mit kommerzieller Zweitlizenz
+sind hier nutzbar.
 
-| Bibliothek | Lizenz | Für ein Closed-Source-Produkt |
+Der Grund ist präziser als „nicht kommerziell": **Copyleft greift bei
+Weitergabe, nicht bei Nutzung.** Solange das Tool auf dem eigenen Rechner läuft
+und nicht verteilt wird, entstehen aus GPL-Abhängigkeiten überhaupt keine
+Pflichten.
+
+| Bibliothek | Lizenz | Für dieses Projekt |
 | --- | --- | --- |
-| Essentia | AGPL | Nein, ohne kommerzielle Lizenz |
-| Rubber Band | GPL + kommerziell | Lizenz kaufen |
-| aubio | GPL | Problematisch |
-| SoundTouch | LGPL | Meist okay (dynamisch gelinkt) |
+| Essentia | AGPL | Nutzbar — siehe AGPL-Hinweis unten |
+| Rubber Band | GPL + kommerziell | Nutzbar |
+| aubio | GPL | Nutzbar |
+| JUCE | GPL + kommerziell | Nutzbar |
+| SoundTouch | LGPL | Nutzbar |
 | librosa | ISC | Frei |
 | miniaudio | Public Domain / MIT-0 | Frei |
 | CPAL (Rust) | MIT / Apache-2.0 | Frei |
-| JUCE | GPL + kommerziell | Lizenz kaufen |
+| Symphonia (Rust) | MPL-2.0 | Frei |
 | Demucs | MIT (Code) | Modellgewichte separat prüfen |
 
-Siehe die offene Frage in [APIS.md](APIS.md#konkrete-nächste-schritte): Ob das
-Produkt kommerziell wird, entscheidet hier mit.
+Zwei Punkte bleiben trotzdem stehen:
+
+⚠️ **Wenn das Tool je weitergegeben wird** — auch kostenlos, auch nur an
+Freunde, auch als Open Source — greift die GPL: Der eigene Code müsste dann
+ebenfalls unter GPL stehen. Das ist kein Problem, aber eine Entscheidung, die
+dann ansteht und nicht danach.
+
+⚠️ **AGPL geht weiter als GPL.** Sie löst schon bei Nutzung über ein Netzwerk
+aus, nicht erst bei Weitergabe. Relevant wird das, wenn die Agenten-Schicht aus
+[AGENTEN.md](AGENTEN.md) je als Dienst läuft, auf den andere zugreifen — etwa
+ein Crowd-Voting per Handy. Dann wäre Essentia im Stack ein Thema. `librosa`
+(ISC) und `madmom` sind für Analyse die unkomplizierteren Wege.
+
+Bei Samples bleibt eine Pflicht unabhängig davon bestehen: **CC BY verlangt
+Namensnennung auch nicht-kommerziell.** Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 
 ## Audio-Ausgabe und Engine
 
@@ -51,9 +68,10 @@ für Kopfhörer-Cue, also für ernsthaftes DJing.
 Cue-Ausgang, nicht die Latenz — ohne Kopfhörer-Vorhören ist ernsthaftes DJing
 nicht möglich, und im Browser gibt es das nicht sauber.
 
-Rust statt C++ wegen der Lizenztabelle oben: CPAL, Symphonia und ein eigener
-Stretcher sind durchgehend permissiv. Damit bleibt die offene Frage „wird das
-kommerziell?" wirklich offen, statt vom Stack vorentschieden zu werden.
+Rust statt C++, weil der Stack damit klein und permissiv bleibt: CPAL,
+Symphonia, ein eigener Stretcher. Dass GPL inzwischen offensteht (nicht
+kommerziell), ändert daran nichts — die Wahl war zu dem Zeitpunkt richtig und
+ist es geblieben. Sie macht nur den *Zwang* weg, alles selbst zu bauen.
 
 ## Time-Stretching und Pitch-Shifting
 
@@ -62,10 +80,16 @@ Kernstück jedes DJ-Tools: Tempo ändern, ohne dass die Tonhöhe mitwandert
 
 - **[Rubber Band Library](https://breakfastquay.com/rubberband/)** — Referenzqualität, GPL + kommerziell
 - **[SoundTouch](https://www.surina.net/soundtouch/)** — LGPL, solide, weit verbreitet
-- **[signalsmith-stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch)** — MIT, modern, auch als WASM nutzbar
+- **[signalsmith-stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch)** — MIT, modern
+- Aktuell im Einsatz: **eigene WSOLA-Implementierung** in `crates/audio-core/src/stretch.rs`
 
-Für einen Browser-Prototyp ist `signalsmith-stretch` per WebAssembly der
-pragmatischste Einstieg: gute Qualität ohne Lizenzfrage.
+Da das Projekt nicht kommerziell ist, steht **Rubber Band offen** — die beste
+der drei Bibliotheken. Sie ist C++ und müsste per FFI angebunden werden.
+
+Der Austausch lohnt aber erst, wenn die eigene WSOLA hörbar nicht reicht. Beim
+DJ-typischen Bereich von ±8 % ist der Abstand klein; groß wird er bei starken
+Faktoren und bei perkussivem Material. **Erst hören, dann tauschen** — die
+Schnittstelle ist schmal genug, dass der Wechsel jederzeit möglich bleibt.
 
 ## BPM, Beatgrid, Tonart
 
@@ -74,8 +98,14 @@ pragmatischste Einstieg: gute Qualität ohne Lizenzfrage.
 - **[librosa](https://librosa.org/)** — Python, ISC, ideal zum Prototypen
 - **[madmom](https://github.com/CPJKU/madmom)** — sehr gute Beat-/Downbeat-Erkennung
 
+Alle vier sind jetzt nutzbar. Für Phase 2 ist `librosa` oder `madmom` der
+erste Griff — nicht wegen der Lizenz, sondern weil die Analyse ohnehin offline
+als eigener Schritt läuft und Python dort schneller zum Ergebnis führt als eine
+FFI-Anbindung an den Rust-Kern.
+
 Für Tonarterkennung liefert Essentia brauchbare Ergebnisse; als eigenständige
-OSS-Alternative gibt es KeyFinder.
+OSS-Alternative gibt es KeyFinder. Zu Essentia siehe den AGPL-Hinweis oben,
+falls die Agenten-Schicht je über Netzwerk erreichbar wird.
 
 **Praktischer Hinweis:** Beatgrid-Erkennung ist bei geradem 4/4-Material fast
 gelöst und bei allem anderen mühsam. Traktor löst das über manuelle
@@ -129,9 +159,10 @@ Ein Deck als Rust-Workspace, steuerbar über eine CLI.
 | `symphonia` | MPL-2.0 | Dekodierung: MP3, FLAC, WAV, AAC/M4A, OGG |
 | `thiserror` / `anyhow` | MIT/Apache-2.0 | Fehlerbehandlung |
 
-Zeitstreckung ist **selbst implementiert** (WSOLA, `stretch.rs`). Das war keine
-Sparmaßnahme, sondern folgt aus der Lizenztabelle: Rubber Band ist GPL, und der
-Prototyp sollte nicht an einer Lizenzentscheidung hängen, die noch offen ist.
+Zeitstreckung ist **selbst implementiert** (WSOLA, `stretch.rs`). Zum Zeitpunkt
+der Umsetzung war die Lizenzfrage noch offen, und der Prototyp sollte nicht
+daran hängen. Inzwischen steht Rubber Band offen — der Tausch bleibt eine
+Option, sobald jemand beides gehört hat.
 
 **Architektur des Abspielpfads.** Der Track wird beim Laden komplett dekodiert
 und einmalig auf die Samplerate des Geräts gebracht. Dadurch enthält der
@@ -156,9 +187,8 @@ unter Last.
 - Zweites Deck und Mixer (Phase 1) — dafür muss der Track im Callback
   austauschbar werden, ohne dort zu allokieren (Send-Back-Kanal für den alten
   `Arc`, damit die Freigabe außerhalb des Audio-Threads passiert)
-- BPM-Analyse offline mit `aubio` oder `librosa`, Ergebnis neben dem Track ablegen
-- Wenn die WSOLA-Qualität bei ±8 % nicht reicht: `signalsmith-stretch` (MIT)
-  einbinden, bevor über eine Rubber-Band-Lizenz nachgedacht wird
+- BPM-Analyse offline mit `librosa` oder `madmom`, Ergebnis neben dem Track ablegen
+- Wenn die WSOLA-Qualität bei ±8 % nicht reicht: Rubber Band per FFI anbinden
 
 ## Quellen
 

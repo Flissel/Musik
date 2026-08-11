@@ -32,8 +32,9 @@ dieses Profil — **die Bewerbung ist einen Versuch wert.**
 
 ⚠️ **Nicht empfohlen:** Es kursieren reverse-engineerte „Suno APIs" von
 Drittanbietern. Die sind inoffiziell, können jederzeit brechen und bewegen sich
-rechtlich auf dünnem Eis. Für ein Projekt, das später kommerziell laufen soll,
-kein tragfähiges Fundament.
+verstoßen aller Wahrscheinlichkeit nach gegen Sunos Nutzungsbedingungen. Dass
+das Projekt nicht kommerziell ist, ändert daran nichts — das realistische Risiko
+ist ein gesperrter Account, nicht eine Lizenzklage.
 
 ### Alternativen, die heute nutzbar sind
 
@@ -88,10 +89,14 @@ APIv2 ist die praktikabelste Quelle für Samples mit sauberer Rechtelage.
 - API frei für nicht-kommerzielle Anwendungen; kommerzielle Nutzung ist separat lizenzierbar
 - Seit Juli 2026 gibt es eine „Generative AI"-Präferenz pro Upload
 
-⚠️ **Zwei Fallstricke:** CC-BY-NC-Material ist für ein kommerzielles Produkt
-unbrauchbar — die Lizenz muss pro Sample geprüft und mitgeführt werden, nicht
-pauschal angenommen. Und CC BY verlangt Namensnennung, was heißt: Wir brauchen
-ein Feld für Attribution in den Track-Metadaten, von Anfang an.
+**CC BY-NC ist nutzbar**, weil das Projekt nicht kommerziell ist — das ist der
+größte praktische Gewinn dieser Entscheidung, denn NC-Material macht einen
+erheblichen Teil von Freesound aus.
+
+⚠️ **Die Attributionspflicht bleibt.** CC BY verlangt Namensnennung auch
+nicht-kommerziell. Das heißt konkret: Die Library braucht von Anfang an ein Feld
+für Lizenz und Urheber pro Track. Nachträglich lässt sich das nicht
+rekonstruieren, wenn erst einmal tausend Samples ohne Herkunft im Ordner liegen.
 
 ### Weitere Quellen
 
@@ -101,15 +106,17 @@ ein Feld für Attribution in den Track-Metadaten, von Anfang an.
 
 ## Konkrete nächste Schritte
 
+- [x] Entschieden: **nicht kommerziell.** Damit sind CC-BY-NC-Samples nutzbar
+      und die ungeklärte Lizenzlage bei Suno/Udio ist kein Ausschlusskriterium
+      mehr — nur noch der fehlende API-Zugang.
 - [ ] Bei Suno für das Partner-Programm bewerben (Intake-Formular, Juli 2026 veröffentlicht)
 - [ ] ElevenLabs-API-Key besorgen, `/music/compose` einmal manuell gegen curl testen
-- [ ] Freesound-API-Key besorgen (kostenlos für nicht-kommerziell)
-- [ ] Entscheiden, ob das Produkt kommerziell werden soll — davon hängt die
-      gesamte Lizenzstrategie ab, und zwar rückwirkend teuer
+- [ ] Freesound-API-Key besorgen (die API ist für nicht-kommerzielle Nutzung kostenlos)
+- [ ] Lizenz- und Urheberfeld im Library-Schema vorsehen, bevor Samples
+      importiert werden
 
-Der letzte Punkt ist keine Formalie. Wenn kommerziell, dann fallen CC-BY-NC-Samples,
-Suno und Udio vorerst raus, und die Bibliothek muss von Tag eins Lizenzinfos
-pro Track mitführen.
+Was die Entscheidung **nicht** löst: Suno hat weiterhin keine öffentliche API.
+Der Blocker war nie die Lizenz, sondern der Zugang.
 
 ## Quellen
 
