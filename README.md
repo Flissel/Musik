@@ -26,6 +26,7 @@ es nichts, was Agenten steuern könnten.
 
 | Dokument | Inhalt |
 | --- | --- |
+| **[docs/PLAN.md](docs/PLAN.md)** | **Vollständiger Bauplan der DJ-Software — Architektur, Phasen, Risiken** |
 | [docs/TRAKTOR-REFERENZ.md](docs/TRAKTOR-REFERENZ.md) | Was Traktor Pro 4 kann, was wir davon übernehmen |
 | [docs/BAUSTEINE.md](docs/BAUSTEINE.md) | Fertige Bibliotheken für Audio, Analyse, Stems — inkl. Lizenzfallen |
 | [docs/APIS.md](docs/APIS.md) | Generierungs-APIs und Sample-Quellen, Zugangsstatus |
@@ -46,20 +47,30 @@ Alternativenvergleich in [docs/APIS.md](docs/APIS.md).
 
 ## Roadmap
 
+**Phase 0 steht** ✅ — ein Deck, Wiedergabe, Tempo mit und ohne Keylock.
+
+Der ausführliche Bauplan der DJ-Software mit Architektur, Abnahmekriterien und
+Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
+
+| Phase | Inhalt |
+| --- | --- |
+| 1–2 | Mehrdeck-Engine mit Mixer und Cue-Bus · Analyse-Pipeline (BPM, Grid, Peaks) |
+| 3–5 | UI mit Waveforms · Sync und Beatmatching · Hot Cues und Loops |
+| 6–7 | Library inkl. Traktor-Import · Effekte |
+| 8–10 | Stems · Mitschnitt · MIDI-Controller |
+
+Ab Phase 6 ist die Software als DJ-Werkzeug benutzbar.
+
+Darauf setzen die beiden Schichten aus dem Zielbild auf:
+
 | Phase | Inhalt | Abhängig von |
 | --- | --- | --- |
-| ~~0~~ | ~~Stack-Entscheidung per Prototyp: ein Deck, Play/Pause/Pitch mit Keylock~~ ✅ | — |
-| 1 | Zweites Deck, Crossfader, EQ, Filter — ein Mix ist durchgängig spielbar | 0 |
-| 2 | BPM-Analyse, Beatgrid (inkl. manueller Korrektur), Sync | 1 |
-| 3 | Waveforms, Cue-Points, Loops | 2 |
-| 4 | Library: Import inkl. Traktor-`collection.nml`, Metadaten, Suche, Playlists | 2 |
-| 5 | Generierungs-Adapter: Prompt → Track → Deck, asynchron mit Queue | 4, API-Zugang |
-| 6 | Stems (beim Import vorberechnet), Stem-Deck-Modus | 4 |
-| 7 | Crowd-Signale einsammeln und visualisieren — noch ohne Steuerung | 4 |
-| 8 | Agenten-Team: Energie-Analyse, Set-Planung, Übergangssteuerung | 5, 7 |
+| G1 | Generierungs-Adapter: Prompt → Track → Deck, asynchron mit Queue | 6, API-Zugang |
+| A1 | Crowd-Signale einsammeln und visualisieren — noch ohne Steuerung | 6 |
+| A2 | Agenten-Team: Energie-Analyse, Set-Planung, Übergangssteuerung | G1, A1 |
 
-Phase 5 hängt am API-Zugang, Phase 7 kann davon unabhängig laufen — Crowd-Signale
-lassen sich auch gegen eine reine Datei-Library testen.
+G1 hängt am API-Zugang, A1 nicht — Crowd-Signale lassen sich auch gegen eine
+reine Datei-Library testen.
 
 ## Tech-Stack
 
