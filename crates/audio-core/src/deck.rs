@@ -126,7 +126,10 @@ impl Voice {
 
         while done < total_frames {
             let n = (total_frames - done).min(SCRATCH_FRAMES);
-            self.fill_stereo(n);
+            let len = n * CHANNELS;
+            let mut scratch = std::mem::take(&mut self.scratch);
+            self.render_stereo(&mut scratch[..len]);
+            self.scratch = scratch;
 
             for i in 0..n {
                 let l = self.scratch[i * CHANNELS];
@@ -146,17 +149,19 @@ impl Voice {
         }
     }
 
-    /// Füllt die ersten `frames` Frames von `self.scratch` mit Stereo-Material.
-    fn fill_stereo(&mut self, frames: usize) {
-        let len = frames * CHANNELS;
-
+    /// Schreibt interleaved Stereo in `out`.
+    ///
+    /// Das ist der Einstieg für den Mixer: Ein Deck ist dort eine Quelle unter
+    /// mehreren und liefert immer Stereo, unabhängig davon, wie das
+    /// Ausgabegerät aussieht.
+    pub fn render_stereo(&mut self, out: &mut [f32]) {
         if let Some(target) = self.take_seek() {
             self.pos = target;
             self.wsola.reset();
         }
 
         if !self.state.is_playing() {
-            self.scratch[..len].fill(0.0);
+            out.fill(0.0);
             return;
         }
 
@@ -167,10 +172,6 @@ impl Voice {
             self.wsola.reset();
             self.stretching = want_stretch;
         }
-
-        // Getrennte Feldzugriffe, damit der Borrow-Checker `scratch` von
-        // `wsola`/`track`/`pos` unterscheiden kann.
-        let out = &mut self.scratch[..len];
 
         let alive = if want_stretch {
             self.wsola

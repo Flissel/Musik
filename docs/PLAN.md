@@ -103,19 +103,38 @@ durchsetzt und `analysis`/`library` sie bewusst nicht kennen müssen.
 ### Signalkette pro Kanal
 
 ```
-Deck ─► Trim ─► EQ (3-Band) ─► Filter (HP/LP) ─► Kanalfader ─┬─► Crossfader ─► Master-Summe ─► Limiter ─► Ausgang 1/2
-                                                             │
-                                                             └─► Cue-Bus ──────────────────────────────► Ausgang 3/4
+Quelle ─► Trim ─► EQ (3-Band) ─► Filter (HP/LP) ─┬─► Kanalfader ─► Crossfader ─► Summe ─► Limiter ─► Ausgang 1/2
+                                                 │
+                                                 └─► Cue-Bus ────────────────────────────────────► Ausgang 3/4
 ```
 
-Zwei Details aus der Traktor-Referenz, die man leicht falsch baut:
+**Quelle, nicht Deck.** Der Mixer kennt keine Decks, nur Quellen, die Stereo
+liefern. Ein AUX-Eingang ist damit ein Kanal wie jeder andere — mit Trim, EQ,
+Filter, Fader und Cue —, und die Generierung kann sich später an derselben
+Stelle einhängen.
+
+Drei Details, die man leicht falsch baut:
 
 - **Mixer-FX liegen post-fader.** Zieht man den Fader zu, klingt der Effekt aus
   statt abzureißen. Das ist der Unterschied zwischen einem weichen und einem
   ruckeligen Übergang.
-- **Der Cue-Abgriff liegt vor dem Crossfader.** Sonst hört man im Kopfhörer
-  nichts, wenn der Kanal ausgeblendet ist — also genau dann, wenn man ihn
-  braucht.
+- **Der Cue-Abgriff liegt vor dem *Fader*** — nicht bloß vor dem Crossfader.
+  Man bereitet einen Track im Kopfhörer vor, während sein Fader unten ist; läge
+  der Abgriff dahinter, hörte man genau dann nichts.
+- **Der Cue-Abgriff liegt hinter EQ und Filter**, weil man seine Klangeingriffe
+  kontrollieren muss, bevor sie auf die Anlage gehen.
+
+### AUX
+
+Mikrofon, Drum-Machine, ein zweiter Rechner. Zwei Dinge unterscheiden AUX von
+einem Deck:
+
+- **Zuweisung Thru.** Ein Mikrofon darf nicht verschwinden, nur weil jemand den
+  Crossfader bewegt.
+- **Ringpuffer statt direktem Zugriff.** Aufnahme und Wiedergabe laufen in
+  getrennten Callbacks mit getrennten Uhren. Ein lock-freier Ringpuffer
+  entkoppelt beide; bleibt die Aufnahme zurück, gibt es Stille und einen
+  gezählten Unterlauf statt eines Aussetzers.
 
 ### Threads
 
@@ -150,7 +169,7 @@ Ordner liegen. Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 
 | # | Ziel | Abnahmekriterium | Aufwand | Braucht |
 | --- | --- | --- | --- | --- |
-| 1 | Mehrdeck-Engine, Mixer, Cue-Bus | Zwei Tracks laufen gleichzeitig, Crossfader blendet, Cue liegt hörbar getrennt auf 3/4 | M | 4-Kanal-Interface |
+| 1 | Mehrdeck-Engine, Mixer, Cue-Bus, AUX | Code steht ✅ · Abnahme offen: Cue muss hörbar getrennt auf 3/4 liegen | M | 4-Kanal-Interface |
 | ~~2~~ | ~~Analyse-Pipeline~~ ✅ | BPM und Grid reproduzierbar als Sidecar, Peaks vorhanden | M | — |
 | 3 | UI-Grundgerüst | Zwei Decks mit Waveform, Mixer bedienbar, stabile 60 fps | L | 1, 2 |
 | 4 | Sync und Beatmatching | Zwei Tracks bleiben über 5 Minuten im Takt, Phase korrekt | M | 2 |

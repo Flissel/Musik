@@ -4,9 +4,10 @@ Traktor-artiges DJ-/Musik-Tool, das generative Musik als gleichberechtigte
 Quelle behandelt — mit dem Fernziel eines Agenten-Teams, das Musik aus den
 Reaktionen der Crowd formt.
 
-Status: **Phase 0 und 2.** Ein Deck läuft (Wiedergabe, Tempo mit und ohne
-Keylock, Springen), und die Analyse-Pipeline erkennt Tempo, Beatgrid und
-Wellenform-Spitzen. Nativ in Rust.
+Status: **Phasen 0–2.** Ein Deck läuft (Wiedergabe, Tempo mit und ohne
+Keylock, Springen), die Analyse erkennt Tempo, Beatgrid und Wellenform-Spitzen,
+und der Mixer mischt mehrere Kanäle inklusive AUX auf Master und Kopfhörer.
+Nativ in Rust.
 
 ## Zielbild
 
@@ -49,14 +50,15 @@ Alternativenvergleich in [docs/APIS.md](docs/APIS.md).
 
 ## Roadmap
 
-**Phase 0 und 2 stehen** ✅ — ein Deck mit Keylock, und die Analyse-Pipeline.
+**Phasen 0 und 2 stehen** ✅, **Phase 1 zur Hälfte** ⚙️ — der Mixer ist gebaut
+und getestet, abnehmen lässt er sich erst mit einem 4-Kanal-Interface.
 
 Der ausführliche Bauplan der DJ-Software mit Architektur, Abnahmekriterien und
 Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
 
 | Phase | Inhalt |
 | --- | --- |
-| 1 | Mehrdeck-Engine mit Mixer und Cue-Bus |
+| 1 ⚙️ | Mehrdeck-Engine mit Mixer, Cue-Bus und AUX — Code steht, Abnahme braucht Hardware |
 | ~~2~~ ✅ | ~~Analyse-Pipeline (BPM, Grid, Peaks)~~ |
 | 3–5 | UI mit Waveforms · Sync und Beatmatching · Hot Cues und Loops |
 | 6–7 | Library inkl. Traktor-Import · Effekte |
@@ -88,6 +90,7 @@ und der Werkzeugkasten sollte sie nicht vorwegnehmen.
 | `cpal` | Apache-2.0 | Audioausgabe |
 | `symphonia` | MPL-2.0 | MP3, FLAC, WAV, AAC/M4A, OGG |
 | `rustfft` | MIT/Apache-2.0 | STFT für die Onset-Erkennung |
+| `rtrb` | MIT/Apache-2.0 | Lock-freier Ringpuffer für AUX |
 | `blake3`, `serde`, `base64` | permissiv | Fingerabdruck und Sidecar |
 
 Zeitstreckung (WSOLA) und Tempoerkennung sind selbst implementiert — damit ist
@@ -177,5 +180,17 @@ Liefert BPM, Beatgrid-Anker und Wellenform-Spitzen und legt sie als Sidecar
 unter `.musik-analyse/` ab, adressiert über einen Hash des Audioinhalts. Ein
 zweiter Lauf über dieselbe Datei liest aus dem Cache; ein umbenannter Ordner
 entwertet die Analyse nicht.
+
+Einen Übergang rendern — ebenfalls **ohne** Audiogerät:
+
+```sh
+cargo run -p musik-cli --bin musik-mix -- --a a.mp3 --b b.mp3 --out mix.wav
+```
+
+Zieht Deck B per Keylock auf das Tempo von A, fährt einen Crossfade mit
+Bass-Swap und schreibt das Ergebnis als WAV. Ohne `--a`/`--b` nimmt es
+synthetische Loops — praktisch, um die Engine zu hören, wenn gerade keine
+Musik zur Hand ist. `--aux <datei>` legt einen dritten Kanal auf Thru dazu,
+der den Crossfader unbeschadet übersteht.
 
 Für API-Keys siehe [`.env.example`](.env.example).

@@ -64,6 +64,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "audio-engine"
+version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "rtrb",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -393,6 +401,7 @@ dependencies = [
  "analysis",
  "anyhow",
  "audio-core",
+ "audio-engine",
 ]
 
 [[package]]
@@ -633,6 +642,12 @@ name = "regex-lite"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
+
+[[package]]
+name = "rtrb"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ade083ccbb4bf536df69d1f6432cc23deb7acccff86b183f3923a6fd56a1153"
 
 [[package]]
 name = "rustc_version"

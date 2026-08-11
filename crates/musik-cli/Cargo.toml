@@ -7,3 +7,4 @@ edition = "2024"
 analysis = { version = "0.1.0", path = "../analysis" }
 anyhow = "1.0.104"
 audio-core = { version = "0.1.0", path = "../audio-core" }
+audio-engine = { version = "0.1.0", path = "../audio-engine" }
