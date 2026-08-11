@@ -4,8 +4,9 @@ Traktor-artiges DJ-/Musik-Tool, das generative Musik als gleichberechtigte
 Quelle behandelt — mit dem Fernziel eines Agenten-Teams, das Musik aus den
 Reaktionen der Crowd formt.
 
-Status: **Phase 0.** Ein Deck läuft — Wiedergabe, Tempo mit und ohne Keylock,
-Springen. Nativ in Rust.
+Status: **Phase 0 und 2.** Ein Deck läuft (Wiedergabe, Tempo mit und ohne
+Keylock, Springen), und die Analyse-Pipeline erkennt Tempo, Beatgrid und
+Wellenform-Spitzen. Nativ in Rust.
 
 ## Zielbild
 
@@ -47,14 +48,15 @@ Alternativenvergleich in [docs/APIS.md](docs/APIS.md).
 
 ## Roadmap
 
-**Phase 0 steht** ✅ — ein Deck, Wiedergabe, Tempo mit und ohne Keylock.
+**Phase 0 und 2 stehen** ✅ — ein Deck mit Keylock, und die Analyse-Pipeline.
 
 Der ausführliche Bauplan der DJ-Software mit Architektur, Abnahmekriterien und
 Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
 
 | Phase | Inhalt |
 | --- | --- |
-| 1–2 | Mehrdeck-Engine mit Mixer und Cue-Bus · Analyse-Pipeline (BPM, Grid, Peaks) |
+| 1 | Mehrdeck-Engine mit Mixer und Cue-Bus |
+| ~~2~~ ✅ | ~~Analyse-Pipeline (BPM, Grid, Peaks)~~ |
 | 3–5 | UI mit Waveforms · Sync und Beatmatching · Hot Cues und Loops |
 | 6–7 | Library inkl. Traktor-Import · Effekte |
 | 8–10 | Stems · Mitschnitt · MIDI-Controller |
@@ -84,13 +86,17 @@ und der Werkzeugkasten sollte sie nicht vorwegnehmen.
 | --- | --- | --- |
 | `cpal` | Apache-2.0 | Audioausgabe |
 | `symphonia` | MPL-2.0 | MP3, FLAC, WAV, AAC/M4A, OGG |
+| `rustfft` | MIT/Apache-2.0 | STFT für die Onset-Erkennung |
+| `blake3`, `serde`, `base64` | permissiv | Fingerabdruck und Sidecar |
 
-Die Zeitstreckung (WSOLA) ist selbst implementiert. Rubber Band ist besser und
-steht inzwischen offen (GPL, nicht kommerzielles Projekt) — der Tausch lohnt
-aber erst, wenn die eigene Variante hörbar nicht reicht. Details in
+Zeitstreckung (WSOLA) und Tempoerkennung sind selbst implementiert. Rubber Band
+ist beim Stretching besser und steht inzwischen offen (GPL, nicht kommerzielles
+Projekt) — der Tausch lohnt aber erst, wenn die eigene Variante hörbar nicht
+reicht. Details in
 [docs/BAUSTEINE.md](docs/BAUSTEINE.md#phase-0-was-gebaut-ist).
 
-UI ist noch offen und kommt frühestens mit Phase 1.
+**UI: egui/eframe**, entschieden. Begründung und die verworfenen Alternativen
+(Tauri, Electron) in [docs/PLAN.md](docs/PLAN.md#entschiedene-punkte).
 
 ## Nicht-Ziele (vorerst)
 
@@ -127,7 +133,10 @@ Details in
 
 1. **Wieviel Kontrolle behält der Mensch am Pult?** Vollautomat oder Assistent —
    prägt das Agenten-Design.
-2. **UI-Schicht.** Frühestens ab Phase 1.
+2. **Audio-Interface mit vier Ausgängen.** Ohne getrennten Cue-Ausgang lässt
+   sich Phase 1 nicht abnehmen — eine Hardware-, keine Softwarefrage. Warum
+   zwei Geräte nicht gehen, steht in
+   [docs/PLAN.md](docs/PLAN.md#1-der-cue-ausgang-zwingt-zu-einem-gerät-mit-vier-ausgängen).
 
 ## Setup
 
@@ -159,5 +168,16 @@ Danach im Prompt:
 Der Vergleich, um den es geht: `t +6` einmal mit und einmal ohne `k`. Mit
 Keylock bleibt die Tonhöhe stehen, ohne wandert sie hoch wie beim
 Plattenspieler.
+
+Tracks analysieren — braucht **kein** Audiogerät:
+
+```sh
+cargo run -p musik-cli --bin musik-analyze -- ~/Musik/*.mp3
+```
+
+Liefert BPM, Beatgrid-Anker und Wellenform-Spitzen und legt sie als Sidecar
+unter `.musik-analyse/` ab, adressiert über einen Hash des Audioinhalts. Ein
+zweiter Lauf über dieselbe Datei liest aus dem Cache; ein umbenannter Ordner
+entwertet die Analyse nicht.
 
 Für API-Keys siehe [`.env.example`](.env.example).

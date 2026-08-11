@@ -151,7 +151,7 @@ Ordner liegen. Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 | # | Ziel | Abnahmekriterium | Aufwand | Braucht |
 | --- | --- | --- | --- | --- |
 | 1 | Mehrdeck-Engine, Mixer, Cue-Bus | Zwei Tracks laufen gleichzeitig, Crossfader blendet, Cue liegt hörbar getrennt auf 3/4 | M | 4-Kanal-Interface |
-| 2 | Analyse-Pipeline | BPM und Grid reproduzierbar als Sidecar, Peaks vorhanden | M | — |
+| ~~2~~ | ~~Analyse-Pipeline~~ ✅ | BPM und Grid reproduzierbar als Sidecar, Peaks vorhanden | M | — |
 | 3 | UI-Grundgerüst | Zwei Decks mit Waveform, Mixer bedienbar, stabile 60 fps | L | 1, 2 |
 | 4 | Sync und Beatmatching | Zwei Tracks bleiben über 5 Minuten im Takt, Phase korrekt | M | 2 |
 | 5 | Hot Cues und Loops | 8 Cues pro Deck, Loop in/out, beat-quantisiert | M | 4 |
@@ -172,15 +172,34 @@ und ein Bitcrusher — richtig gebaut und mit vernünftigen Regelwegen.
 
 ## Offene Entscheidungen
 
-**UI-Framework** (Phase 3). Empfehlung: **egui/eframe** (MIT/Apache-2.0,
-GPU-beschleunigt). Passt zu einer DJ-Oberfläche, weil die ohnehin jedes Bild neu
-zeichnet — laufende Waveforms, bewegte Fader, Pegelanzeigen. Immediate-Mode ist
-für so etwas eher Vorteil als Nachteil, und die Waveform wird selbst gemalt statt
-aus Widgets zusammengesetzt.
+**Streaming von Platte statt Vollentschlüsselung** (spätestens Phase 8). Vier
+Decks à 100 MB gehen noch; vier Decks mit je vier Stems nicht mehr. Dann wird
+aus dem Laden ein Vorpuffer plus Nachladen im Hintergrund.
 
-Die Alternative wäre Tauri mit TypeScript-Frontend. Näher an vorhandener
-Erfahrung, aber die Zustandskopplung zwischen UI und Audio ist eng und
-hochfrequent — das über IPC zu führen ist Aufwand, den egui nicht hat.
+**Kalibrierung der Tempo-Schwelle.** Die Grenze, ab der ein erkanntes Tempo als
+Aussage gilt statt als Rauschen, trennt derzeit nur die beiden Extreme —
+Klick-Track gegen Dauerton. Gegen echte Musik ist sie nie geprüft worden; das
+geht erst mit einer Sammlung auf der Platte.
+
+## Entschiedene Punkte
+
+**UI-Framework: egui/eframe** (MIT/Apache-2.0, GPU-beschleunigt über wgpu).
+
+Eine DJ-Oberfläche zeichnet ohnehin jedes Bild neu — laufende Waveforms, bewegte
+Fader, Pegelanzeigen. Immediate-Mode ist dafür eher Vorteil als Nachteil, und
+die Waveform wird selbst gemalt statt aus Widgets zusammengesetzt.
+
+Zwei Alternativen wurden verworfen:
+
+- **Tauri** wäre näher an vorhandener TypeScript-Erfahrung, aber die
+  Zustandskopplung zwischen UI und Audio ist eng und hochfrequent. Das über IPC
+  zu führen ist Aufwand, den egui nicht hat. Dazu hängt das Rendering an der
+  System-Webview, und unter Linux ist WebKitGTK bei canvas-lastigen Oberflächen
+  die schwächste der Engines.
+- **Electron** bringt gebündeltes Chromium und damit identisches Rendering
+  überall, verlangt aber ein natives N-API-Addon zum Rust-Kern samt Prebuilds
+  für drei Plattformen — bei ~200 MB Bundle. Cross-Plattform ist dabei kein
+  Argument: egui und Tauri bauen genauso für Windows, macOS und Linux.
 
 **Streaming von Platte statt Vollentschlüsselung** (spätestens Phase 8). Vier
 Decks à 100 MB gehen noch; vier Decks mit je vier Stems nicht mehr. Dann wird

@@ -6,6 +6,9 @@
 # Rust — Cargo.lock wird bewusst eingecheckt (Anwendung, keine Bibliothek)
 /target/
 
+# Analyse-Sidecars (aus dem Audio reproduzierbar)
+.musik-analyse/
+
 # Node
 node_modules/
 dist/
