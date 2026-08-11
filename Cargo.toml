@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["crates/audio-core", "crates/musik-cli"]
+
+[workspace.package]
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+audio-core = { path = "crates/audio-core" }

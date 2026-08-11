@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Rust — Cargo.lock wird bewusst eingecheckt (Anwendung, keine Bibliothek)
+/target/
+
 # Node
 node_modules/
 dist/

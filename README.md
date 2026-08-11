@@ -4,8 +4,8 @@ Traktor-artiges DJ-/Musik-Tool, das generative Musik als gleichberechtigte
 Quelle behandelt — mit dem Fernziel eines Agenten-Teams, das Musik aus den
 Reaktionen der Crowd formt.
 
-Status: **Konzeptphase.** Noch kein Code. Recherche, Zielbild und Roadmap
-stehen.
+Status: **Phase 0.** Ein Deck läuft — Wiedergabe, Tempo mit und ohne Keylock,
+Springen. Nativ in Rust.
 
 ## Zielbild
 
@@ -48,7 +48,7 @@ Alternativenvergleich in [docs/APIS.md](docs/APIS.md).
 
 | Phase | Inhalt | Abhängig von |
 | --- | --- | --- |
-| **0** | Stack-Entscheidung per Prototyp: ein Deck, Play/Pause/Pitch mit Keylock | — |
+| ~~0~~ | ~~Stack-Entscheidung per Prototyp: ein Deck, Play/Pause/Pitch mit Keylock~~ ✅ | — |
 | 1 | Zweites Deck, Crossfader, EQ, Filter — ein Mix ist durchgängig spielbar | 0 |
 | 2 | BPM-Analyse, Beatgrid (inkl. manueller Korrektur), Sync | 1 |
 | 3 | Waveforms, Cue-Points, Loops | 2 |
@@ -63,18 +63,22 @@ lassen sich auch gegen eine reine Datei-Library testen.
 
 ## Tech-Stack
 
-**Offen — das ist die Phase-0-Entscheidung.** Die Frage ist nicht Latenz,
-sondern der getrennte Kopfhörer-Cue-Ausgang: den gibt es im Browser nicht
-sauber, und ohne ihn ist ernsthaftes DJing nicht möglich.
+**Nativ, in Rust.** Ausschlaggebend war der getrennte Kopfhörer-Cue-Ausgang,
+nicht die Latenz — ohne Vorhören ist ernsthaftes DJing nicht möglich, und im
+Browser gibt es das nicht sauber. Rust statt C++ wegen der Lizenzen: der ganze
+Stack ist permissiv, damit die offene Frage „wird das kommerziell?" nicht vom
+Werkzeugkasten vorentschieden wird.
 
-- **Browser (Web Audio API)** — schneller Prototyp, kein Install, gut zu
-  debuggen. Kein exklusiver Interface-Zugriff, kein zweiter Ausgang.
-- **Nativ (Rust/C++)** — echte Low-Latency-Ausgabe, mehrere Ausgänge, mehr
-  Aufwand.
+| Crate | Lizenz | Wofür |
+| --- | --- | --- |
+| `cpal` | Apache-2.0 | Audioausgabe |
+| `symphonia` | MPL-2.0 | MP3, FLAC, WAV, AAC/M4A, OGG |
 
-Analyse-, Library- und Agenten-Schicht sind von dieser Entscheidung unabhängig
-und können parallel entstehen. Konkreter Testaufbau zur Entscheidung in
-[docs/BAUSTEINE.md](docs/BAUSTEINE.md#empfehlung-für-phase-0).
+Die Zeitstreckung (WSOLA) ist selbst implementiert — Rubber Band wäre besser,
+ist aber GPL. Details und Begründung in
+[docs/BAUSTEINE.md](docs/BAUSTEINE.md#phase-0-was-gebaut-ist).
+
+UI ist noch offen und kommt frühestens mit Phase 1.
 
 ## Nicht-Ziele (vorerst)
 
@@ -86,15 +90,42 @@ und können parallel entstehen. Konkreter Testaufbau zur Entscheidung in
 
 ## Offene Entscheidungen
 
-1. **Browser oder nativ?** → Phase 0
-2. **Wird das Produkt kommerziell?** Davon hängt die gesamte Lizenzstrategie ab,
+1. **Wird das Produkt kommerziell?** Davon hängt die gesamte Lizenzstrategie ab,
    und zwar rückwirkend teuer — bei den Bibliotheken (AGPL/GPL), bei den
    Samples (CC BY-NC) und bei den Generierungs-Anbietern (Suno und Udio haben
    ungeklärte Lizenzlage).
-3. **Wieviel Kontrolle behält der Mensch am Pult?** Vollautomat oder Assistent —
+2. **Wieviel Kontrolle behält der Mensch am Pult?** Vollautomat oder Assistent —
    prägt das Agenten-Design.
 
 ## Setup
 
-Kommt mit Phase 0, sobald der Stack steht. Für API-Keys siehe
-[`.env.example`](.env.example).
+Voraussetzung: Rust (aktuelles Stable). Unter Linux zusätzlich die
+ALSA-Header — `sudo apt install libasound2-dev`.
+
+```sh
+cargo build
+cargo test
+```
+
+Ein Deck fahren:
+
+```sh
+cargo run -p musik-cli -- /pfad/zum/track.mp3
+```
+
+Danach im Prompt:
+
+| Befehl | Wirkung |
+| --- | --- |
+| `p` | Play/Pause |
+| `t +6` | Tempo +6 % (oder `t 1.06` als Verhältnis) |
+| `k` | Keylock an/aus — Tonhöhe beim Tempowechsel halten |
+| `s 30` | Auf Sekunde 30 springen |
+| `i` | Status |
+| `q` | Beenden |
+
+Der Vergleich, um den es geht: `t +6` einmal mit und einmal ohne `k`. Mit
+Keylock bleibt die Tonhöhe stehen, ohne wandert sie hoch wie beim
+Plattenspieler.
+
+Für API-Keys siehe [`.env.example`](.env.example).

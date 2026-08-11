@@ -47,11 +47,13 @@ einen eigenen Time-Stretcher (siehe unten).
 Nativ gibt echte Low-Latency-Ausgabe und mehrere Ausgänge — die Voraussetzung
 für Kopfhörer-Cue, also für ernsthaftes DJing.
 
-**Einschätzung:** Wenn das Ding je auf einer echten Anlage laufen soll, führt
-langfristig kein Weg an nativ vorbei — wegen des getrennten Cue-Ausgangs, nicht
-wegen der Latenz. Für einen ersten Prototyp ist der Browser trotzdem der
-schnellere Weg, und die Analyse-/Library-/Agenten-Schichten sind davon ohnehin
-unabhängig.
+**Entscheidung: nativ, in Rust.** Ausschlaggebend war der getrennte
+Cue-Ausgang, nicht die Latenz — ohne Kopfhörer-Vorhören ist ernsthaftes DJing
+nicht möglich, und im Browser gibt es das nicht sauber.
+
+Rust statt C++ wegen der Lizenztabelle oben: CPAL, Symphonia und ein eigener
+Stretcher sind durchgehend permissiv. Damit bleibt die offene Frage „wird das
+kommerziell?" wirklich offen, statt vom Stack vorentschieden zu werden.
 
 ## Time-Stretching und Pitch-Shifting
 
@@ -110,17 +112,53 @@ Damit lassen sich Sammlung, Cue-Points, Beatgrids und Playlists übernehmen. Ein
 gutes frühes Feature: viel Nutzen für wenig Aufwand. Siehe
 [TRAKTOR-REFERENZ.md](TRAKTOR-REFERENZ.md#datenformat-die-collectionnml).
 
-## Empfehlung für Phase 0
+## Phase 0: was gebaut ist
 
-Als Prototyp, um die Stack-Frage empirisch statt theoretisch zu klären:
+Ein Deck als Rust-Workspace, steuerbar über eine CLI.
 
-1. Ein Deck im Browser, Web Audio API, Datei laden und abspielen
-2. Tempo per `signalsmith-stretch` (WASM) ändern, Tonhöhe halten
-3. BPM offline mit `librosa` oder `aubio` bestimmen, Ergebnis als JSON danebenlegen
-4. Messen: Wie fühlt sich die Latenz an? Wie klingt der Stretcher bei ±8 %?
+| Crate | Inhalt |
+| --- | --- |
+| `crates/audio-core` | Dekodierung, Zeitstreckung, Deck-Zustand, CPAL-Ausgabe |
+| `crates/musik-cli` | Kommandozeile zum Fahren des Decks |
 
-Fällt der Test durch, ist der native Weg belegt statt vermutet — und die
-Analyse-Skripte aus Schritt 3 bleiben unverändert nutzbar.
+**Gewählte Abhängigkeiten** — bewusst wenige, alle permissiv:
+
+| Crate | Lizenz | Wofür |
+| --- | --- | --- |
+| `cpal` | Apache-2.0 | Ausgabegerät, plattformübergreifend |
+| `symphonia` | MPL-2.0 | Dekodierung: MP3, FLAC, WAV, AAC/M4A, OGG |
+| `thiserror` / `anyhow` | MIT/Apache-2.0 | Fehlerbehandlung |
+
+Zeitstreckung ist **selbst implementiert** (WSOLA, `stretch.rs`). Das war keine
+Sparmaßnahme, sondern folgt aus der Lizenztabelle: Rubber Band ist GPL, und der
+Prototyp sollte nicht an einer Lizenzentscheidung hängen, die noch offen ist.
+
+**Architektur des Abspielpfads.** Der Track wird beim Laden komplett dekodiert
+und einmalig auf die Samplerate des Geräts gebracht. Dadurch enthält der
+Callback keine Ratenkonvertierung, keine Allokation, kein Lock — Steuerung läuft
+ausschließlich über Atomics. Das sind genau die drei Dinge, die sonst Aussetzer
+verursachen.
+
+**Was verifiziert ist.** Elf Tests, unter anderem:
+
+- Keylock hält die Tonhöhe bei 0.92×, 1.06× und 1.20× (gemessen über
+  Nulldurchgänge, Abweichung < 13 Hz bei 440 Hz)
+- Ohne Keylock wandert die Tonhöhe korrekt mit dem Tempo mit
+- Die Zeitachse driftet nicht: 4 s Ausgabe bei 1.06× verbrauchen 4,24 s Quelle
+- Dekodierung, Mono→Stereo und Resampling halten Länge und Tonhöhe
+
+Nicht verifiziert ist der Klang auf einer echten Anlage — das braucht Ohren an
+einer Soundkarte, nicht Tests. Ebenso offen: gemessene Latenz und das Verhalten
+unter Last.
+
+## Was als Nächstes ansteht
+
+- Zweites Deck und Mixer (Phase 1) — dafür muss der Track im Callback
+  austauschbar werden, ohne dort zu allokieren (Send-Back-Kanal für den alten
+  `Arc`, damit die Freigabe außerhalb des Audio-Threads passiert)
+- BPM-Analyse offline mit `aubio` oder `librosa`, Ergebnis neben dem Track ablegen
+- Wenn die WSOLA-Qualität bei ±8 % nicht reicht: `signalsmith-stretch` (MIT)
+  einbinden, bevor über eine Rubber-Band-Lizenz nachgedacht wird
 
 ## Quellen
 
