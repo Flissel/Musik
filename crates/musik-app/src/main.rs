@@ -25,9 +25,10 @@ use anyhow::{Context, Result};
 use audio_core::deck::{DeckState, Voice};
 use audio_core::{Beatgrid, Track};
 use audio_engine::{aux_channel, DeckSource, Engine, EngineRunner, Output};
+use control::{DeckEintrag, KanalSpiegel, Server, Steuerpult};
 use library::Library;
 
-use app::{assign_fuer, ChannelUi, DeckUi, MusikApp, Screenshot};
+use app::{assign_fuer, DeckUi, MusikApp, Screenshot};
 
 const RATE: u32 = 48_000;
 
@@ -37,6 +38,17 @@ struct Args {
     a: Option<PathBuf>,
     b: Option<PathBuf>,
     screenshot: Option<PathBuf>,
+    screenshot_nach: std::time::Duration,
+    socket: PathBuf,
+}
+
+/// Wo die Steuerung lauscht. Im Laufzeitverzeichnis des Benutzers, nicht in
+/// `/tmp` — dort könnte jeder andere Benutzer des Rechners mitsteuern.
+fn standard_socket() -> PathBuf {
+    match std::env::var_os("XDG_RUNTIME_DIR") {
+        Some(dir) => PathBuf::from(dir).join("musik.sock"),
+        None => std::env::temp_dir().join(format!("musik-{}.sock", std::process::id())),
+    }
 }
 
 fn main() -> Result<()> {
@@ -47,6 +59,7 @@ fn main() -> Result<()> {
 
     let demo = args.a.is_none() && args.b.is_none();
     let mut decks = Vec::new();
+    let mut eintraege = Vec::new();
 
     for (index, (name, pfad)) in [("DECK A", &args.a), ("DECK B", &args.b)]
         .into_iter()
@@ -98,18 +111,25 @@ fn main() -> Result<()> {
         engine.channel(kanal).set_fader(fader);
         state.set_playing(demo);
 
-        let mut strip = ChannelUi::new(name, kanal);
-        strip.fader = fader;
+        eintraege.push((
+            DeckEintrag {
+                state: Arc::clone(&state),
+                kanal,
+                sample_rate: RATE,
+                frames,
+                titel,
+                artist,
+            },
+            fader,
+            name,
+        ));
 
         decks.push(DeckUi {
             name: name.to_string(),
             state,
-            artist,
-            titel,
             peaks: analyse.peaks.iter().filter_map(|p| p.to_level()).collect(),
             frames,
             sample_rate: RATE,
-            strip,
             zoom_secs: 8.0,
             loop_beats: 4.0,
         });
@@ -121,6 +141,19 @@ fn main() -> Result<()> {
     engine.channel(aux_kanal).set_assign(assign_fuer(2));
 
     let (handle, runner) = audio_engine::engine_channel(engine, 512);
+
+    // Das Steuerpult bekommt alles, was bedienbar ist — und ist danach die
+    // einzige Stelle, an der Reglerstellungen stehen.
+    let mut pult = Steuerpult::neu(handle);
+    for (eintrag, fader, name) in eintraege {
+        let assign = assign_fuer(pult.decks().len());
+        let mut spiegel = KanalSpiegel::neu(name, assign);
+        spiegel.fader = fader as f64;
+        pult.kanal_hinzufuegen(spiegel);
+        pult.deck_hinzufuegen(eintrag);
+    }
+    pult.kanal_hinzufuegen(KanalSpiegel::neu("AUX", assign_fuer(2)));
+    let pult = Arc::new(std::sync::Mutex::new(pult));
 
     let (output, hinweis) = match Output::open(runner) {
         Ok(out) => {
@@ -147,17 +180,24 @@ fn main() -> Result<()> {
         .and_then(|l| l.search(&library::Query::default()).ok())
         .unwrap_or_default();
 
+    // Ab hier ist die Anlage von außen bedienbar. Scheitert das, läuft die
+    // Oberfläche trotzdem — nur eben allein.
+    let steuerung = match Server::starten(&args.socket, Arc::clone(&pult)) {
+        Ok(server) => {
+            println!("Steuerung: {}", server.pfad().display());
+            Some(server)
+        }
+        Err(e) => {
+            eprintln!("Steuerung nicht verfügbar: {e}");
+            None
+        }
+    };
+
     let anwendung = MusikApp {
-        handle,
+        pult,
         output,
         audio_hinweis: hinweis,
         decks,
-        aux: ChannelUi::new("AUX", aux_kanal),
-        crossfader: 0.0,
-        crossfader_kurve: 0.0,
-        master_gain: 1.0,
-        cue_mix: 0.0,
-        cue_gain: 1.0,
         library,
         analyse_cache: args.cache.clone(),
         suche: String::new(),
@@ -169,7 +209,7 @@ fn main() -> Result<()> {
         },
         screenshot: args.screenshot.map(|pfad| Screenshot {
             pfad,
-            warte_bilder: 30,
+            warte_bis: std::time::Instant::now() + args.screenshot_nach,
             angefordert: false,
         }),
     };
@@ -190,7 +230,12 @@ fn main() -> Result<()> {
             Ok(Box::new(anwendung))
         }),
     )
-    .map_err(|e| anyhow::anyhow!("Fenster ließ sich nicht öffnen: {e}"))
+    .map_err(|e| anyhow::anyhow!("Fenster ließ sich nicht öffnen: {e}"))?;
+
+    // Erst hier fallen lassen: Der Socket wird beim Aufräumen entfernt, und
+    // das soll nicht schon passieren, während das Fenster noch steht.
+    drop(steuerung);
+    Ok(())
 }
 
 fn parse_args() -> Result<Args> {
@@ -200,6 +245,10 @@ fn parse_args() -> Result<Args> {
         a: None,
         b: None,
         screenshot: None,
+        // Lang genug, dass das Fenster steht und die erste Wellenform
+        // gezeichnet ist.
+        screenshot_nach: std::time::Duration::from_millis(600),
+        socket: standard_socket(),
     };
 
     let mut iter = std::env::args().skip(1);
@@ -211,9 +260,17 @@ fn parse_args() -> Result<Args> {
             "--a" => args.a = Some(PathBuf::from(wert()?)),
             "--b" => args.b = Some(PathBuf::from(wert()?)),
             "--screenshot" => args.screenshot = Some(PathBuf::from(wert()?)),
+            "--socket" => args.socket = PathBuf::from(wert()?),
+            "--screenshot-nach" => {
+                let sekunden: f64 = wert()?
+                    .parse()
+                    .context("--screenshot-nach braucht Sekunden")?;
+                args.screenshot_nach = std::time::Duration::from_secs_f64(sekunden.max(0.0));
+            }
             "-h" | "--help" => {
                 println!("Aufruf: musik-app [--db <datei>] [--a <track>] [--b <track>]");
                 println!("                  [--cache <dir>] [--screenshot <bild.png>]");
+                println!("                  [--socket <pfad>] [--screenshot-nach <sekunden>]");
                 std::process::exit(0);
             }
             other => anyhow::bail!("unbekannte Option: {other}"),

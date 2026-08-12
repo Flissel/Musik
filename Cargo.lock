@@ -730,6 +730,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
+name = "control"
+version = "0.1.0"
+dependencies = [
+ "audio-core",
+ "audio-engine",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2006,6 +2014,7 @@ dependencies = [
  "anyhow",
  "audio-core",
  "audio-engine",
+ "control",
  "eframe",
  "egui",
  "image",

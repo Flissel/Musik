@@ -8,8 +8,8 @@ Status: **sieben von zehn Phasen gebaut.** Decks mit Keylock, Hot Cues und
 Loops; Mixer mit EQ, Filter, Crossfader, Cue-Bus und AUX; Analyse für Tempo,
 Beatgrid und Wellenform; Sync über Tempo *und* Phase; Sammlung mit
 Traktor-Import; Oberfläche mit zwei Decks, Wellenform, Beatgrid und
-Plattenkiste. Nativ in Rust. Was fehlt, sind Effekte, Stems, Mitschnitt und
-MIDI.
+Plattenkiste; **Fernsteuerung über einen selbstbeschreibenden Steuerraum**.
+Nativ in Rust. Was fehlt, sind Effekte, Stems, Mitschnitt und MIDI.
 
 ![Die Oberfläche](docs/bilder/oberflaeche.png)
 
@@ -35,6 +35,7 @@ es nichts, was Agenten steuern könnten.
 | **[docs/PLAN.md](docs/PLAN.md)** | **Vollständiger Bauplan der DJ-Software — Architektur, Phasen, Risiken** |
 | [docs/TRAKTOR-REFERENZ.md](docs/TRAKTOR-REFERENZ.md) | Was Traktor Pro 4 kann, was wir davon übernehmen |
 | [docs/MIXXX.md](docs/MIXXX.md) | Mixxx als Referenz — was übernehmbar ist, warum es nicht eingebettet werden kann |
+| **[docs/STEUERUNG.md](docs/STEUERUNG.md)** | **Fernsteuerung: Socket, Protokoll, selbstbeschreibender Steuerraum** |
 | [docs/BAUSTEINE.md](docs/BAUSTEINE.md) | Fertige Bibliotheken für Audio, Analyse, Stems — inkl. Lizenzfallen |
 | [docs/APIS.md](docs/APIS.md) | Generierungs-APIs und Sample-Quellen, Zugangsstatus |
 | [docs/AGENTEN.md](docs/AGENTEN.md) | Multi-Agenten-Team und Crowd-Feedback-Schleife |
@@ -70,6 +71,7 @@ Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
 | ~~4~~ ✅ | ~~Sync und Beatmatching über Tempo und Phase~~ |
 | ~~5~~ ✅ | ~~Hot Cues und Loops~~ |
 | ~~6~~ ✅ | ~~Library inkl. Traktor-Import~~ |
+| ~~S~~ ✅ | ~~Steuerraum und Fernsteuerung~~ — [docs/STEUERUNG.md](docs/STEUERUNG.md) |
 | **7–10** | **Effekte · Stems · Mitschnitt · MIDI-Controller** |
 
 Zum Auflegen fehlt jetzt nur noch Hardware: Phase 1 ist abgenommen, sobald der
@@ -241,5 +243,22 @@ Ausgänge, sagt die Kopfzeile das und das Vorhören entfällt.
 
 `--release` ist keine Zierde: die Analyse eines frisch geladenen Tracks dauert
 im Debug-Build spürbar länger.
+
+Von außen steuern, während sie läuft:
+
+```sh
+$ nc -U "$XDG_RUNTIME_DIR/musik.sock"
+list deck1.
+set deck1.play 1
+set channel1.fader 0.8
+setn channel2.eq_low 0        # normiert, für MIDI
+```
+
+`list` liefert zu jedem Control Typ, Bereich, Einheit, Schreibbarkeit und
+Bedeutung — der Steuerraum beschreibt sich selbst, ein Handbuch ist dafür nicht
+nötig. Das ist die Grundlage für die Agenten-Schicht und für den Anschluss an
+VibeMind. Details in [docs/STEUERUNG.md](docs/STEUERUNG.md).
+
+![Von außen gesteuert](docs/bilder/fernsteuerung.png)
 
 Für API-Keys siehe [`.env.example`](.env.example).

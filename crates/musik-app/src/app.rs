@@ -4,16 +4,19 @@
 //! darunter die Sammlung. Das ist die Anordnung, die man von einem DJ-Setup
 //! kennt — Plattenspieler oben, Mischpult in der Mitte, Plattenkiste unten.
 //!
-//! Die Oberfläche fasst den Mixer nie direkt an. Sie hält gespiegelte Werte für
-//! die Darstellung und schickt jede Änderung als Kommando in die lock-freie
-//! Schlange. Den Transport steuert sie über die Atomics im `DeckState`.
+//! Die Oberfläche fasst den Mixer nie direkt an — und sie hält auch keine
+//! eigenen Werte mehr. Alles Bedienbare liegt im Steuerpult (`control`), das
+//! die Kommandos in die lock-freie Schlange schickt. Damit ist die Oberfläche
+//! einer von mehreren Bedienern: Ein Skript am Socket bewegt denselben Fader,
+//! und beide sehen sofort dasselbe.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use analysis::peaks::PeakLevel;
 use audio_core::deck::{DeckState, HOT_CUES};
-use audio_engine::{Assign, Command, EngineHandle, Output};
+use audio_engine::{Assign, Output};
+use control::{Einheit, Gruppe, Schluessel, Steuerpult, Wert};
 use egui::{Color32, RichText, Ui};
 use library::{Library, Query, TrackRecord};
 
@@ -32,43 +35,16 @@ const MIXER_HOEHE: f32 = 262.0;
 /// Liste will und beim Mixen mehr Wellenform.
 const SAMMLUNG_HOEHE: f32 = 190.0;
 
-pub struct ChannelUi {
-    pub name: String,
-    pub channel: usize,
-    pub trim: f32,
-    pub low: f32,
-    pub mid: f32,
-    pub high: f32,
-    pub filter: f32,
-    pub fader: f32,
-    pub cue: bool,
-}
-
-impl ChannelUi {
-    pub fn new(name: impl Into<String>, channel: usize) -> Self {
-        ChannelUi {
-            name: name.into(),
-            channel,
-            trim: 1.0,
-            low: 1.0,
-            mid: 1.0,
-            high: 1.0,
-            filter: 0.0,
-            fader: 0.0,
-            cue: false,
-        }
-    }
-}
-
+/// Was die Oberfläche über ein Deck weiß, das im Steuerpult nicht steht.
+///
+/// Titel, Tempo, Position und Reglerstellungen liegen im Pult — hier bleibt
+/// nur, was allein zum Zeichnen gebraucht wird.
 pub struct DeckUi {
     pub name: String,
     pub state: Arc<DeckState>,
-    pub artist: String,
-    pub titel: String,
     pub peaks: Vec<PeakLevel>,
     pub frames: u64,
     pub sample_rate: u32,
-    pub strip: ChannelUi,
     /// Sichtbarer Ausschnitt der Zoom-Ansicht, in Sekunden.
     pub zoom_secs: f32,
     pub loop_beats: f64,
@@ -92,24 +68,26 @@ impl DeckUi {
 
 pub struct Screenshot {
     pub pfad: PathBuf,
-    pub warte_bilder: u32,
+    /// Erst ab diesem Zeitpunkt wird ausgelöst.
+    ///
+    /// Eine feste Zahl von Bildern wäre willkürlich und je nach Rechner
+    /// unterschiedlich lang. Über die Zeit lässt sich außerdem etwas
+    /// dazwischenschieben — etwa die Anlage über den Socket in einen
+    /// bestimmten Zustand fahren und *den* aufnehmen.
+    pub warte_bis: std::time::Instant,
     pub angefordert: bool,
 }
 
 pub struct MusikApp {
-    pub handle: EngineHandle,
+    /// Der gemeinsame Steuerraum. Die Oberfläche ist einer von mehreren
+    /// Bedienern — ein Skript am Socket sieht dieselben Werte.
+    pub pult: Arc<Mutex<Steuerpult>>,
     /// Hält den Audio-Stream am Leben. Fällt er weg, verstummt die Ausgabe —
     /// deshalb liegt er hier, auch wenn sonst niemand ihn anfasst.
     #[allow(dead_code)]
     pub output: Option<Output>,
     pub audio_hinweis: String,
     pub decks: Vec<DeckUi>,
-    pub aux: ChannelUi,
-    pub crossfader: f32,
-    pub crossfader_kurve: f32,
-    pub master_gain: f32,
-    pub cue_mix: f32,
-    pub cue_gain: f32,
     pub library: Option<Library>,
     pub analyse_cache: PathBuf,
     pub suche: String,
@@ -122,7 +100,9 @@ impl eframe::App for MusikApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         // Abgelöste Quellen abholen, sonst nimmt der Audio-Thread irgendwann
         // keine neuen Tracks mehr an.
-        self.handle.collect_retired();
+        if let Ok(mut pult) = self.pult.lock() {
+            pult.handle_mut().collect_retired();
+        }
 
         // Kopie, weil `ui` gleich selbst ausgeliehen wird und der Kontext
         // danach noch für den Screenshot gebraucht wird.
@@ -213,11 +193,17 @@ impl MusikApp {
         uebersicht: f32,
         zoom: f32,
     ) {
-        let (titel, artist, dauer, position, bpm, keylock, laeuft) = {
+        let (titel, artist) = match self.pult.lock() {
+            Ok(pult) => match pult.decks().get(index) {
+                Some(d) => (d.titel.clone(), d.artist.clone()),
+                None => (String::new(), String::new()),
+            },
+            Err(_) => (String::new(), String::new()),
+        };
+
+        let (dauer, position, bpm, keylock, laeuft) = {
             let deck = &self.decks[index];
             (
-                deck.titel.clone(),
-                deck.artist.clone(),
                 deck.dauer_secs(),
                 deck.position_secs(),
                 deck.state.effective_bpm(),
@@ -438,185 +424,24 @@ impl MusikApp {
 
     fn mixer(&mut self, ui: &mut Ui) {
         ui.add_space(4.0);
+
+        // Einmal je Bild sperren. Der Audio-Thread ist daran nicht beteiligt —
+        // er sieht nur die lock-freie Schlange, die das Pult füllt. Hier
+        // konkurriert die Oberfläche nur mit anderen Bedienern, und die sind
+        // langsam.
+        let Ok(mut pult) = self.pult.lock() else {
+            ui.label(RichText::new("Steuerpult nicht erreichbar").color(theme::WARNUNG));
+            return;
+        };
+
         ui.horizontal_top(|ui| {
-            for index in 0..self.decks.len() {
-                let farbe = theme::deck_farbe(index);
-                let mut strip =
-                    std::mem::replace(&mut self.decks[index].strip, ChannelUi::new("", 0));
-                self.kanalzug(ui, &mut strip, farbe);
-                self.decks[index].strip = strip;
+            for i in 0..pult.kanaele().len() {
+                kanalzug(ui, &mut pult, i, theme::deck_farbe(i));
             }
-
-            let mut aux = std::mem::replace(&mut self.aux, ChannelUi::new("", 0));
-            self.kanalzug(ui, &mut aux, theme::AUX);
-            self.aux = aux;
-
             ui.separator();
-            self.summe(ui);
+            summe(ui, &mut pult);
         });
     }
-
-    fn kanalzug(&mut self, ui: &mut Ui, strip: &mut ChannelUi, farbe: Color32) {
-        egui::Frame::new()
-            .fill(theme::PANEL)
-            .inner_margin(7.0)
-            .corner_radius(4.0)
-            .show(ui, |ui| {
-                // Senkrecht, sonst stünden die Regler eines Zuges nebeneinander
-                // statt übereinander — der Rahmen erbt hier ein waagerechtes
-                // Layout vom Mixer.
-                ui.vertical(|ui| self.kanalzug_inhalt(ui, strip, farbe));
-            });
-    }
-
-    fn kanalzug_inhalt(&mut self, ui: &mut Ui, strip: &mut ChannelUi, farbe: Color32) {
-        ui.set_width(KANALBREITE);
-        ui.label(RichText::new(&strip.name).color(farbe).strong().size(12.0));
-
-        // Die Drehregler eines echten Mixers sind schmal; hier sind es liegende
-        // Schieber, also bekommen sie die Breite des Zuges und keine Zahl —
-        // beim Auflegen liest man die ohnehin nicht.
-        let regler =
-            |ui: &mut Ui, wert: &mut f32, name: &str, spanne: std::ops::RangeInclusive<f32>| {
-                ui.spacing_mut().slider_width = KANALBREITE - 34.0;
-                ui.add(
-                    egui::Slider::new(wert, spanne)
-                        .show_value(false)
-                        .text(RichText::new(name).size(10.0)),
-                )
-                .changed()
-            };
-
-        if regler(ui, &mut strip.trim, "TRIM", 0.0..=2.0) {
-            self.handle.send(Command::Trim(strip.channel, strip.trim));
-        }
-
-        let mut eq_geaendert = regler(ui, &mut strip.high, "HI", 0.0..=2.0);
-        eq_geaendert |= regler(ui, &mut strip.mid, "MID", 0.0..=2.0);
-        eq_geaendert |= regler(ui, &mut strip.low, "LOW", 0.0..=2.0);
-        if eq_geaendert {
-            self.handle.send(Command::Eq {
-                channel: strip.channel,
-                low: strip.low,
-                mid: strip.mid,
-                high: strip.high,
-            });
-        }
-
-        if regler(ui, &mut strip.filter, "FLT", -1.0..=1.0) {
-            self.handle
-                .send(Command::Filter(strip.channel, strip.filter));
-        }
-
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("CUE").size(10.0))
-                            .fill(if strip.cue {
-                                theme::CUE
-                            } else {
-                                theme::PANEL_HELL
-                            })
-                            .min_size(egui::vec2(42.0, 22.0)),
-                    )
-                    .clicked()
-                {
-                    strip.cue = !strip.cue;
-                    self.handle.send(Command::Cue(strip.channel, strip.cue));
-                }
-            });
-
-            // Der Linefader steht senkrecht wie am Gerät.
-            ui.spacing_mut().slider_width = FADERHOEHE;
-            if ui
-                .add(
-                    egui::Slider::new(&mut strip.fader, 0.0..=1.0)
-                        .show_value(false)
-                        .vertical(),
-                )
-                .changed()
-            {
-                self.handle.send(Command::Fader(strip.channel, strip.fader));
-            }
-        });
-    }
-
-    fn summe(&mut self, ui: &mut Ui) {
-        egui::Frame::new()
-            .fill(theme::PANEL)
-            .inner_margin(7.0)
-            .corner_radius(4.0)
-            .show(ui, |ui| {
-                ui.vertical(|ui| self.summe_inhalt(ui));
-            });
-    }
-
-    fn summe_inhalt(&mut self, ui: &mut Ui) {
-        ui.set_width(250.0);
-        ui.spacing_mut().slider_width = 214.0;
-        ui.label(RichText::new("SUMME").strong().size(12.0));
-
-        if ui
-            .add(
-                egui::Slider::new(&mut self.crossfader, -1.0..=1.0)
-                    .show_value(false)
-                    .text(RichText::new("A « Crossfader » B").size(10.0)),
-            )
-            .changed()
-        {
-            self.handle.send(Command::Crossfader(self.crossfader));
-        }
-
-        if ui
-            .add(
-                egui::Slider::new(&mut self.crossfader_kurve, 0.0..=1.0)
-                    .show_value(false)
-                    .text(RichText::new("Kurve weich » hart").size(10.0)),
-            )
-            .changed()
-        {
-            self.handle
-                .send(Command::CrossfaderCurve(self.crossfader_kurve));
-        }
-
-        ui.separator();
-
-        if ui
-            .add(
-                egui::Slider::new(&mut self.master_gain, 0.0..=1.5)
-                    .show_value(false)
-                    .text(RichText::new("MASTER").size(10.0)),
-            )
-            .changed()
-        {
-            self.handle.send(Command::MasterGain(self.master_gain));
-        }
-
-        if ui
-            .add(
-                egui::Slider::new(&mut self.cue_gain, 0.0..=1.5)
-                    .show_value(false)
-                    .text(RichText::new("KOPFHÖRER").size(10.0)),
-            )
-            .changed()
-        {
-            self.handle.send(Command::CueGain(self.cue_gain));
-        }
-
-        if ui
-            .add(
-                egui::Slider::new(&mut self.cue_mix, 0.0..=1.0)
-                    .show_value(false)
-                    .text(RichText::new("CUE « Mix » MASTER").size(10.0)),
-            )
-            .changed()
-        {
-            self.handle.send(Command::CueMix(self.cue_mix));
-        }
-    }
-
     fn sammlung(&mut self, ui: &mut Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -737,8 +562,7 @@ impl MusikApp {
         };
 
         if !auftrag.angefordert {
-            if auftrag.warte_bilder > 0 {
-                auftrag.warte_bilder -= 1;
+            if std::time::Instant::now() < auftrag.warte_bis {
                 ctx.request_repaint();
                 return;
             }
@@ -820,6 +644,160 @@ fn zeit(secs: f64) -> String {
     format!("{m}:{:05.2}", secs - m as f64 * 60.0)
 }
 
+/// Ein Schieberegler, der an einem Control hängt.
+///
+/// Die Oberfläche kennt weder Bereich noch Einheit noch Bedeutung — das steht
+/// alles im Katalog, und der Regler holt es sich von dort. Ein neues Control
+/// ist damit ohne eine Zeile hier bedienbar, und der Hilfetext, den ein Agent
+/// über `list` bekommt, ist derselbe, der hier als Tooltip erscheint. Zwei
+/// Beschreibungen, die auseinanderlaufen könnten, gibt es nicht.
+fn regler(ui: &mut Ui, pult: &mut Steuerpult, key: &Schluessel, name: &str, senkrecht: bool) {
+    let Some(b) = pult.beschreibung(key) else {
+        return;
+    };
+    let Some((min, max)) = b.bereich else {
+        return;
+    };
+    let Ok(Wert::Zahl(aktuell)) = pult.lies(key) else {
+        return;
+    };
+
+    let mut wert = aktuell;
+    let mut schieber = egui::Slider::new(&mut wert, min..=max).show_value(false);
+    schieber = if senkrecht {
+        schieber.vertical()
+    } else {
+        schieber.text(RichText::new(name).size(10.0))
+    };
+
+    let antwort = ui.add(schieber).on_hover_text(b.text);
+    if antwort.changed() {
+        let _ = pult.schreibe(key, Wert::Zahl(wert));
+    }
+    // Doppelklick stellt zurück auf den Anfangswert des Bereichs bzw. die
+    // Mitte — bei einem bipolaren Control ist das die Raste.
+    if antwort.double_clicked() {
+        let zurueck = if b.einheit == Einheit::Bipolar {
+            0.0
+        } else if min <= 1.0 && max >= 1.0 {
+            1.0
+        } else {
+            min
+        };
+        let _ = pult.schreibe(key, Wert::Zahl(zurueck));
+    }
+}
+
+fn kanalzug(ui: &mut Ui, pult: &mut Steuerpult, index: usize, farbe: Color32) {
+    egui::Frame::new()
+        .fill(theme::PANEL)
+        .inner_margin(7.0)
+        .corner_radius(4.0)
+        .show(ui, |ui| {
+            // Senkrecht, sonst stünden die Regler eines Zuges nebeneinander
+            // statt übereinander — der Rahmen erbt hier ein waagerechtes
+            // Layout vom Mixer.
+            ui.vertical(|ui| kanalzug_inhalt(ui, pult, index, farbe));
+        });
+}
+
+fn kanalzug_inhalt(ui: &mut Ui, pult: &mut Steuerpult, index: usize, farbe: Color32) {
+    let Some(kanal) = pult.kanaele().get(index) else {
+        return;
+    };
+    let name = kanal.name.clone();
+    let cue_an = kanal.cue;
+
+    ui.set_width(KANALBREITE);
+    ui.label(RichText::new(&name).color(farbe).strong().size(12.0));
+    ui.spacing_mut().slider_width = KANALBREITE - 34.0;
+
+    let gruppe = Gruppe::Kanal(index);
+    for (element, beschriftung) in [
+        ("trim", "TRIM"),
+        ("eq_high", "HI"),
+        ("eq_mid", "MID"),
+        ("eq_low", "LOW"),
+        ("filter", "FLT"),
+    ] {
+        regler(
+            ui,
+            pult,
+            &Schluessel::neu(gruppe, element),
+            beschriftung,
+            false,
+        );
+    }
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            let knopf = ui.add(
+                egui::Button::new(RichText::new("CUE").size(10.0))
+                    .fill(if cue_an {
+                        theme::CUE
+                    } else {
+                        theme::PANEL_HELL
+                    })
+                    .min_size(egui::vec2(42.0, 22.0)),
+            );
+            if knopf.clicked() {
+                let _ = pult.schreibe(&Schluessel::neu(gruppe, "cue"), Wert::Schalter(!cue_an));
+            }
+        });
+
+        // Der Linefader steht senkrecht wie am Gerät.
+        ui.spacing_mut().slider_width = FADERHOEHE;
+        regler(ui, pult, &Schluessel::neu(gruppe, "fader"), "", true);
+    });
+}
+
+fn summe(ui: &mut Ui, pult: &mut Steuerpult) {
+    egui::Frame::new()
+        .fill(theme::PANEL)
+        .inner_margin(7.0)
+        .corner_radius(4.0)
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(250.0);
+                ui.spacing_mut().slider_width = 214.0;
+                ui.label(RichText::new("SUMME").strong().size(12.0));
+
+                let g = Gruppe::Master;
+                regler(
+                    ui,
+                    pult,
+                    &Schluessel::neu(g, "crossfader"),
+                    "A « Crossfader » B",
+                    false,
+                );
+                regler(
+                    ui,
+                    pult,
+                    &Schluessel::neu(g, "crossfader_curve"),
+                    "Kurve weich » hart",
+                    false,
+                );
+                ui.separator();
+                regler(ui, pult, &Schluessel::neu(g, "gain"), "MASTER", false);
+                regler(
+                    ui,
+                    pult,
+                    &Schluessel::neu(g, "cue_gain"),
+                    "KOPFHÖRER",
+                    false,
+                );
+                regler(
+                    ui,
+                    pult,
+                    &Schluessel::neu(g, "cue_mix"),
+                    "CUE « Mix » MASTER",
+                    false,
+                );
+            });
+        });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -847,11 +825,16 @@ mod tests {
     }
 
     #[test]
-    fn ein_neuer_kanalzug_startet_mit_geschlossenem_fader() {
-        let strip = ChannelUi::new("A", 0);
-        assert_eq!(strip.fader, 0.0);
-        assert!(!strip.cue);
-        assert_eq!((strip.low, strip.mid, strip.high), (1.0, 1.0, 1.0));
-        assert_eq!(strip.filter, 0.0);
+    fn ohne_titel_bleibt_der_dateiname_stehen() {
+        let mut eintrag =
+            TrackRecord::from_path("/musik/Ordner/Alpenglühen - Vier auf die Eins.wav");
+        assert_eq!(anzeigename(&eintrag), "Alpenglühen - Vier auf die Eins");
+
+        eintrag.title = Some("Richtiger Titel".into());
+        assert_eq!(anzeigename(&eintrag), "Richtiger Titel");
+
+        // Ein leerer Tag ist so gut wie keiner.
+        eintrag.title = Some("   ".into());
+        assert_eq!(anzeigename(&eintrag), "Alpenglühen - Vier auf die Eins");
     }
 }

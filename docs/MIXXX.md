@@ -70,7 +70,7 @@ Der Inhalt ist zweierlei, und die Trennung ist wichtig:
 
 Also: als Doku lesen, eigenes Format schreiben.
 
-### 2. Das Control-System als Vorbild für die MCP-Schnittstelle
+### 2. Das Control-System als Vorbild für die MCP-Schnittstelle ✅ gebaut
 
 Mixxx hat eine interne API, über die **alles** läuft — Tastatur, MIDI, HID und
 die grafische Oberfläche greifen auf dieselben benannten Controls zu, adressiert
@@ -79,12 +79,14 @@ die grafische Oberfläche greifen auf dieselben benannten Controls zu, adressier
 
 Das ist genau die Form, die unsere Anbindung an VibeMind braucht: ein flacher,
 benannter Steuerraum, den ein Agent adressieren kann, ohne die Oberfläche zu
-kennen. Wir haben das bisher nicht — Transport läuft über Atomics im
-`DeckState`, der Mixer über die Kommandoschlange, beides ohne gemeinsame
-Namensgebung. Bevor die MCP-Schicht aus [VIBEMIND.md](VIBEMIND.md) gebaut wird,
-lohnt sich dieser Zwischenschritt.
+kennen. Vorher lag die Bedienung bei uns an drei Stellen — Transport in den
+Atomics des `DeckState`, der Mixer in der Kommandoschlange, die
+Reglerstellungen als Spiegel in der Oberfläche — ohne gemeinsame Namensgebung.
 
-Architektonische Idee, frei übernehmbar.
+Architektonische Idee, frei übernehmbar — **inzwischen gebaut**, als Crate
+`control`, und in drei Punkten weitergedreht: Der Steuerraum beschreibt sich
+zur Laufzeit selbst, die Werte sind typisiert statt durchweg `double`, und er
+ist von außen erreichbar. Siehe [STEUERUNG.md](STEUERUNG.md).
 
 ### 3. Zwei Beatgrid-Stufen statt einer
 
@@ -133,7 +135,8 @@ ist prozessintern.
 Für einen Agenten, der auflegen soll, ist Mixxx damit keine fertige Basis. Genau
 diese Lücke ist das, was dieses Projekt eigentlich beiträgt — nicht der
 zwanzigste Mixer, sondern ein DJ-Werkzeug, das von Anfang an eine
-Steuerschnittstelle nach außen hat.
+Steuerschnittstelle nach außen hat. **Diese Lücke ist inzwischen geschlossen:**
+[STEUERUNG.md](STEUERUNG.md).
 
 **Die Lizenz für den VibeMind-Weg.** Einbetten geht nicht, und ein Fork wäre
 GPL. Beides schließt die Veröffentlichung als MIT aus.

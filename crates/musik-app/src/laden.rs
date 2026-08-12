@@ -41,6 +41,8 @@ pub fn track_auf_deck(app: &mut MusikApp, deck: usize, eintrag: &TrackRecord) ->
 
     let frames = track.frames() as u64;
     let state = Arc::clone(&app.decks[deck].state);
+    let titel = crate::app::anzeigename(eintrag);
+    let artist = eintrag.artist.clone().unwrap_or_default();
 
     // Der neue Track startet gestoppt am Anfang — ein Deck, das beim Laden
     // losläuft, ist ein Unfall.
@@ -57,16 +59,38 @@ pub fn track_auf_deck(app: &mut MusikApp, deck: usize, eintrag: &TrackRecord) ->
     );
 
     let voice = Voice::new(Arc::new(track), Arc::clone(&state));
-    let kanal = app.decks[deck].strip.channel;
-    if !app.handle.load(kanal, Box::new(DeckSource::new(voice))) {
-        anyhow::bail!("die Ladeschlange ist voll — gleich noch einmal versuchen");
+
+    {
+        let mut pult = app
+            .pult
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Steuerpult ist in einem unklaren Zustand"))?;
+
+        let kanal = pult
+            .decks()
+            .get(deck)
+            .context("Deck gibt es im Steuerpult nicht")?
+            .kanal;
+
+        if !pult
+            .handle_mut()
+            .load(kanal, Box::new(DeckSource::new(voice)))
+        {
+            anyhow::bail!("die Ladeschlange ist voll — gleich noch einmal versuchen");
+        }
+
+        // Erst nach dem erfolgreichen Laden umbenennen: Sonst zeigte das Pult
+        // einen Titel an, der gar nicht auf dem Deck liegt.
+        if let Some(eintrag) = pult.deck_mut(deck) {
+            eintrag.titel = titel;
+            eintrag.artist = artist;
+            eintrag.frames = frames;
+        }
     }
 
     let ui = &mut app.decks[deck];
     ui.peaks = peaks;
     ui.frames = frames;
-    ui.titel = crate::app::anzeigename(eintrag);
-    ui.artist = eintrag.artist.clone().unwrap_or_default();
 
     Ok(())
 }

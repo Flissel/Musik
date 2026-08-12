@@ -92,6 +92,7 @@ crates/
   analysis/      steht — BPM, Beatgrid, Waveform-Peaks, Sidecar-Cache
   library/       steht — SQLite, Suche, Playlists, Traktor-Import
   musik-cli/     steht — Deck, Analyse, Offline-Mix, Sammlung
+  control/       steht — benannter Steuerraum, Fernsteuerung über Socket
   musik-app/     steht — Oberfläche (egui/eframe): Decks, Mixer, Plattenkiste
   Effekte, Stems und MIDI kommen in audio-engine bzw. analysis dazu.
 ```
@@ -184,6 +185,11 @@ Für Phase 10 ist Mixxx' Mapping-Verzeichnis die beste verfügbare Dokumentation
 der Geräte-Landschaft — als Nachschlagewerk, nicht als Vorlage zum Kopieren.
 Warum das ein Unterschied ist, steht in [MIXXX.md](MIXXX.md).
 
+Phase 10 ist seit dem Steuerraum deutlich kleiner geworden: Ein Mapping ist
+jetzt eine Tabelle von MIDI-Nachricht auf Control-Namen, und den normierten
+Schreibweg (`setn`, 0..1) gibt es bereits. Siehe
+[STEUERUNG.md](STEUERUNG.md).
+
 Phase 1 und 2 sind unabhängig und können parallel laufen — die Analyse braucht
 die Engine nicht.
 
@@ -206,6 +212,7 @@ Was fehlt, sind Effekte, Stems, Mitschnitt und MIDI.
 | `analysis` | Tempo, Beatgrid, Wellenform-Spitzen, Sidecar-Cache |
 | `library` | SQLite-Sammlung, Suche, Playlists, Traktor-Import |
 | `musik-cli` | Deck fahren, analysieren, Mix rendern, Sammlung verwalten |
+| `control` | Steuerraum: benannte Controls, Katalog, Zeilenprotokoll, Socket |
 | `musik-app` | Oberfläche: zwei Decks, Mixer mit AUX, Plattenkiste |
 
 ## Offene Entscheidungen
