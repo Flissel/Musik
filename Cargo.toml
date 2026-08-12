@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/analysis","crates/audio-core", "crates/audio-engine", "crates/library", "crates/musik-cli"]
+members = ["crates/analysis","crates/audio-core", "crates/audio-engine", "crates/library", "crates/musik-app", "crates/musik-cli"]
 
 [workspace.package]
 edition = "2021"

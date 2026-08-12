@@ -92,7 +92,7 @@ crates/
   analysis/      steht — BPM, Beatgrid, Waveform-Peaks, Sidecar-Cache
   library/       steht — SQLite, Suche, Playlists, Traktor-Import
   musik-cli/     steht — Deck, Analyse, Offline-Mix, Sammlung
-  musik-app/     OFFEN — UI (egui), Phase 3
+  musik-app/     steht — Oberfläche (egui/eframe): Decks, Mixer, Plattenkiste
   Effekte, Stems und MIDI kommen in audio-engine bzw. analysis dazu.
 ```
 
@@ -171,9 +171,9 @@ Ordner liegen. Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 | --- | --- | --- | --- | --- |
 | 1 | Mehrdeck-Engine, Mixer, Cue-Bus, AUX | Code steht ✅ · Abnahme offen: Cue muss hörbar getrennt auf 3/4 liegen | M | 4-Kanal-Interface |
 | ~~2~~ | ~~Analyse-Pipeline~~ ✅ | BPM und Grid reproduzierbar als Sidecar, Peaks vorhanden | M | — |
-| 3 | UI-Grundgerüst | Zwei Decks mit Waveform, Mixer bedienbar, stabile 60 fps | L | 1, 2 |
+| ~~3~~ | ~~UI-Grundgerüst~~ ✅ | Zwei Decks mit Wellenform und Grid, Mixer bedienbar, Sammlung durchsuchbar · Offen: Bildrate auf echter Hardware messen | L | 1, 2 |
 | ~~4~~ | ~~Sync und Beatmatching~~ ✅ | Zwei Tracks bleiben über 5 Minuten im Takt — als Test abgesichert | M | 2 |
-| ~~5~~ | ~~Hot Cues und Loops~~ ✅ | 8 Cues pro Deck, Loop beat-quantisiert · Bedienung fehlt noch (Phase 3) | M | 4 |
+| ~~5~~ | ~~Hot Cues und Loops~~ ✅ | 8 Cues pro Deck, Loop beat-quantisiert, in der Oberfläche bedienbar | M | 4 |
 | ~~6~~ | ~~Library~~ ✅ | Import, Suche, Playlists, Traktor-`collection.nml` | L | 2 |
 | 7 | Effekte | 6–8 gute Effekte, Mixer-FX post-fader | M | 1 |
 | 8 | Stems | Beim Import vorberechnet, Stem-Deck-Modus | L | 6 |
@@ -191,16 +191,18 @@ und ein Bitcrusher — richtig gebaut und mit vernünftigen Regelwegen.
 
 ## Was inzwischen steht
 
-Sechs von zehn Phasen sind gebaut. Was fehlt, ist vor allem die Oberfläche —
-alles Bisherige lässt sich nur über die Kommandozeile und über Tests bedienen.
+Sieben von zehn Phasen sind gebaut. Die Software lässt sich bedienen: Tracks
+aus der Sammlung auf die Decks legen, Wellenform und Beatgrid sehen, mischen.
+Was fehlt, sind Effekte, Stems, Mitschnitt und MIDI.
 
 | Crate | Inhalt |
 | --- | --- |
 | `audio-core` | Deck: Dekodierung, WSOLA, Beatgrid, Hot Cues, Loops |
-| `audio-engine` | Mixer: Kanalzüge, EQ, Filter, Crossfader, Cue-Bus, Begrenzer, AUX, Sync |
+| `audio-engine` | Mixer: Kanalzüge, EQ, Filter, Crossfader, Cue-Bus, Begrenzer, AUX, Sync, Kommandoschlange, Geräteausgabe |
 | `analysis` | Tempo, Beatgrid, Wellenform-Spitzen, Sidecar-Cache |
 | `library` | SQLite-Sammlung, Suche, Playlists, Traktor-Import |
 | `musik-cli` | Deck fahren, analysieren, Mix rendern, Sammlung verwalten |
+| `musik-app` | Oberfläche: zwei Decks, Mixer mit AUX, Plattenkiste |
 
 ## Offene Entscheidungen
 
@@ -209,9 +211,12 @@ Decks à 100 MB gehen noch; vier Decks mit je vier Stems nicht mehr. Dann wird
 aus dem Laden ein Vorpuffer plus Nachladen im Hintergrund.
 
 **Kalibrierung der Tempo-Schwelle.** Die Grenze, ab der ein erkanntes Tempo als
-Aussage gilt statt als Rauschen, trennt derzeit nur die beiden Extreme —
-Klick-Track gegen Dauerton. Gegen echte Musik ist sie nie geprüft worden; das
-geht erst mit einer Sammlung auf der Platte.
+Aussage gilt statt als Rauschen, ist inzwischen ein z-Wert statt eines
+Verhältnisses zum Mittelwert — das alte Maß hat dichtes Material
+fälschlich abgewiesen, weil dessen durchgehende Energie den Sockel der
+Autokorrelation anhebt (Details in `crates/analysis/src/tempo.rs`). Sie trennt
+jetzt Klick-Track, dichten Loop und Dauerton sauber, ist gegen echte Musik aber
+weiterhin nicht geprüft; das geht erst mit einer Sammlung auf der Platte.
 
 ## Entschiedene Punkte
 

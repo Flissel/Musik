@@ -4,10 +4,14 @@ Traktor-artiges DJ-/Musik-Tool, das generative Musik als gleichberechtigte
 Quelle behandelt — mit dem Fernziel eines Agenten-Teams, das Musik aus den
 Reaktionen der Crowd formt.
 
-Status: **sechs von zehn Phasen gebaut.** Decks mit Keylock, Hot Cues und
+Status: **sieben von zehn Phasen gebaut.** Decks mit Keylock, Hot Cues und
 Loops; Mixer mit EQ, Filter, Crossfader, Cue-Bus und AUX; Analyse für Tempo,
 Beatgrid und Wellenform; Sync über Tempo *und* Phase; Sammlung mit
-Traktor-Import. Nativ in Rust — was fehlt, ist die Oberfläche.
+Traktor-Import; Oberfläche mit zwei Decks, Wellenform, Beatgrid und
+Plattenkiste. Nativ in Rust. Was fehlt, sind Effekte, Stems, Mitschnitt und
+MIDI.
+
+![Die Oberfläche](docs/bilder/oberflaeche.png)
 
 ## Zielbild
 
@@ -50,8 +54,9 @@ Alternativenvergleich in [docs/APIS.md](docs/APIS.md).
 
 ## Roadmap
 
-**Sechs von zehn Phasen sind gebaut.** Was jetzt fehlt, ist vor allem die
-Oberfläche — bedienen lässt sich alles bisher nur über die Kommandozeile.
+**Sieben von zehn Phasen sind gebaut.** Die Software lässt sich bedienen:
+Tracks aus der Sammlung auf die Decks legen, Wellenform und Beatgrid sehen,
+mischen. Was fehlt, sind Effekte, Stems, Mitschnitt und MIDI.
 
 Der ausführliche Bauplan der DJ-Software mit Architektur, Abnahmekriterien und
 Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
@@ -60,14 +65,15 @@ Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
 | --- | --- |
 | 1 ⚙️ | Mehrdeck-Engine mit Mixer, Cue-Bus und AUX — Code steht, Abnahme braucht Hardware |
 | ~~2~~ ✅ | ~~Analyse-Pipeline (BPM, Grid, Peaks)~~ |
-| **3** | **UI mit Waveforms — das größte offene Stück** |
+| ~~3~~ ✅ | ~~UI mit Wellenformen, Beatgrid und Plattenkiste~~ |
 | ~~4~~ ✅ | ~~Sync und Beatmatching über Tempo und Phase~~ |
-| ~~5~~ ✅ | ~~Hot Cues und Loops~~ (Bedienung kommt mit Phase 3) |
+| ~~5~~ ✅ | ~~Hot Cues und Loops~~ |
 | ~~6~~ ✅ | ~~Library inkl. Traktor-Import~~ |
-| 7–10 | Effekte · Stems · Mitschnitt · MIDI-Controller |
+| **7–10** | **Effekte · Stems · Mitschnitt · MIDI-Controller** |
 
-Zum Auflegen fehlt vor allem Phase 3: Ohne Oberfläche mit Waveforms lässt sich
-das Vorhandene zwar testen, aber nicht spielen.
+Zum Auflegen fehlt jetzt nur noch Hardware: Phase 1 ist abgenommen, sobald der
+Cue-Bus hörbar getrennt auf den Ausgängen 3/4 liegt, und das braucht ein
+Interface mit vier Ausgängen.
 
 Darauf setzen die beiden Schichten aus dem Zielbild auf:
 
@@ -97,6 +103,8 @@ und der Werkzeugkasten sollte sie nicht vorwegnehmen.
 | `rustfft` | MIT/Apache-2.0 | STFT für die Onset-Erkennung |
 | `rtrb` | MIT/Apache-2.0 | Lock-freier Ringpuffer für AUX |
 | `blake3`, `serde`, `base64` | permissiv | Fingerabdruck und Sidecar |
+| `eframe`, `egui` | MIT/Apache-2.0 | Oberfläche |
+| `image` | MIT/Apache-2.0 | Screenshots schreiben |
 
 Zeitstreckung (WSOLA) und Tempoerkennung sind selbst implementiert — damit ist
 der gesamte Stack MIT-verträglich. Rubber Band wäre beim Stretching besser, ist
@@ -211,5 +219,26 @@ SQLite-Datei ab. `import-traktor` übernimmt Tempo, Beatgrid und Hot Cues aus
 einer bestehenden Traktor-Sammlung — ⚠️ gegen eine *echte* `collection.nml` ist
 das noch nicht geprüft, nur gegen selbst geschriebene Beispiele. Der erste Lauf
 gehört stichprobenartig nachgesehen.
+
+Auflegen — **hier** braucht es ein Audiogerät:
+
+```sh
+cargo run --release -p musik-app -- --db musik.db
+```
+
+| Aufruf | Wirkung |
+| --- | --- |
+| *(ohne Argumente)* | synthetische Demo-Tracks auf beiden Decks |
+| `--db musik.db` | die eigene Sammlung in der Plattenkiste |
+| `--a a.mp3 --b b.mp3` | zwei Dateien direkt auf die Decks |
+| `--screenshot bild.png` | ein Bild aufnehmen und beenden |
+
+Ohne Audiogerät startet die Oberfläche trotzdem: der Mixer läuft dann von einem
+Taktgeber im Leerlauf, die Decks bewegen sich, die Bedienung lässt sich
+beurteilen — nur hören kann man nichts. Findet die Soundkarte weniger als vier
+Ausgänge, sagt die Kopfzeile das und das Vorhören entfällt.
+
+`--release` ist keine Zierde: die Analyse eines frisch geladenen Tracks dauert
+im Debug-Build spürbar länger.
 
 Für API-Keys siehe [`.env.example`](.env.example).
