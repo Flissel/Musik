@@ -13,11 +13,13 @@
 
 pub mod aux;
 pub mod channel;
+pub mod command;
 pub mod crossfader;
 pub mod eq;
 pub mod filter;
 pub mod limiter;
 pub mod mixer;
+pub mod output;
 pub mod source;
 pub mod svf;
 pub mod sync;
@@ -27,10 +29,12 @@ pub(crate) mod testing;
 
 pub use aux::{aux_channel, AuxSource, AuxWriter};
 pub use channel::Channel;
+pub use command::{channel as engine_channel, Command, EngineHandle, EngineRunner};
 pub use crossfader::{Assign, Crossfader};
 pub use eq::ThreeBandEq;
 pub use filter::DjFilter;
 pub use limiter::Limiter;
 pub use mixer::{assign_deck_pair, Engine};
+pub use output::Output;
 pub use source::{DeckSource, LoopSource, SilentSource, Source};
 pub use sync::{phase_error, sync, sync_tempo_only, SyncPlan};
