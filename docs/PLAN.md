@@ -180,6 +180,10 @@ Ordner liegen. Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 | 9 | Mitschnitt | Master-Bus als WAV/FLAC, ohne Aussetzer | S | 1 |
 | 10 | MIDI-Controller | Generic-MIDI-Mapping, speicherbar | M | 3 |
 
+Für Phase 10 ist Mixxx' Mapping-Verzeichnis die beste verfügbare Dokumentation
+der Geräte-Landschaft — als Nachschlagewerk, nicht als Vorlage zum Kopieren.
+Warum das ein Unterschied ist, steht in [MIXXX.md](MIXXX.md).
+
 Phase 1 und 2 sind unabhängig und können parallel laufen — die Analyse braucht
 die Engine nicht.
 
@@ -208,7 +212,9 @@ Was fehlt, sind Effekte, Stems, Mitschnitt und MIDI.
 
 **Streaming von Platte statt Vollentschlüsselung** (spätestens Phase 8). Vier
 Decks à 100 MB gehen noch; vier Decks mit je vier Stems nicht mehr. Dann wird
-aus dem Laden ein Vorpuffer plus Nachladen im Hintergrund.
+aus dem Laden ein Vorpuffer plus Nachladen im Hintergrund. Mixxx hat genau das
+gelöst und beschreibt es im Wiki — lesen, bevor wir es selbst entwerfen, siehe
+[MIXXX.md](MIXXX.md#4-streaming-von-platte).
 
 **Kalibrierung der Tempo-Schwelle.** Die Grenze, ab der ein erkanntes Tempo als
 Aussage gilt statt als Rauschen, ist inzwischen ein z-Wert statt eines
@@ -240,7 +246,9 @@ Zwei Alternativen wurden verworfen:
 
 **Streaming von Platte statt Vollentschlüsselung** (spätestens Phase 8). Vier
 Decks à 100 MB gehen noch; vier Decks mit je vier Stems nicht mehr. Dann wird
-aus dem Laden ein Vorpuffer plus Nachladen im Hintergrund.
+aus dem Laden ein Vorpuffer plus Nachladen im Hintergrund. Mixxx hat genau das
+gelöst und beschreibt es im Wiki — lesen, bevor wir es selbst entwerfen, siehe
+[MIXXX.md](MIXXX.md#4-streaming-von-platte).
 
 ## Risiken
 

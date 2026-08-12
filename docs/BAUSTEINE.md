@@ -36,6 +36,7 @@ GPL-Abhängigkeit eine Tür, die sich hinter einem schließt. Siehe
 | CPAL (Rust) | MIT / Apache-2.0 | Frei |
 | Symphonia (Rust) | MPL-2.0 | Frei |
 | Demucs | MIT (Code) | Modellgewichte separat prüfen |
+| Mixxx | GPLv2+ (Binary faktisch GPLv3+) | Nutzbar — als Referenz lesen, nicht einbetten: [MIXXX.md](MIXXX.md) |
 
 Zwei Punkte bleiben trotzdem stehen:
 
