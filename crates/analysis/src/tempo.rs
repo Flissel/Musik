@@ -29,14 +29,17 @@ const PRIOR_WIDTH: f64 = 1.2;
 /// Ab welcher Güte die halbe Periode als die eigentliche gilt. Siehe [`fundamental`].
 const FUNDAMENTAL_RATIO: f32 = 0.8;
 
-/// Wie deutlich die Autokorrelationsspitze den Mittelwert übertreffen muss,
-/// damit das Ergebnis als Aussage durchgeht statt als Rauschen.
+/// Wie weit die Autokorrelationsspitze aus dem Feld der übrigen
+/// Verschiebungen herausragen muss, damit das Ergebnis als Aussage durchgeht
+/// statt als Rauschen. Gemessen in Standardabweichungen — siehe
+/// [`coarse_period`], warum nicht als Verhältnis zum Mittelwert.
 ///
-/// Gemessen: Klick-Tracks liegen bei 14–27, ein reiner Dauerton bei 1,65. Der
-/// Wert liegt bewusst näher am unteren Ende, deckt aber nur die beiden
-/// Extreme ab — gegen eine echte Sammlung ist er nie kalibriert worden. Siehe
-/// `schwellen_trennen_perkussiv_von_dauerton`.
-const MIN_SALIENCE: f32 = 3.0;
+/// Gemessen: Klick-Tracks 4,2–6,0; ein dichter Loop aus Kick, Bass und Hi-Hats
+/// 3,5; ein reiner Dauerton 1,7. Der Wert liegt bewusst näher am unteren Ende
+/// — lieber ein zweifelhaftes Grid, das der Nutzer sieht und korrigieren kann,
+/// als gar keins. Gegen eine echte Sammlung ist er nie kalibriert worden.
+/// Siehe `schwellen_trennen_perkussiv_von_dauerton`.
+const MIN_SALIENCE: f32 = 2.5;
 
 /// Glättung der Hüllkurve für die Grobstufe, in Frames. Macht die
 /// Autokorrelation an ganzzahligen Verschiebungen tolerant gegen den halben
@@ -81,16 +84,29 @@ pub fn detect(env: &OnsetEnvelope) -> Option<Beatgrid> {
     Some(Beatgrid {
         bpm: (env.rate * 60.0 / period) as f32,
         anchor_frames: env.to_sample_frames(phase).round().max(0.0) as u64,
-        confidence: ((salience - MIN_SALIENCE) / 8.0).clamp(0.0, 1.0),
+        confidence: ((salience - MIN_SALIENCE) / 4.0).clamp(0.0, 1.0),
     })
 }
 
 /// Beste Verschiebung nach Autokorrelation, gewichtet mit dem Oktav-Prior.
 ///
-/// Zweiter Rückgabewert ist die Deutlichkeit: Spitze geteilt durch Mittelwert
-/// über den Suchbereich. Bei einem Dauerton liegt die nahe 1, bei perkussivem
-/// Material deutlich darüber — das ist das Kriterium, ob überhaupt ein Tempo
-/// vorliegt.
+/// Zweiter Rückgabewert ist die Deutlichkeit: wie viele Standardabweichungen
+/// die Spitze über dem Mittel aller Verschiebungen liegt.
+///
+/// Naheliegender wäre Spitze durch Mittelwert gewesen, und genau so stand es
+/// hier auch — bis dichtes Material es widerlegt hat. Ein Klick-Track ist
+/// zwischen den Klicks still, also korreliert er bei fast jeder Verschiebung
+/// mit nahezu null und das Verhältnis wird riesig (14–27). Echte Musik hat
+/// dagegen durchgehend Energie: die Korrelation hat überall einen hohen
+/// Sockel, und das Verhältnis rutscht gegen 1, auch wenn der Beat schnurgerade
+/// durchläuft. Ein dichter Loop aus Kick, Bass und Hi-Hats kam so auf 2,06 —
+/// und wäre an einer Schwelle von 3,0 hängengeblieben, obwohl das Tempo längst
+/// richtig erkannt war.
+///
+/// Der z-Wert misst stattdessen, ob **eine** Verschiebung aus dem Feld
+/// heraussticht. Ein konstanter Sockel verschiebt Spitze und Mittel gleich
+/// weit und kürzt sich heraus. Auf demselben Material trennt er doppelt so
+/// deutlich: 3,46 gegen 1,71 statt 2,06 gegen 1,65.
 fn coarse_period(v: &[f32], rate: f64, p_short: f64, p_long: f64) -> Option<(f64, f32)> {
     let lo = p_short.floor().max(2.0) as usize;
     let hi = p_long.ceil() as usize;
@@ -101,13 +117,11 @@ fn coarse_period(v: &[f32], rate: f64, p_short: f64, p_long: f64) -> Option<(f64
     let mut best = 0.0f64;
     let mut best_weighted = f32::NEG_INFINITY;
     let mut peak = 0.0f32;
-    let mut sum = 0.0f64;
-    let mut n = 0usize;
+    let mut korrelationen = Vec::with_capacity(hi - lo + 1);
 
     for lag in lo..=hi {
         let r = autocorrelation(v, lag as f64);
-        sum += r as f64;
-        n += 1;
+        korrelationen.push(r);
         peak = peak.max(r);
 
         let weighted = r * octave_prior(rate * 60.0 / lag as f64) as f32;
@@ -117,14 +131,40 @@ fn coarse_period(v: &[f32], rate: f64, p_short: f64, p_long: f64) -> Option<(f64
         }
     }
 
-    if best == 0.0 || n == 0 {
+    if best == 0.0 || korrelationen.is_empty() {
         return None;
     }
 
-    let mean = (sum / n as f64) as f32;
-    let salience = if mean > 0.0 { peak / mean } else { 0.0 };
-
+    let salience = z_wert(peak, &korrelationen);
     Some((best, salience))
+}
+
+/// Abstand eines Wertes vom Mittel, in Standardabweichungen.
+///
+/// Null, wenn alle Werte gleich sind — dann sticht nichts heraus, und genau
+/// das soll die Zahl aussagen.
+fn z_wert(wert: f32, werte: &[f32]) -> f32 {
+    if werte.is_empty() {
+        return 0.0;
+    }
+
+    let n = werte.len() as f64;
+    let mittel = werte.iter().map(|r| *r as f64).sum::<f64>() / n;
+    let varianz = werte
+        .iter()
+        .map(|r| {
+            let d = *r as f64 - mittel;
+            d * d
+        })
+        .sum::<f64>()
+        / n;
+    let sd = varianz.sqrt();
+
+    if sd > 0.0 {
+        ((wert as f64 - mittel) / sd) as f32
+    } else {
+        0.0
+    }
 }
 
 /// Steigt von einer Verschiebung zu ihrer Grundperiode ab.
@@ -363,15 +403,30 @@ mod tests {
         samples
     }
 
+    /// Klicks auf einem durchgehenden Klangteppich.
+    ///
+    /// Das ist der Fall, an dem die alte Deutlichkeit gescheitert ist: der Beat
+    /// ist so gerade wie beim Klick-Track, aber der Ton dazwischen hebt den
+    /// Sockel der Autokorrelation an. Echte Musik sieht so aus, ein nackter
+    /// Klick-Track nicht.
+    fn klicks_auf_teppich(bpm: f64, secs: f64) -> Vec<f32> {
+        let mut samples = click_track(bpm, RATE, secs, 0.0);
+        let ton = dauerton(secs);
+        for (s, t) in samples.iter_mut().zip(ton.iter()) {
+            *s += *t;
+        }
+        samples
+    }
+
     /// Sichert den Abstand ab, auf dem [`MIN_SALIENCE`] beruht. Rutschen die
-    /// beiden Enden zusammen, ist die Schwelle nicht mehr begründet.
+    /// Enden zusammen, ist die Schwelle nicht mehr begründet.
     #[test]
     fn schwellen_trennen_perkussiv_von_dauerton() {
         for bpm in [100.0, 128.0, 174.0] {
             let sal = deutlichkeit(&click_track(bpm, RATE, 25.0, 0.0))
                 .unwrap_or_else(|| panic!("keine Periode bei {bpm} BPM"));
             assert!(
-                sal > 10.0,
+                sal > 4.0,
                 "Klick-Track bei {bpm} BPM nur bei Deutlichkeit {sal:.2}"
             );
         }
@@ -381,6 +436,32 @@ mod tests {
             sal < MIN_SALIENCE,
             "Dauerton erreicht Deutlichkeit {sal:.2} und käme durch"
         );
+    }
+
+    /// Der eigentliche Grund für den z-Wert: dichtes Material muss durchkommen.
+    ///
+    /// Mit Spitze-durch-Mittelwert lag genau dieser Fall bei rund 2 und wurde
+    /// abgewiesen, obwohl das Tempo richtig erkannt war.
+    #[test]
+    fn ein_durchgehender_klangteppich_verdeckt_den_beat_nicht() {
+        for bpm in [100.0, 128.0] {
+            let samples = klicks_auf_teppich(bpm, 25.0);
+
+            let sal =
+                deutlichkeit(&samples).unwrap_or_else(|| panic!("keine Periode bei {bpm} BPM"));
+            assert!(
+                sal > MIN_SALIENCE,
+                "Beat unter Dauerton nur bei Deutlichkeit {sal:.2} — käme nicht durch"
+            );
+
+            let grid = detect(&onset_envelope(&samples, RATE))
+                .unwrap_or_else(|| panic!("kein Grid bei {bpm} BPM"));
+            assert!(
+                (grid.bpm as f64 - bpm).abs() < 1.0,
+                "{} statt {bpm} BPM",
+                grid.bpm
+            );
+        }
     }
 
     #[test]
