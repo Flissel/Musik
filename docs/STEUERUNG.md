@@ -234,6 +234,26 @@ festgehalten und begründet.
 
 ![Effekte, von außen gesetzt](bilder/effekte.png)
 
+## Mitschnitt
+
+```text
+do master.record ~/sets/2026-08-13.wav
+record läuft nach ~/sets/2026-08-13.wav
+get master.record_seconds     → value master.record_seconds 6.784000
+get master.record_dropped     → value master.record_dropped 0
+do master.record_stop         → record ~/sets/2026-08-13.wav · 6.8 s
+```
+
+Aufgenommen wird die Summe **hinter dem Begrenzer** — also das, was auf die
+Anlage geht, und nicht das, was vorher da war.
+
+`record_dropped` ist kein Beiwerk. Der Audio-Thread darf nicht auf die Platte
+schreiben; er legt in einen Ringpuffer, ein eigener Thread leert ihn. Kommt der
+nicht hinterher, gehen Frames verloren — blockieren wäre schlimmer. Verloren
+heißt hier aber nicht verschwiegen: Der Zähler ist abfragbar, und `record_stop`
+sagt es von sich aus dazu. Ein Mitschnitt mit Lücken, der aussieht wie einer
+ohne, wäre das schlechteste Ergebnis von allen.
+
 ## Auch die Oberfläche geht hier durch
 
 Nicht nur die Regler: Suchen und Laden nehmen inzwischen denselben Weg. Ein

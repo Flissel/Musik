@@ -133,6 +133,11 @@ fn main() -> Result<()> {
     let aux_kanal = engine.add_channel("AUX", Box::new(aux_source));
     engine.channel(aux_kanal).set_assign(assign_fuer(2));
 
+    // Der Mitschnitt greift hinter dem Begrenzer ab. Angelegt vor der
+    // Kommandoschlange, weil die Engine danach in den Audio-Thread wandert.
+    let (tap, aufnahme) = audio_engine::mitschnitt(RATE);
+    engine.set_mitschnitt(tap);
+
     let (handle, runner) = audio_engine::engine_channel(engine, 512);
 
     // Das Steuerpult bekommt alles, was bedienbar ist — und ist danach die
@@ -160,6 +165,7 @@ fn main() -> Result<()> {
     let (sammlung, ergebnisse) =
         sammlung::AppSammlung::neu(library.take(), deck_zustaende, args.cache.clone());
     pult.sammlung_setzen(Box::new(sammlung));
+    pult.aufnahme_setzen(aufnahme);
     // Die erste Liste kommt über denselben Weg wie jede spätere Suche.
     let treffer = pult.suche("");
 

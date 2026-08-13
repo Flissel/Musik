@@ -11,6 +11,7 @@
 //! Allokation, kein Lock, keine Speicherfreigabe. Puffer wachsen beim ersten
 //! Block auf die nötige Größe und bleiben danach stehen.
 
+pub mod aufnahme;
 pub mod aux;
 pub mod channel;
 pub mod command;
@@ -28,6 +29,7 @@ pub mod sync;
 #[cfg(test)]
 pub(crate) mod testing;
 
+pub use aufnahme::{mitschnitt, Aufnahme, Mitschnitt};
 pub use aux::{aux_channel, AuxSource, AuxWriter};
 pub use channel::Channel;
 pub use command::{channel as engine_channel, Command, EngineHandle, EngineRunner};

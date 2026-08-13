@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use audio_core::deck::DeckState;
-use audio_engine::{Assign, Command, Effekt, EngineHandle};
+use audio_engine::{Assign, Aufnahme, Command, Effekt, EngineHandle};
 
 use crate::katalog::{self, Beschreibung};
 use crate::schluessel::{Gruppe, Schluessel};
@@ -190,6 +190,7 @@ pub struct Steuerpult {
     master: MasterSpiegel,
     handle: EngineHandle,
     sammlung: Option<Box<dyn Sammlung>>,
+    aufnahme: Option<Aufnahme>,
 }
 
 impl Steuerpult {
@@ -200,7 +201,14 @@ impl Steuerpult {
             master: MasterSpiegel::default(),
             handle,
             sammlung: None,
+            aufnahme: None,
         }
+    }
+
+    /// Hängt den Mitschnitt an. Ohne das antwortet `record` mit einem Fehler,
+    /// statt stillschweigend nichts aufzunehmen.
+    pub fn aufnahme_setzen(&mut self, aufnahme: Aufnahme) {
+        self.aufnahme = Some(aufnahme);
     }
 
     /// Hängt Suche und Laden an. Ohne das antworten beide mit einem Fehler,
@@ -388,6 +396,27 @@ impl Steuerpult {
 
     fn lies_master(&self, element: &str) -> Option<Wert> {
         let m = &self.master;
+
+        // Der Mitschnitt hat seinen eigenen Zustand, nicht den des Mixers.
+        match element {
+            "recording" => {
+                return Some(Wert::Schalter(
+                    self.aufnahme.as_ref().is_some_and(|a| a.laeuft()),
+                ))
+            }
+            "record_seconds" => {
+                return Some(Wert::Zahl(
+                    self.aufnahme.as_ref().map(|a| a.sekunden()).unwrap_or(0.0),
+                ))
+            }
+            "record_dropped" => {
+                return Some(Wert::Zahl(
+                    self.aufnahme.as_ref().map(|a| a.verworfen()).unwrap_or(0) as f64,
+                ))
+            }
+            _ => {}
+        }
+
         let wert = match element {
             "crossfader" => Wert::Zahl(m.crossfader),
             "crossfader_curve" => Wert::Zahl(m.crossfader_curve),
@@ -439,6 +468,11 @@ impl Steuerpult {
                 let beats: f64 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
                 self.fx_sync(i, beats)
             }
+            (Gruppe::Master, "record") => {
+                let pfad = argument.ok_or_else(fehlt)?;
+                self.aufnehmen(pfad)
+            }
+            (Gruppe::Master, "record_stop") => self.aufnahme_stoppen(),
             (Gruppe::Master, "search") => {
                 let treffer = self.suche(argument.unwrap_or(""));
                 Ok(treffer_zeilen(&treffer))
@@ -592,6 +626,38 @@ impl Steuerpult {
         let ziel = (jetzt + beats * je_beat).clamp(0.0, d.frames as f64);
         d.state.seek_frames(ziel as u64);
         Ok(Vec::new())
+    }
+
+    fn aufnehmen(&mut self, pfad: &str) -> Result<Vec<String>, Fehler> {
+        let Some(aufnahme) = self.aufnahme.as_mut() else {
+            return Err(Fehler::Gescheitert("kein Mitschnitt angeschlossen".into()));
+        };
+
+        aufnahme
+            .starten(std::path::Path::new(pfad))
+            .map_err(Fehler::Gescheitert)?;
+        Ok(vec![format!("record läuft nach {pfad}")])
+    }
+
+    fn aufnahme_stoppen(&mut self) -> Result<Vec<String>, Fehler> {
+        let Some(aufnahme) = self.aufnahme.as_mut() else {
+            return Err(Fehler::Gescheitert("kein Mitschnitt angeschlossen".into()));
+        };
+
+        let sekunden = aufnahme.sekunden();
+        let verworfen = aufnahme.verworfen();
+        let Some(pfad) = aufnahme.stoppen() else {
+            return Err(Fehler::Gescheitert("es läuft kein Mitschnitt".into()));
+        };
+
+        let mut zeilen = vec![format!("record {} · {sekunden:.1} s", pfad.display())];
+        // Lücken müssen dastehen, nicht erst beim Anhören auffallen.
+        if verworfen > 0 {
+            zeilen.push(format!(
+                "warnung {verworfen} Frames fehlen — der Mitschnitt hat Lücken"
+            ));
+        }
+        Ok(zeilen)
     }
 
     /// Freitextsuche. Auch die Oberfläche geht hier durch — zwei Suchwege
@@ -1098,6 +1164,7 @@ mod tests {
                 "search" => Some("test"),
                 "search_mixable" => Some("128"),
                 "fx_sync" => Some("1"),
+                "record" => Some("/tmp/musik-katalogtest.wav"),
                 _ => None,
             };
 
@@ -1337,5 +1404,79 @@ mod fx_tests {
         let (mut pult, _runner) = pult_mit_zwei_decks();
         let fehler = pult.ausloesen(&k("channel1.fx_sync"), Some("0"));
         assert!(matches!(fehler, Err(Fehler::Argument { .. })), "{fehler:?}");
+    }
+}
+
+#[cfg(test)]
+mod aufnahme_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!("musik-pult-{}-{name}.wav", std::process::id()));
+        p
+    }
+
+    #[test]
+    fn ein_mitschnitt_laesst_sich_von_aussen_starten_und_beenden() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let pfad = scratch("lauf");
+
+        assert_eq!(
+            pult.lies(&k("master.recording")).unwrap(),
+            Wert::Schalter(false)
+        );
+
+        let zeilen = pult
+            .ausloesen(&k("master.record"), Some(&pfad.to_string_lossy()))
+            .expect("Start");
+        assert!(zeilen[0].starts_with("record läuft nach"), "{zeilen:?}");
+        assert_eq!(
+            pult.lies(&k("master.recording")).unwrap(),
+            Wert::Schalter(true)
+        );
+
+        let zeilen = pult.ausloesen(&k("master.record_stop"), None).unwrap();
+        assert!(zeilen[0].starts_with("record "), "{zeilen:?}");
+        assert_eq!(
+            pult.lies(&k("master.recording")).unwrap(),
+            Wert::Schalter(false)
+        );
+
+        let _ = std::fs::remove_file(&pfad);
+    }
+
+    #[test]
+    fn stoppen_ohne_mitschnitt_sagt_das() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let fehler = pult.ausloesen(&k("master.record_stop"), None);
+        assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
+    }
+
+    #[test]
+    fn ohne_pfad_wird_nicht_aufgenommen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let fehler = pult.ausloesen(&k("master.record"), None);
+        assert!(matches!(fehler, Err(Fehler::Argument { .. })), "{fehler:?}");
+    }
+
+    #[test]
+    fn verlorene_frames_sind_von_aussen_sichtbar() {
+        // Der Zähler muss abfragbar sein, sonst merkt man Lücken erst beim
+        // Anhören des fertigen Mitschnitts.
+        let (pult, _runner) = pult_mit_zwei_decks();
+        assert_eq!(
+            pult.lies(&k("master.record_dropped")).unwrap(),
+            Wert::Zahl(0.0)
+        );
+        assert_eq!(
+            pult.lies(&k("master.record_seconds")).unwrap(),
+            Wert::Zahl(0.0)
+        );
     }
 }

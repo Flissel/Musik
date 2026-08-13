@@ -6,6 +6,7 @@
 //! Kopfhörer nach ein paar Minuten hörbar gegen den Master verschiebt. Siehe
 //! `docs/PLAN.md`.
 
+use crate::aufnahme::Mitschnitt;
 use crate::channel::Channel;
 use crate::crossfader::{Assign, Crossfader};
 use crate::limiter::Limiter;
@@ -23,6 +24,7 @@ pub struct Engine {
     cue: Vec<f32>,
     /// Zwischenspeicher für das Signal hinter dem Fader.
     post: Vec<f32>,
+    mitschnitt: Option<Mitschnitt>,
 }
 
 impl Engine {
@@ -38,11 +40,17 @@ impl Engine {
             master: Vec::new(),
             cue: Vec::new(),
             post: Vec::new(),
+            mitschnitt: None,
         }
     }
 
     pub fn sample_rate(&self) -> f32 {
         self.sample_rate
+    }
+
+    /// Hängt den Mitschnitt an die Summe.
+    pub fn set_mitschnitt(&mut self, mitschnitt: Mitschnitt) {
+        self.mitschnitt = Some(mitschnitt);
     }
 
     /// Legt einen Kanal an und gibt seinen Index zurück.
@@ -151,6 +159,13 @@ impl Engine {
             }
         }
         self.limiter.process(&mut self.master[..len]);
+
+        // Der Mitschnitt greift **hinter** dem Begrenzer ab — aufgenommen wird
+        // das, was auf die Anlage geht, nicht das, was vorher da war. Hier
+        // wird nur in einen Ringpuffer geschoben; geschrieben wird woanders.
+        if let Some(m) = self.mitschnitt.as_mut() {
+            m.nimm_auf(&self.master[..len]);
+        }
 
         // Kopfhörer: Mischung aus Cue-Bus und Master.
         for i in 0..len {

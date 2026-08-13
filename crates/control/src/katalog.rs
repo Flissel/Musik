@@ -372,6 +372,35 @@ pub static KANAL: &[Beschreibung] = &[
 
 pub static MASTER: &[Beschreibung] = &[
     aktion(
+        "record",
+        "<pfad>",
+        "Mitschnitt der Summe starten; nimmt auf, was auf die Anlage geht",
+    ),
+    aktion(
+        "record_stop",
+        "",
+        "Mitschnitt beenden und die Datei abschließen",
+    ),
+    schalter("recording", "", false, "Läuft gerade ein Mitschnitt"),
+    zahl(
+        "record_seconds",
+        "",
+        0.0,
+        f64::MAX,
+        Einheit::Sekunden,
+        false,
+        "Bisherige Länge des Mitschnitts",
+    ),
+    zahl(
+        "record_dropped",
+        "",
+        0.0,
+        f64::MAX,
+        Einheit::Keine,
+        false,
+        "Frames, die der Schreiber nicht mehr annehmen konnte — alles über 0 heißt Lücken",
+    ),
+    aktion(
         "search",
         "<text>",
         "Die Sammlung durchsuchen; antwortet mit einer Zeile je Treffer",

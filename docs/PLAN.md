@@ -178,7 +178,7 @@ Ordner liegen. Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 | ~~6~~ | ~~Library~~ ✅ | Import, Suche, Playlists, Traktor-`collection.nml` | L | 2 |
 | ~~7~~ | ~~Effekte~~ ✅ | Vier Effekte post-fader, tempo-synchron · Offen: Reverb, und ob vier reichen | M | 1 |
 | 8 | Stems | Beim Import vorberechnet, Stem-Deck-Modus | L | 6 |
-| 9 | Mitschnitt | Master-Bus als WAV/FLAC, ohne Aussetzer | S | 1 |
+| ~~9~~ | ~~Mitschnitt~~ ✅ | Summe als WAV, hinter dem Begrenzer, verlorene Frames werden gezählt · Offen: FLAC | S | 1 |
 | 10 | MIDI-Controller | Generic-MIDI-Mapping, speicherbar | M | 3 |
 
 Für Phase 10 ist Mixxx' Mapping-Verzeichnis die beste verfügbare Dokumentation
@@ -208,14 +208,14 @@ Anordnung nur auf dem Papier richtig.
 
 ## Was inzwischen steht
 
-Acht von zehn Phasen sind gebaut. Die Software lässt sich bedienen: Tracks
+Neun von zehn Phasen sind gebaut. Die Software lässt sich bedienen: Tracks
 aus der Sammlung auf die Decks legen, Wellenform und Beatgrid sehen, mischen.
-Was fehlt, sind Stems, Mitschnitt und MIDI.
+Was fehlt, sind Stems und MIDI.
 
 | Crate | Inhalt |
 | --- | --- |
 | `audio-core` | Deck: Dekodierung, WSOLA, Beatgrid, Hot Cues, Loops |
-| `audio-engine` | Mixer: Kanalzüge, EQ, Filter, Effekte, Crossfader, Cue-Bus, Begrenzer, AUX, Sync, Kommandoschlange, Geräteausgabe |
+| `audio-engine` | Mixer: Kanalzüge, EQ, Filter, Effekte, Crossfader, Cue-Bus, Begrenzer, AUX, Sync, Mitschnitt, Kommandoschlange, Geräteausgabe |
 | `analysis` | Tempo, Beatgrid, Wellenform-Spitzen, Sidecar-Cache |
 | `library` | SQLite-Sammlung, Suche, Playlists, Traktor-Import |
 | `musik-cli` | Deck fahren, analysieren, Mix rendern, Sammlung verwalten |

@@ -27,6 +27,11 @@ pub fn pult_mit_zwei_decks() -> (Steuerpult, EngineRunner) {
     let aux = engine.add_channel("AUX", Box::new(SilentSource));
     engine.channel(aux).set_assign(Assign::Thru);
 
+    // Der Mitschnitt hängt an der Engine, genau wie im Ernstfall — sonst
+    // liefe der Test gegen ein Loch, wo in der Anwendung ein Ringpuffer ist.
+    let (tap, aufnahme) = audio_engine::mitschnitt(RATE);
+    engine.set_mitschnitt(tap);
+
     let (handle, runner) = audio_engine::engine_channel(engine, 256);
     let mut pult = Steuerpult::neu(handle);
 
@@ -51,6 +56,8 @@ pub fn pult_mit_zwei_decks() -> (Steuerpult, EngineRunner) {
 
     let _ = DeckSource::new as fn(_) -> _;
     pult.sammlung_setzen(Box::new(TestSammlung));
+
+    pult.aufnahme_setzen(aufnahme);
     (pult, runner)
 }
 

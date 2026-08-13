@@ -4,13 +4,13 @@ Traktor-artiges DJ-/Musik-Tool, das generative Musik als gleichberechtigte
 Quelle behandelt — mit dem Fernziel eines Agenten-Teams, das Musik aus den
 Reaktionen der Crowd formt.
 
-Status: **acht von zehn Phasen gebaut.** Decks mit Keylock, Hot Cues und
+Status: **neun von zehn Phasen gebaut.** Decks mit Keylock, Hot Cues und
 Loops; Mixer mit EQ, Filter, Crossfader, Cue-Bus und AUX; Analyse für Tempo,
 Beatgrid und Wellenform; Sync über Tempo *und* Phase; Sammlung mit
 Traktor-Import; Oberfläche mit zwei Decks, Wellenform, Beatgrid und
 Plattenkiste; vier Effekte hinter dem Fader; **Fernsteuerung über einen
-selbstbeschreibenden Steuerraum**. Nativ in Rust. Was fehlt, sind Stems,
-Mitschnitt und MIDI.
+selbstbeschreibenden Steuerraum**; Mitschnitt der Summe. Nativ in Rust. Was
+fehlt, sind Stems und MIDI.
 
 ![Die Oberfläche](docs/bilder/oberflaeche.png)
 
@@ -57,9 +57,9 @@ Alternativenvergleich in [docs/APIS.md](docs/APIS.md).
 
 ## Roadmap
 
-**Acht von zehn Phasen sind gebaut.** Die Software lässt sich bedienen:
+**Neun von zehn Phasen sind gebaut.** Die Software lässt sich bedienen:
 Tracks aus der Sammlung auf die Decks legen, Wellenform und Beatgrid sehen,
-mischen, mit Effekten. Was fehlt, sind Stems, Mitschnitt und MIDI.
+mischen, mit Effekten, und das Ganze mitschneiden. Was fehlt, sind Stems und MIDI.
 
 Der ausführliche Bauplan der DJ-Software mit Architektur, Abnahmekriterien und
 Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
@@ -74,7 +74,8 @@ Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
 | ~~6~~ ✅ | ~~Library inkl. Traktor-Import~~ |
 | ~~S~~ ✅ | ~~Steuerraum und Fernsteuerung~~ — [docs/STEUERUNG.md](docs/STEUERUNG.md) |
 | ~~7~~ ✅ | ~~Effekte: Delay, Gater, Flanger, Crusher — post-fader, tempo-synchron~~ |
-| **8–10** | **Stems · Mitschnitt · MIDI-Controller** |
+| ~~9~~ ✅ | ~~Mitschnitt der Summe als WAV~~ |
+| **8, 10** | **Stems · MIDI-Controller** |
 
 Zum Auflegen fehlt jetzt nur noch Hardware: Phase 1 ist abgenommen, sobald der
 Cue-Bus hörbar getrennt auf den Ausgängen 3/4 liegt, und das braucht ein
