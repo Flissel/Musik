@@ -254,6 +254,39 @@ heißt hier aber nicht verschwiegen: Der Zähler ist abfragbar, und `record_stop
 sagt es von sich aus dazu. Ein Mitschnitt mit Lücken, der aussieht wie einer
 ohne, wäre das schlechteste Ergebnis von allen.
 
+## Antworten lesen
+
+Wer einen eigenen Bediener schreibt, braucht eine Abbruchregel. Eine Antwort
+endet mit einer Zeile, die mit `ok`, `err` oder `value` beginnt:
+
+| Befehl | Antwort |
+| --- | --- |
+| `get` | genau eine `value`-Zeile |
+| `list` | eine `control`-Zeile je Treffer, dann `ok N Controls` |
+| `set`, `setn` | eine `ok`- oder `err`-Zeile |
+| `do` | keine bis mehrere Infozeilen, dann `ok` oder `err` |
+| `sub` | `ok`, danach `value`-Zeilen, wann immer sich etwas ändert |
+
+Ein Abo ist der einzige Fall, in dem ungefragt etwas hereinkommt. Wer
+abonniert, sollte deshalb getrennt lesen und schreiben.
+
+## Anschluss für Agenten: MCP
+
+Für Agenten liegt eine Brücke bei — [`mcp/`](../mcp/README.md), ein
+MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Sechs Werkzeuge statt
+zweihundert: `musik_set` und `musik_do` erreichen alles, `musik_status` und
+`musik_search` sparen die häufigsten Wege.
+
+Der Gewinn aus dem selbstbeschreibenden Katalog wird dort eingelöst: Die
+Beschreibungen von `musik_set` und `musik_do` **erzeugt der Server beim Start
+aus dem laufenden Programm**. Was ein Agent liest, ist dasselbe, was im Katalog
+steht und in der Oberfläche als Tooltip erscheint.
+
+Beim Bauen fiel dabei auf, dass `list` das Argument einer Aktion nicht
+mitgab — es stand im Katalog, verließ aber den Prozess nie. Jetzt steht es in
+der Bereichsspalte, und `deck1.load` sagt von sich aus, dass es einen Pfad
+will.
+
 ## Auch die Oberfläche geht hier durch
 
 Nicht nur die Regler: Suchen und Laden nehmen inzwischen denselben Weg. Ein

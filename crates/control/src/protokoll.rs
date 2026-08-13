@@ -133,12 +133,14 @@ fn list(pult: &Steuerpult, praefix: Option<&str>) -> String {
             }
         }
 
-        // Bereich und Auswahl in eine Spalte: Beide sagen dasselbe — welche
-        // Werte erlaubt sind.
-        let raum = match (b.bereich, b.auswahl) {
-            (_, auswahl) if !auswahl.is_empty() => auswahl.join("|"),
-            (Some((min, max)), _) if max == f64::MAX => format!("{min}.."),
-            (Some((min, max)), _) => format!("{min}..{max}"),
+        // Eine Spalte für „welche Werte sind erlaubt". Bei einer Aktion ist
+        // das ihr Argument — ohne das wüsste ein Aufrufer nicht, dass `load`
+        // einen Pfad will und `jump_cue` eine Zahl von 1 bis 8.
+        let raum = match (b.art, b.bereich, b.auswahl) {
+            (Art::Aktion, _, _) if !b.argument.is_empty() => b.argument.to_string(),
+            (_, _, auswahl) if !auswahl.is_empty() => auswahl.join("|"),
+            (_, Some((min, max)), _) if max == f64::MAX => format!("{min}.."),
+            (_, Some((min, max)), _) => format!("{min}..{max}"),
             _ => "-".to_string(),
         };
 
@@ -587,5 +589,34 @@ mod abo_tests {
             behandle(&mut pult, &mut s, "get deck1.load_status"),
             "value deck1.load_status laedt"
         );
+    }
+}
+
+#[cfg(test)]
+mod katalog_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+
+    /// Eine Aktion muss sagen, was sie erwartet.
+    ///
+    /// Ohne das steht in der Liste zwar, dass es `deck1.load` gibt, aber nicht,
+    /// dass sie einen Pfad will — und wer nur die Liste hat, rät.
+    #[test]
+    fn aktionen_nennen_ihr_argument() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+
+        let antwort = behandle(&mut pult, &mut s, "list deck1.load");
+        assert!(
+            antwort.contains("aktion <pfad>"),
+            "das Argument fehlt: {antwort}"
+        );
+
+        let cue = behandle(&mut pult, &mut s, "list deck1.jump_cue");
+        assert!(cue.contains("<1..8>"), "{cue}");
+
+        // Eine Aktion ohne Argument steht als solche da.
+        let stop = behandle(&mut pult, &mut s, "list master.record_stop");
+        assert!(stop.contains("aktion -"), "{stop}");
     }
 }

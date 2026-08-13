@@ -37,6 +37,7 @@ es nichts, was Agenten steuern könnten.
 | [docs/TRAKTOR-REFERENZ.md](docs/TRAKTOR-REFERENZ.md) | Was Traktor Pro 4 kann, was wir davon übernehmen |
 | [docs/MIXXX.md](docs/MIXXX.md) | Mixxx als Referenz — was übernehmbar ist, warum es nicht eingebettet werden kann |
 | **[docs/STEUERUNG.md](docs/STEUERUNG.md)** | **Fernsteuerung: Socket, Protokoll, selbstbeschreibender Steuerraum** |
+| [mcp/README.md](mcp/README.md) | MCP-Brücke für Agenten — Werkzeuge aus dem Katalog erzeugt |
 | [docs/BAUSTEINE.md](docs/BAUSTEINE.md) | Fertige Bibliotheken für Audio, Analyse, Stems — inkl. Lizenzfallen |
 | [docs/APIS.md](docs/APIS.md) | Generierungs-APIs und Sample-Quellen, Zugangsstatus |
 | [docs/AGENTEN.md](docs/AGENTEN.md) | Multi-Agenten-Team und Crowd-Feedback-Schleife |
@@ -260,7 +261,9 @@ setn channel2.eq_low 0        # normiert, für MIDI
 `list` liefert zu jedem Control Typ, Bereich, Einheit, Schreibbarkeit und
 Bedeutung — der Steuerraum beschreibt sich selbst, ein Handbuch ist dafür nicht
 nötig. Das ist die Grundlage für die Agenten-Schicht und für den Anschluss an
-VibeMind. Details in [docs/STEUERUNG.md](docs/STEUERUNG.md).
+VibeMind — für die liegt in [`mcp/`](mcp/README.md) eine MCP-Brücke bereit,
+deren Werkzeugbeschreibungen aus demselben Katalog erzeugt werden. Details in
+[docs/STEUERUNG.md](docs/STEUERUNG.md).
 
 ![Von außen gesteuert](docs/bilder/fernsteuerung.png)
 
