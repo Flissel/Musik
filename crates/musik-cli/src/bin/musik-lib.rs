@@ -77,6 +77,15 @@ fn main() -> Result<()> {
             println!("\nMischbar mit {bpm:.1} BPM (±6 %):");
             zeige(&treffer);
         }
+        "harmonic" => {
+            let roh = rest.first().context("harmonic braucht eine Tonart")?;
+            let tonart = audio_core::Tonart::parse(roh).with_context(|| {
+                format!("'{roh}' ist keine Tonart — gemeint war Am, F# oder 8A")
+            })?;
+            let treffer = lib.search(&Query::harmonic_with(tonart))?;
+            println!("\nHarmonisch zu {} ({}):", tonart.name(), tonart.camelot());
+            zeige(&treffer);
+        }
         "missing-attribution" => {
             let luecken = lib.tracks_missing_attribution()?;
             if luecken.is_empty() {
@@ -144,6 +153,9 @@ fn einlesen(lib: &Library, pfad: &Path, store: &Store) -> Result<bool> {
             analyse.sample_rate,
         );
     }
+    // `None` überschreibt beim Upsert nichts — eine aus Traktor importierte
+    // Tonart bleibt also stehen, wenn die eigene Analyse keine findet.
+    eintrag.musical_key = analyse.musical_key.clone();
 
     lib.upsert_track(&eintrag)?;
 
@@ -151,8 +163,12 @@ fn einlesen(lib: &Library, pfad: &Path, store: &Store) -> Result<bool> {
         Some(bpm) => format!("{bpm:6.2} BPM"),
         None => "  kein Tempo".to_string(),
     };
+    let key = match analyse.tonart() {
+        Some(k) => format!("{:>3} {:>3}", k.name(), k.camelot()),
+        None => "       ".to_string(),
+    };
     println!(
-        "  {tempo}  {}  {}",
+        "  {tempo}  {key}  {}  {}",
         if gerechnet { "neu " } else { "Cache" },
         pfad.display()
     );
@@ -197,8 +213,11 @@ fn zeige(tracks: &[TrackRecord]) {
             .bpm
             .map(|b| format!("{b:6.2}"))
             .unwrap_or_else(|| "     -".into());
+        // Was in der Sammlung steht, kann aus Traktor stammen und in einer
+        // Schreibweise dastehen, die wir nicht deuten — dann eben so.
+        let key = t.musical_key.as_deref().unwrap_or("-");
         println!(
-            "  {bpm}  {:<28}  {}",
+            "  {bpm}  {key:<4}  {:<28}  {}",
             t.artist.as_deref().unwrap_or("—"),
             t.title.as_deref().unwrap_or(&t.path)
         );
@@ -212,6 +231,7 @@ fn hilfe() {
     println!("  import-traktor <nml>     Traktor-Sammlung übernehmen (Tempo, Grid, Cues)");
     println!("  search <text>            Titel, Künstler und Album durchsuchen");
     println!("  mixable <bpm>            Tracks im Tempofenster ±6 %");
+    println!("  harmonic <tonart>        Tracks mit passender Tonart (Am, F# oder 8A)");
     println!("  missing-attribution      Samples ohne Lizenz oder Urheber auflisten");
     println!();
     println!("  --db <datei>             Sammlung (Vorgabe: musik.db)");

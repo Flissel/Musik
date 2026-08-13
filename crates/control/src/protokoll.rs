@@ -568,7 +568,7 @@ mod abo_tests {
 
         let suche = behandle(&mut pult, &mut s, "do master.search techno");
         assert!(
-            suche.contains("track 128.00 /musik/techno-0.wav"),
+            suche.contains("track 128.00 8A /musik/techno-0.wav"),
             "{suche}"
         );
 

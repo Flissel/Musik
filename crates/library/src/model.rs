@@ -1,6 +1,6 @@
 //! Datenmodell der Library.
 
-use audio_core::Beatgrid;
+use audio_core::{Beatgrid, Tonart};
 
 /// Woher ein Track stammt. Bestimmt mit, welche Rechtepflichten daran hängen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,6 +195,11 @@ pub struct Query {
     pub bpm_min: Option<f32>,
     pub bpm_max: Option<f32>,
     pub genre: Option<String>,
+    /// Zulässige Tonarten, in allen Schreibweisen, die gemeint sein können.
+    ///
+    /// Eine Liste statt eines einzelnen Werts, weil harmonisch nie genau eine
+    /// Tonart passt — siehe [`Query::harmonic_with`].
+    pub keys: Option<Vec<String>>,
     pub limit: Option<u32>,
 }
 
@@ -212,6 +217,26 @@ impl Query {
         Query {
             bpm_min: Some(bpm * (1.0 - toleranz)),
             bpm_max: Some(bpm * (1.0 + toleranz)),
+            ..Default::default()
+        }
+    }
+
+    /// Tracks, deren Tonart harmonisch zu `tonart` passt.
+    ///
+    /// Gesucht wird über beide Schreibweisen — `Am` und `8A` —, weil in der
+    /// Sammlung steht, was die Quelle geschrieben hat: Die eigene Analyse legt
+    /// Namen ab, Traktor schreibt mal das eine, mal das andere. Eine dritte
+    /// Schreibweise (`A min` etwa) wird nicht gefunden; das ist eine bewusste
+    /// Grenze und keine stille.
+    pub fn harmonic_with(tonart: Tonart) -> Self {
+        let keys = tonart
+            .verwandte()
+            .iter()
+            .flat_map(|t| [t.name(), t.camelot()])
+            .collect();
+
+        Query {
+            keys: Some(keys),
             ..Default::default()
         }
     }

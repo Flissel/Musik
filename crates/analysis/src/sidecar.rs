@@ -24,7 +24,12 @@ use crate::peaks::PeakLevel;
 
 /// Bei einer Änderung des Formats hochzählen — ältere Sidecars werden dann
 /// verworfen statt falsch gelesen.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// 2: Tonart dazugekommen. Ein Sidecar aus Version 1 hätte sie schlicht nicht,
+/// und `serde(default)` würde daraus ein „keine Tonart erkannt" machen — also
+/// eine Falschaussage statt einer fehlenden Angabe. Deshalb der Bump: Der
+/// Track wird einmal neu gerechnet und weiß danach Bescheid.
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Analysis {
@@ -43,7 +48,23 @@ pub struct Analysis {
     #[serde(default)]
     pub bpm_confidence: Option<f32>,
 
+    /// Tonart in üblicher Schreibweise (`Am`, `F#`). `None`, wenn das Material
+    /// keine klare hergibt — Perkussion etwa.
+    #[serde(default)]
+    pub musical_key: Option<String>,
+    #[serde(default)]
+    pub key_confidence: Option<f32>,
+
     pub peaks: Vec<PeakLevelData>,
+}
+
+impl Analysis {
+    /// Die erkannte Tonart als Wert, sofern eine dasteht.
+    pub fn tonart(&self) -> Option<audio_core::Tonart> {
+        self.musical_key
+            .as_deref()
+            .and_then(audio_core::Tonart::parse)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +229,8 @@ mod tests {
             bpm: Some(128.0),
             beat_anchor_frames: Some(42),
             bpm_confidence: Some(0.9),
+            musical_key: Some("Am".into()),
+            key_confidence: Some(0.2),
             peaks: vec![],
         };
 
@@ -216,6 +239,7 @@ mod tests {
 
         assert_eq!(geladen.bpm, Some(128.0));
         assert_eq!(geladen.beat_anchor_frames, Some(42));
+        assert_eq!(geladen.tonart(), audio_core::Tonart::parse("Am"));
         assert!(store.load("gibtesnicht").is_none());
 
         std::fs::remove_dir_all(&dir).ok();
@@ -236,12 +260,46 @@ mod tests {
             bpm: None,
             beat_anchor_frames: None,
             bpm_confidence: None,
+            musical_key: None,
+            key_confidence: None,
             peaks: vec![],
         };
         analysis.version = FORMAT_VERSION + 1;
         store.save(&analysis).expect("speichern");
 
         assert!(store.load("veraltet").is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Ein Sidecar aus einer älteren Fassung darf nicht als vollständig
+    /// durchgehen.
+    ///
+    /// Ohne die Versionsprüfung würde `serde(default)` das fehlende Feld zu
+    /// `None` machen, und `None` heißt hier „geprüft, keine Tonart gefunden" —
+    /// eine Falschaussage. Verworfen wird es, und dann rechnet die Analyse neu.
+    #[test]
+    fn ein_sidecar_ohne_tonart_wird_neu_gerechnet_statt_ergaenzt() {
+        let dir = std::env::temp_dir().join("musik-analysis-test-alt");
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::new(&dir);
+
+        // So sah ein Sidecar der Version 1 aus — ohne die beiden neuen Felder.
+        let alt = r#"{
+            "version": 1,
+            "fingerprint": "alt",
+            "sample_rate": 44100,
+            "frames": 1000,
+            "duration_secs": 0.02,
+            "bpm": 128.0,
+            "beat_anchor_frames": 0,
+            "bpm_confidence": 0.9,
+            "peaks": []
+        }"#;
+        std::fs::write(store.path_for("alt"), alt).unwrap();
+
+        assert!(store.load("alt").is_none());
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use analysis::peaks::PeakLevel;
 use analysis::Store;
 use audio_core::deck::{DeckState, Voice};
-use audio_core::{Beatgrid, Track};
+use audio_core::{Beatgrid, Tonart, Track};
 use control::{Sammlung, Treffer};
 use library::{Library, Query, TrackRecord};
 
@@ -42,6 +42,7 @@ pub struct Fertig {
     pub frames: u64,
     pub titel: String,
     pub artist: String,
+    pub tonart: Option<Tonart>,
 }
 
 /// Die Umsetzung, die das Pult bekommt.
@@ -111,6 +112,50 @@ impl Sammlung for AppSammlung {
             .collect()
     }
 
+    fn suchen_harmonisch(&self, tonart: Tonart, grenze: usize) -> Vec<Treffer> {
+        let Some(lib) = self.library.as_ref() else {
+            return Vec::new();
+        };
+
+        let mut query = Query::harmonic_with(tonart);
+        query.limit = Some(grenze as u32);
+        lib.search(&query)
+            .unwrap_or_default()
+            .into_iter()
+            .map(treffer_aus)
+            .collect()
+    }
+
+    fn playlists(&self) -> Vec<String> {
+        let Some(lib) = self.library.as_ref() else {
+            return Vec::new();
+        };
+        lib.playlists()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect()
+    }
+
+    fn playlist(&self, name: &str, grenze: usize) -> Vec<Treffer> {
+        let Some(lib) = self.library.as_ref() else {
+            return Vec::new();
+        };
+        let Ok(listen) = lib.playlists() else {
+            return Vec::new();
+        };
+        let Some((id, _)) = listen.into_iter().find(|(_, n)| n == name) else {
+            return Vec::new();
+        };
+
+        lib.playlist_tracks(id)
+            .unwrap_or_default()
+            .into_iter()
+            .take(grenze)
+            .map(treffer_aus)
+            .collect()
+    }
+
     fn laden(&self, deck: usize, pfad: &str) -> Result<(), String> {
         let Some((state, sample_rate)) = self.decks.get(deck) else {
             return Err(format!("deck{} gibt es nicht", deck + 1));
@@ -154,6 +199,9 @@ fn treffer_aus(eintrag: TrackRecord) -> Treffer {
         titel: anzeigename(&eintrag),
         artist: eintrag.artist,
         bpm: eintrag.bpm,
+        // Was sich nicht lesen lässt, wird nicht gezeigt — eine falsch
+        // gedeutete Tonart wäre schlimmer als eine fehlende.
+        tonart: eintrag.musical_key.as_deref().and_then(Tonart::parse),
         pfad: eintrag.path,
     }
 }
@@ -220,6 +268,7 @@ fn fertigen(auftrag: &Auftrag, store: &Store) -> Result<Fertig, String> {
         frames,
         titel,
         artist: String::new(),
+        tonart: analyse.tonart(),
     })
 }
 

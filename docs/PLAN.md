@@ -171,11 +171,11 @@ Ordner liegen. Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 | # | Ziel | Abnahmekriterium | Aufwand | Braucht |
 | --- | --- | --- | --- | --- |
 | 1 | Mehrdeck-Engine, Mixer, Cue-Bus, AUX | Code steht ✅ · Abnahme offen: Cue muss hörbar getrennt auf 3/4 liegen | M | 4-Kanal-Interface |
-| ~~2~~ | ~~Analyse-Pipeline~~ ✅ | BPM und Grid reproduzierbar als Sidecar, Peaks vorhanden | M | — |
+| ~~2~~ | ~~Analyse-Pipeline~~ ✅ | BPM, Grid und Tonart reproduzierbar als Sidecar, Peaks vorhanden | M | — |
 | ~~3~~ | ~~UI-Grundgerüst~~ ✅ | Zwei Decks mit Wellenform und Grid, Mixer bedienbar, Sammlung durchsuchbar · Offen: Bildrate auf echter Hardware messen | L | 1, 2 |
 | ~~4~~ | ~~Sync und Beatmatching~~ ✅ | Zwei Tracks bleiben über 5 Minuten im Takt — als Test abgesichert | M | 2 |
 | ~~5~~ | ~~Hot Cues und Loops~~ ✅ | 8 Cues pro Deck, Loop beat-quantisiert, in der Oberfläche bedienbar | M | 4 |
-| ~~6~~ | ~~Library~~ ✅ | Import, Suche, Playlists, Traktor-`collection.nml` | L | 2 |
+| ~~6~~ | ~~Library~~ ✅ | Import, Suche nach Text, Tempo und Tonart, Playlists, Traktor-`collection.nml` | L | 2 |
 | ~~7~~ | ~~Effekte~~ ✅ | Vier Effekte post-fader, tempo-synchron · Offen: Reverb, und ob vier reichen | M | 1 |
 | 8 | Stems | Beim Import vorberechnet, Stem-Deck-Modus | L | 6 |
 | ~~9~~ | ~~Mitschnitt~~ ✅ | Summe als WAV, hinter dem Begrenzer, verlorene Frames werden gezählt · Offen: FLAC | S | 1 |
@@ -209,15 +209,22 @@ Anordnung nur auf dem Papier richtig.
 ## Was inzwischen steht
 
 Neun von zehn Phasen sind gebaut. Die Software lässt sich bedienen: Tracks
-aus der Sammlung auf die Decks legen, Wellenform und Beatgrid sehen, mischen.
-Was fehlt, sind Stems und MIDI.
+aus der Sammlung auf die Decks legen, Wellenform und Beatgrid sehen, nach
+Tempo und Tonart aussuchen, mischen. Was fehlt, sind Stems und MIDI.
+
+Die Tonarterkennung ist selbst gebaut — libKeyFinder und der QM Key Detector
+stehen unter GPL und hätten den Weg zu VibeMind zugemacht. Sie sagt bewusst
+**nichts**, wenn ein Track nur aus Bass und Drums besteht: Dort steht das
+Tongeschlecht nicht im Signal, und ein geratenes Dur führt auf dem Camelot-Rad
+zum Fehlgriff. Die Schwellen sind an synthetischem Material gemessen und
+gegen eine echte Sammlung nie geprüft.
 
 | Crate | Inhalt |
 | --- | --- |
 | `audio-core` | Deck: Dekodierung, WSOLA, Beatgrid, Hot Cues, Loops |
 | `audio-engine` | Mixer: Kanalzüge, EQ, Filter, Effekte, Crossfader, Cue-Bus, Begrenzer, AUX, Sync, Mitschnitt, Kommandoschlange, Geräteausgabe |
-| `analysis` | Tempo, Beatgrid, Wellenform-Spitzen, Sidecar-Cache |
-| `library` | SQLite-Sammlung, Suche, Playlists, Traktor-Import |
+| `analysis` | Tempo, Beatgrid, Tonart, Wellenform-Spitzen, Sidecar-Cache |
+| `library` | SQLite-Sammlung, Suche nach Text, Tempo und Tonart, Playlists, Traktor-Import |
 | `musik-cli` | Deck fahren, analysieren, Mix rendern, Sammlung verwalten |
 | `control` | Steuerraum: benannte Controls, Katalog, Zeilenprotokoll, Socket |
 | `musik-app` | Oberfläche: zwei Decks, Mixer mit AUX, Plattenkiste |

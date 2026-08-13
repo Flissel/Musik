@@ -115,6 +115,7 @@ fn main() -> Result<()> {
         eintrag.frames = frames;
         eintrag.titel = titel;
         eintrag.artist = artist;
+        eintrag.tonart = analyse.tonart();
         eintraege.push((eintrag, fader, name));
 
         decks.push(DeckUi {
@@ -168,6 +169,7 @@ fn main() -> Result<()> {
     pult.aufnahme_setzen(aufnahme);
     // Die erste Liste kommt über denselben Weg wie jede spätere Suche.
     let treffer = pult.suche("");
+    let playlisten = pult.playlists();
 
     let pult = Arc::new(std::sync::Mutex::new(pult));
 
@@ -211,6 +213,8 @@ fn main() -> Result<()> {
         decks,
         suche: String::new(),
         treffer,
+        playlisten,
+        playliste: String::new(),
         status: if demo {
             "Demobetrieb mit synthetischen Tracks".into()
         } else {

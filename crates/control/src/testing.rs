@@ -42,6 +42,7 @@ pub fn pult_mit_zwei_decks() -> (Steuerpult, EngineRunner) {
         eintrag.frames = RATE as u64 * 60;
         eintrag.titel = format!("Testtrack {name}");
         eintrag.artist = "Test".into();
+        eintrag.tonart = audio_core::Tonart::parse("Am");
         pult.deck_hinzufuegen(eintrag);
     }
     pult.kanal_hinzufuegen(KanalSpiegel::neu("AUX", Assign::Thru));
@@ -75,12 +76,29 @@ impl Sammlung for TestSammlung {
                 titel: format!("{text} {i}"),
                 artist: None,
                 bpm: Some(128.0 + i as f32),
+                tonart: audio_core::Tonart::parse("Am"),
             })
             .collect()
     }
 
     fn suchen_mischbar(&self, bpm: f32, grenze: usize) -> Vec<Treffer> {
         self.suchen(&format!("{bpm:.0}"), grenze)
+    }
+
+    fn suchen_harmonisch(&self, tonart: audio_core::Tonart, grenze: usize) -> Vec<Treffer> {
+        self.suchen(&tonart.camelot(), grenze)
+    }
+
+    fn playlists(&self) -> Vec<String> {
+        vec!["Freitag".into(), "Warmup".into()]
+    }
+
+    fn playlist(&self, name: &str, grenze: usize) -> Vec<Treffer> {
+        if name == "Freitag" {
+            self.suchen(name, grenze)
+        } else {
+            Vec::new()
+        }
     }
 
     fn laden(&self, _deck: usize, pfad: &str) -> Result<(), String> {

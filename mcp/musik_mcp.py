@@ -328,6 +328,15 @@ class SucheEingabe(Basis):
         gt=0,
         le=400,
     )
+    harmonisch_zu: Optional[str] = Field(
+        default=None,
+        description=(
+            "Statt Freitext nach Tonart suchen: Tracks, deren Tonart harmonisch "
+            "passt. Nimmt 'Am', 'F#' oder Camelot '8A'. Schlägt den Freitext, "
+            "wird aber selbst von mischbar_zu_bpm geschlagen."
+        ),
+        max_length=8,
+    )
     limit: int = Field(default=25, description="Höchstzahl der Treffer", ge=1, le=200)
     response_format: Format = Field(default=Format.MARKDOWN, description="Ausgabeform")
 
@@ -335,6 +344,11 @@ class SucheEingabe(Basis):
     @classmethod
     def _einzeilig(cls, v: str) -> str:
         return _pruefe_einzeilig(v, "text")
+
+    @field_validator("harmonisch_zu")
+    @classmethod
+    def _tonart_einzeilig(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _pruefe_einzeilig(v, "harmonisch_zu")
 
 
 class StatusEingabe(Basis):
@@ -396,6 +410,15 @@ def _als_zahl(text: str) -> Optional[float]:
         return None
 
 
+def _als_text(text: str) -> Optional[str]:
+    """`-` ist die Antwort des Pults für „leer" — die wird nicht weitergereicht.
+
+    Sonst stünde in der Ausgabe ein Bindestrich, wo „unbekannt" gemeint ist,
+    und der ließe sich nicht von einem echten Wert unterscheiden.
+    """
+    return None if text in ("-", "") else text
+
+
 async def _werte(controls: list[str]) -> dict[str, str]:
     """Liest mehrere Controls über eine Verbindung."""
     antworten = await sprich(*(f"get {c}" for c in controls))
@@ -415,6 +438,8 @@ async def _status(form: Format) -> str:
         "title",
         "artist",
         "bpm",
+        "key",
+        "key_camelot",
         "position",
         "duration",
         "play",
@@ -444,6 +469,8 @@ async def _status(form: Format) -> str:
                 "title": roh.get(f"{d}.title", ""),
                 "artist": roh.get(f"{d}.artist", ""),
                 "bpm": _als_zahl(roh.get(f"{d}.bpm", "-")),
+                "key": _als_text(roh.get(f"{d}.key", "-")),
+                "key_camelot": _als_text(roh.get(f"{d}.key_camelot", "-")),
                 "position": _als_zahl(roh.get(f"{d}.position", "-")) or 0.0,
                 "duration": _als_zahl(roh.get(f"{d}.duration", "-")) or 0.0,
                 "playing": roh.get(f"{d}.play") == "1",
@@ -484,6 +511,8 @@ async def _status(form: Format) -> str:
         zeilen.append(
             f"- {tempo}, {lauf} bei {d['position']:.1f} s von {d['duration']:.1f} s"
         )
+        if d["key"]:
+            zeilen.append(f"- Tonart {d['key']} ({d['key_camelot']})")
         if d["finished"]:
             zeilen.append("- **durchgelaufen**")
         if d["load_status"] not in ("bereit", ""):
@@ -618,28 +647,35 @@ async def musik_get(params: ControlEingabe) -> str:
     annotations={"title": "Sammlung durchsuchen", **NUR_LESEN},
 )
 async def musik_search(params: SucheEingabe) -> str:
-    """Sucht Tracks in der Sammlung — nach Text oder nach passendem Tempo.
+    """Sucht Tracks in der Sammlung — nach Text, Tempo oder Tonart.
 
     Args:
         params (SucheEingabe):
             - text (str): Freitext über Titel, Künstler, Album
             - mischbar_zu_bpm (float|None): stattdessen nach Tempo suchen (±6 %)
+            - harmonisch_zu (str|None): stattdessen nach Tonart suchen
             - limit (int): 1–200, Standard 25
             - response_format: 'markdown' oder 'json'
 
     Returns:
         str: Markdown-Liste oder JSON:
         {"count": int, "truncated": bool,
-         "tracks": [{"bpm": float|null, "path": str, "title": str}]}
-        `path` ist es, was `musik_do` mit der Aktion 'deckN.load' braucht.
+         "tracks": [{"bpm": float|null, "key": str|null, "path": str,
+                     "title": str}]}
+        `key` ist die Camelot-Zahl (8A, 5B); `path` ist es, was `musik_do` mit
+        der Aktion 'deckN.load' braucht.
 
     Beispiele:
         - „Was habe ich von Alpenglühen?" → text='Alpen'
         - „Was passt zu 128 BPM?" → mischbar_zu_bpm=128
+        - „Was passt harmonisch zu Deck 1?" → erst `musik_get('deck1.key')`,
+          dann harmonisch_zu mit dem Ergebnis.
         - Nicht dafür: einen Track auflegen → `musik_do('deck1.load', pfad)`.
     """
     if params.mischbar_zu_bpm is not None:
         befehl = f"do master.search_mixable {params.mischbar_zu_bpm}"
+    elif params.harmonisch_zu:
+        befehl = f"do master.search_harmonic {params.harmonisch_zu}"
     else:
         befehl = f"do master.search {params.text}".rstrip()
 
@@ -658,15 +694,21 @@ async def musik_search(params: SucheEingabe) -> str:
             continue
         if not zeile.startswith("track "):
             continue
-        teile = zeile.split(" ", 2)
-        if len(teile) < 3:
+        teile = zeile.split(" ", 3)
+        if len(teile) < 4:
             continue
-        # `track <bpm> <pfad> <titel>` — der Pfad kann Leerzeichen enthalten,
-        # der Titel auch. Getrennt wird deshalb hinten am Titel, der immer der
-        # Dateiname ohne Endung oder der Tag ist.
-        rest = teile[2]
-        pfad, titel = _pfad_und_titel(rest)
-        treffer.append({"bpm": _als_zahl(teile[1]), "path": pfad, "title": titel})
+        # `track <bpm> <key> <pfad> <titel>` — der Pfad kann Leerzeichen
+        # enthalten, der Titel auch. Getrennt wird deshalb hinten am Titel, der
+        # immer der Dateiname ohne Endung oder der Tag ist.
+        pfad, titel = _pfad_und_titel(teile[3])
+        treffer.append(
+            {
+                "bpm": _als_zahl(teile[1]),
+                "key": None if teile[2] == "-" else teile[2],
+                "path": pfad,
+                "title": titel,
+            }
+        )
 
     treffer = treffer[: params.limit]
     if params.response_format is Format.JSON:
@@ -681,7 +723,8 @@ async def musik_search(params: SucheEingabe) -> str:
     zeilen_aus = [f"# {len(treffer)} Treffer", ""]
     for t in treffer:
         tempo = f"{t['bpm']:.2f} BPM" if t["bpm"] else "kein Tempo"
-        zeilen_aus.append(f"- **{t['title']}** — {tempo}\n  `{t['path']}`")
+        key = f", {t['key']}" if t["key"] else ""
+        zeilen_aus.append(f"- **{t['title']}** — {tempo}{key}\n  `{t['path']}`")
     if begrenzt:
         zeilen_aus.append("\nDie Liste ist begrenzt; es gibt mehr.")
     return "\n".join(zeilen_aus)

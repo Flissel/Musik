@@ -238,6 +238,20 @@ impl Library {
             wheres.push(format!("genre = ?{}", args.len() + 1));
             args.push(Box::new(genre.clone()));
         }
+        if let Some(keys) = query.keys.as_ref().filter(|k| !k.is_empty()) {
+            // Groß/klein und Leerraum vereinheitlicht: In der Sammlung steht,
+            // was die Quelle geschrieben hat, und `am` meint dasselbe wie `Am`.
+            let platzhalter: Vec<String> = (0..keys.len())
+                .map(|i| format!("?{}", args.len() + i + 1))
+                .collect();
+            wheres.push(format!(
+                "UPPER(TRIM(musical_key)) IN ({})",
+                platzhalter.join(", ")
+            ));
+            for key in keys {
+                args.push(Box::new(key.trim().to_uppercase()));
+            }
+        }
 
         if !wheres.is_empty() {
             sql.push_str(" WHERE ");
@@ -391,7 +405,7 @@ fn unix_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use audio_core::Beatgrid;
+    use audio_core::{Beatgrid, Tonart};
 
     fn track(path: &str, artist: &str, title: &str, bpm: Option<f32>) -> TrackRecord {
         let mut t = TrackRecord::from_path(path);
@@ -467,6 +481,45 @@ mod tests {
         let titel: Vec<_> = treffer.iter().filter_map(|t| t.title.as_deref()).collect();
 
         assert_eq!(titel, vec!["passend"], "unerwartete Treffer: {titel:?}");
+    }
+
+    #[test]
+    fn suche_nach_harmonisch_passenden_tonarten() {
+        let lib = Library::open_in_memory().unwrap();
+
+        let mit_key = |pfad: &str, titel: &str, key: &str| {
+            let mut t = track(pfad, "A", titel, Some(128.0));
+            t.musical_key = Some(key.into());
+            lib.upsert_track(&t).unwrap();
+        };
+
+        // a-Moll ist 8A. Verwandt sind 8B (C-Dur), 7A (d-Moll) und 9A (e-Moll).
+        mit_key("/a.mp3", "gleiche Tonart", "Am");
+        mit_key("/b.mp3", "Parallele", "C");
+        mit_key("/c.mp3", "Nachbar", "Em");
+        // Dieselbe Tonart in Camelot geschrieben — die Sammlung enthält, was
+        // die Quelle geschrieben hat, und Traktor schreibt gern so.
+        mit_key("/d.mp3", "Camelot geschrieben", "7a");
+        mit_key("/e.mp3", "weit weg", "D#m");
+        mit_key("/f.mp3", "unlesbar", "H-Dur irgendwie");
+        lib.upsert_track(&track("/g.mp3", "A", "ohne Tonart", Some(128.0)))
+            .unwrap();
+
+        let a_moll = Tonart::parse("Am").unwrap();
+        let treffer = lib.search(&Query::harmonic_with(a_moll)).unwrap();
+        let mut titel: Vec<_> = treffer.iter().filter_map(|t| t.title.as_deref()).collect();
+        titel.sort_unstable();
+
+        assert_eq!(
+            titel,
+            vec![
+                "Camelot geschrieben",
+                "Nachbar",
+                "Parallele",
+                "gleiche Tonart"
+            ],
+            "unerwartete Treffer: {titel:?}"
+        );
     }
 
     #[test]

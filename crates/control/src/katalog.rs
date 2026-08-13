@@ -218,6 +218,14 @@ pub static DECK: &[Beschreibung] = &[
     ),
     text_feld("title", "Titel des geladenen Tracks"),
     text_feld("artist", "Künstler des geladenen Tracks"),
+    text_feld(
+        "key",
+        "Tonart des geladenen Tracks, etwa Am oder F#; leer heißt unbekannt",
+    ),
+    text_feld(
+        "key_camelot",
+        "Dieselbe Tonart als Camelot-Zahl (8A, 5B) — danach wird harmonisch gemischt",
+    ),
     // Ohne das erfährt ein Agent nie, dass er den nächsten Track auflegen
     // muss. Für autonomes Auflegen ist es die zentrale Information.
     schalter("finished", "", false, "Track ist durchgelaufen"),
@@ -405,10 +413,21 @@ pub static MASTER: &[Beschreibung] = &[
         "<text>",
         "Die Sammlung durchsuchen; antwortet mit einer Zeile je Treffer",
     ),
+    aktion("playlists", "", "Die Playlists der Sammlung aufzählen"),
+    aktion(
+        "playlist",
+        "<name>",
+        "Die Tracks einer Playlist auflisten, in ihrer Reihenfolge",
+    ),
     aktion(
         "search_mixable",
         "<bpm>",
         "Tracks suchen, die tempomäßig zu diesem Wert passen",
+    ),
+    aktion(
+        "search_harmonic",
+        "<tonart>",
+        "Tracks suchen, deren Tonart harmonisch passt; nimmt Am, F# oder 8A",
     ),
     zahl(
         "crossfader",

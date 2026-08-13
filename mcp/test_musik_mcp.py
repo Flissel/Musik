@@ -148,6 +148,22 @@ async def hauptteil() -> int:
             all(t["path"].endswith((".wav", ".mp3", ".flac")) for t in treffer["tracks"]),
             "die Pfade sind vollständig, auch mit Leerzeichen",
         )
+        pruefe(
+            all("key" in t for t in treffer["tracks"]),
+            "jeder Treffer trägt eine Tonart-Spalte, auch wenn sie leer ist",
+        )
+
+        # Eine Tonart, die keine ist, muss auffallen und darf nicht wie ein
+        # leeres Ergebnis aussehen.
+        unsinn = text_von(
+            await client.call_tool(
+                "musik_search", {"params": {"harmonisch_zu": "H-Dur"}}
+            )
+        )
+        pruefe(
+            unsinn.startswith("Fehler:"),
+            "eine unlesbare Tonart wird gemeldet statt leer zu antworten",
+        )
 
         # Zeilenumbrüche dürfen keinen zweiten Befehl einschleusen.
         try:

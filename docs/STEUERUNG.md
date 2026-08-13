@@ -67,6 +67,7 @@ do deck2.jump_cue 1
 do deck1.beatjump -4
 do master.search techno
 do master.search_mixable 128
+do master.search_harmonic 8A
 get deck1.sync               → err deck1.sync ist eine Aktion — mit 'do' auslösen
 set deck1.sync 1             → err deck1.sync ist eine Aktion — mit 'do' auslösen
 do deck1.play                → err deck1.play ist keine Aktion — mit 'set' setzen
@@ -159,7 +160,9 @@ Kein Mausklick, keine Kenntnis der Oberfläche — nur Control-Namen:
 ```sh
 do master.search Alpen                  # was gibt es?
 do deck1.load "…/Alpenglühen.wav"       # auflegen
-do master.search_mixable 128            # was passt dazu?
+do master.search_mixable 128            # was passt vom Tempo?
+get deck1.key_camelot                   # → 8A
+do master.search_harmonic 8A            # was passt von der Tonart?
 do deck2.load "…/Nachtschicht.wav"
 set deck1.play 1
 set channel1.fader 0.9
@@ -287,11 +290,44 @@ mitgab — es stand im Katalog, verließ aber den Prozess nie. Jetzt steht es in
 der Bereichsspalte, und `deck1.load` sagt von sich aus, dass es einen Pfad
 will.
 
+## Harmonisch mischen
+
+Tempo ist die halbe Trackauswahl. Zwei Stücke im gleichen Takt können trotzdem
+gegeneinander klingen, wenn die Tonarten nicht zusammenpassen — deshalb gibt es
+sie am Deck und in der Sammlung:
+
+```text
+get deck1.key            → value deck1.key Am
+get deck1.key_camelot    → value deck1.key_camelot 8A
+do master.search_harmonic 8A
+                         → track 127.98 8A /musik/01.wav  Nachtschicht
+                           track 125.99 8B /musik/02.wav  Alpenglühen
+                           track 123.99 9A /musik/03.wav  Blaue Stunde
+```
+
+**Zwei Felder statt einem.** `key` ist die Schreibweise für Menschen (`Am`,
+`F#`), `key_camelot` die zum Rechnen (`8A`, `2B`). Beides in eine Zeichenkette
+zu packen hieße, dass jeder Leser sie wieder auseinandernehmen muss.
+`search_harmonic` nimmt beide entgegen, und was keine Tonart ist, wird
+**gemeldet** statt als leeres Ergebnis zurückzukommen — ein Tippfehler darf
+nicht aussehen wie eine leere Sammlung.
+
+Gesucht wird nach der Regel des Camelot-Rads: dieselbe Zahl (Paralleltonart),
+eine weiter, eine zurück. Deshalb steht in jeder Trefferzeile jetzt eine
+Camelot-Spalte hinter dem Tempo.
+
+**Leer heißt unbekannt, nicht „passt zu allem".** Auf Bass und Drums allein
+ermittelt die Analyse bewusst keine Tonart — warum, steht in
+`crates/analysis/src/tonart.rs`. Diese Tracks tauchen in einer harmonischen
+Suche nicht auf; das ist richtig so, denn ein geratener Wert würde beim Mischen
+mehr kosten als ein fehlender.
+
 ## Auch die Oberfläche geht hier durch
 
 Nicht nur die Regler: Suchen und Laden nehmen inzwischen denselben Weg. Ein
 Klick auf „A" in der Plattenkiste löst `deck1.load` aus, das Suchfeld ruft
-`master.search`.
+`master.search`, und „Harmonisch zu A" ruft `master.search_harmonic` mit der
+Tonart von Deck 1.
 
 Das ist kein Selbstzweck. Vorher hatte die Oberfläche einen eigenen Ladepfad —
 zwei Wege zum selben Ziel heißt zwei Stellen, an denen es schiefgehen kann, und

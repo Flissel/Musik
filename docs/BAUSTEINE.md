@@ -118,6 +118,19 @@ Für Tonarterkennung liefert Essentia brauchbare Ergebnisse; als eigenständige
 OSS-Alternative gibt es KeyFinder. Zu Essentia siehe den AGPL-Hinweis oben,
 falls die Agenten-Schicht je über Netzwerk erreichbar wird.
 
+**Entschieden: selbst gebaut**, in `crates/analysis/src/tonart.rs`. Die beiden
+verbreiteten Verfahren — libKeyFinder und der QM Key Detector, den auch Mixxx
+mitlinkt — stehen unter GPL, und das schlösse den Weg zu VibeMind (MIT, zur
+Veröffentlichung vorgesehen) wieder zu. Das Verfahren selbst ist Lehrbuchstoff:
+Chroma über eine FFT, Vergleich gegen die Krumhansl-Kessler-Profile,
+Camelot-Ausgabe. Rund 200 Zeilen.
+
+Was es kann und was nicht, steht ausführlich im Modul. Kurz: Auf Material mit
+Akkorden trifft es; auf Bass und Drums allein sagt es **nichts**, weil dort das
+Tongeschlecht nicht im Signal steht und ein geratenes Dur auf dem Camelot-Rad
+zum Fehlgriff führt. Beide Schwellen sind an synthetischem Material gemessen
+und gegen eine echte Sammlung nie geprüft — dasselbe Vorbehalt wie beim Tempo.
+
 **Praktischer Hinweis:** Beatgrid-Erkennung ist bei geradem 4/4-Material fast
 gelöst und bei allem anderen mühsam. Traktor löst das über manuelle
 Grid-Korrektur — die brauchen wir auch, egal wie gut der Detektor ist.

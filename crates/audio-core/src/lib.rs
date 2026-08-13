@@ -9,6 +9,7 @@ pub mod error;
 pub mod grid;
 pub mod player;
 pub mod stretch;
+pub mod tonart;
 pub mod track;
 
 #[cfg(test)]
@@ -18,4 +19,5 @@ pub use deck::DeckState;
 pub use error::{AudioError, Result};
 pub use grid::Beatgrid;
 pub use player::Player;
+pub use tonart::Tonart;
 pub use track::Track;

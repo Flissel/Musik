@@ -1,8 +1,17 @@
 //! Synthetische Tracks für den Fall ohne Musiksammlung.
 //!
 //! Damit lässt sich die Oberfläche starten und beurteilen, ohne dass Dateien
-//! vorliegen müssen — und sie zeigt dabei echte Wellenformen und ein echtes
-//! Beatgrid, weil das Material durch dieselbe Analyse läuft wie alles andere.
+//! vorliegen müssen — und sie zeigt dabei echte Wellenformen, ein echtes
+//! Beatgrid und eine echte Tonart, weil das Material durch dieselbe Analyse
+//! läuft wie alles andere.
+//!
+//! Deshalb liegen über den Drums auch Akkorde und nicht nur ein Bass: Aus
+//! Bass und Schlagzeug allein ermittelt die Analyse **keine** Tonart, und das
+//! zu Recht (siehe `analysis::tonart`). Ohne Akkorde könnte die Demo die halbe
+//! Anzeige nicht vorführen.
+//!
+//! Die beiden Decks stehen in a-Moll (8A) und e-Moll (9A) — auf dem
+//! Camelot-Rad Nachbarn, also ein Paar, das sich harmonisch mischen lässt.
 
 use std::f32::consts::PI;
 
@@ -18,7 +27,7 @@ pub fn deck_a(sample_rate: u32) -> DemoTrack {
     DemoTrack {
         track: bauen(sample_rate, 128.0, 16, muster_a),
         artist: "Demo".into(),
-        title: "Vier auf die Eins · 128".into(),
+        title: "Vier auf die Eins · 128 · Am".into(),
     }
 }
 
@@ -26,9 +35,17 @@ pub fn deck_b(sample_rate: u32) -> DemoTrack {
     DemoTrack {
         track: bauen(sample_rate, 124.0, 16, muster_b),
         artist: "Demo".into(),
-        title: "Snare-Muster · 124".into(),
+        title: "Snare-Muster · 124 · Em".into(),
     }
 }
+
+/// Die Akkordfolgen der beiden Demos, als Halbtöne über C4.
+///
+/// Deck A: Am – Am – Dm – C, also a-Moll. Deck B: Em – Em – Am – G, also
+/// e-Moll. Der Bass nimmt jeweils den Grundakkord eine bzw. zwei Oktaven
+/// tiefer.
+const STUFEN_A: [[i32; 3]; 4] = [[9, 12, 16], [9, 12, 16], [2, 5, 9], [0, 4, 7]];
+const STUFEN_B: [[i32; 3]; 4] = [[4, 7, 11], [4, 7, 11], [9, 12, 16], [7, 11, 14]];
 
 fn muster_a(bar: usize, step: usize, add: &mut dyn FnMut(usize, f32), rate: u32) {
     if step.is_multiple_of(4) {
@@ -37,9 +54,14 @@ fn muster_a(bar: usize, step: usize, add: &mut dyn FnMut(usize, f32), rate: u32)
     if step % 4 == 2 {
         hat(add, rate, 0.22);
     }
+    let akkord = STUFEN_A[bar % 4];
     if step.is_multiple_of(2) {
-        let note = [55.0, 55.0, 73.42, 65.41][bar % 4];
-        bass(add, note, rate, 0.30);
+        bass(add, hz(akkord[0] - 24), rate, 0.30);
+    }
+    // Einmal je Takt, dafür lang: Ein Akkord, der auf jedem Sechzehntel neu
+    // anschlägt, wäre ein Stakkato und kein Flächenklang.
+    if step == 0 {
+        flaeche(add, &akkord, rate, 0.10);
     }
 }
 
@@ -50,10 +72,18 @@ fn muster_b(bar: usize, step: usize, add: &mut dyn FnMut(usize, f32), rate: u32)
     if step % 8 == 4 {
         snare(add, rate);
     }
+    let akkord = STUFEN_B[bar % 4];
     if step % 2 == 1 {
-        let note = [49.0, 61.74, 49.0, 58.27][bar % 4];
-        bass(add, note, rate, 0.26);
+        bass(add, hz(akkord[0] - 24), rate, 0.26);
     }
+    if step == 0 {
+        flaeche(add, &akkord, rate, 0.20);
+    }
+}
+
+/// Halbtöne über C4 in Hertz.
+fn hz(halbton_ueber_c4: i32) -> f32 {
+    261.63 * 2.0f32.powf(halbton_ueber_c4 as f32 / 12.0)
 }
 
 /// Ein Muster füllt einen Sechzehntel-Schritt eines Taktes.
@@ -132,6 +162,29 @@ fn hat(add: &mut dyn FnMut(usize, f32), rate: u32, gain: f32) {
     }
 }
 
+/// Ein Akkord als Flächenklang — die Harmonik der Demo.
+///
+/// Jede Stimme bekommt ein paar Obertöne, damit sie im Spektrum breiter steht
+/// als ein nackter Sinus. Leise, weil sie unter den Drums liegen soll und
+/// nicht darüber.
+fn flaeche(add: &mut dyn FnMut(usize, f32), halbtoene: &[i32], rate: u32, gain: f32) {
+    let n = (rate as f32 * 1.6) as usize;
+    for i in 0..n {
+        let t = i as f32 / rate as f32;
+        // Weich ein und aus, sonst knackt es und schmiert breitbandig.
+        let huelle = (t * 8.0).min(1.0).min((1.6 - t) * 6.0).max(0.0);
+
+        let mut wert = 0.0;
+        for halbton in halbtoene {
+            let grund = hz(*halbton);
+            for (ober, staerke) in [(1.0, 1.0), (2.0, 0.4), (3.0, 0.2)] {
+                wert += (2.0 * PI * grund * ober * t).sin() * staerke;
+            }
+        }
+        add(i, wert * huelle * gain / halbtoene.len() as f32);
+    }
+}
+
 fn bass(add: &mut dyn FnMut(usize, f32), freq: f32, rate: u32, gain: f32) {
     let n = (rate as f32 * 0.3) as usize;
     for i in 0..n {
@@ -167,5 +220,40 @@ mod tests {
                 demo.title
             );
         }
+    }
+
+    /// Dasselbe für die Tonart — und aus demselben Grund.
+    ///
+    /// Die Demo ist die einzige Stelle, an der sich die Anzeige ohne eigene
+    /// Sammlung beurteilen lässt. Zeigt sie hier „—", ist entweder die
+    /// Erkennung kaputt oder das Material taugt nicht als Vorführung; beides
+    /// will man wissen, bevor jemand das Fenster aufmacht.
+    #[test]
+    fn die_analyse_findet_die_versprochene_tonart() {
+        for (demo, erwartet) in [(deck_a(48_000), "Am"), (deck_b(48_000), "Em")] {
+            let analyse = analysis::analyze(&demo.track);
+            let tonart = analyse
+                .tonart()
+                .unwrap_or_else(|| panic!("{}: keine Tonart erkannt", demo.title));
+            assert_eq!(tonart.name(), erwartet, "{}", demo.title);
+        }
+    }
+
+    /// Die beiden Decks sollen sich harmonisch mischen lassen.
+    ///
+    /// Sonst führt die Demo zwar eine Tonart vor, aber nicht, wozu sie da ist.
+    #[test]
+    fn die_beiden_demo_decks_passen_harmonisch_zueinander() {
+        let a = analysis::analyze(&deck_a(48_000).track).tonart().unwrap();
+        let b = analysis::analyze(&deck_b(48_000).track).tonart().unwrap();
+
+        assert!(
+            a.passt_zu(&b),
+            "{} ({}) passt nicht zu {} ({})",
+            a.name(),
+            a.camelot(),
+            b.name(),
+            b.camelot()
+        );
     }
 }

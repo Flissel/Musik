@@ -1,4 +1,4 @@
-//! Offline-Analyse: Tempo, Beatgrid und Wellenform-Spitzen.
+//! Offline-Analyse: Tempo, Beatgrid, Tonart und Wellenform-Spitzen.
 //!
 //! Läuft bewusst außerhalb des Abspielpfads. Nichts hier hat Echtzeitauflagen,
 //! dafür ist alles reproduzierbar und wird über den Inhalts-Hash
@@ -8,6 +8,7 @@ pub mod onset;
 pub mod peaks;
 pub mod sidecar;
 pub mod tempo;
+pub mod tonart;
 
 #[cfg(test)]
 pub(crate) mod testing;
@@ -16,6 +17,7 @@ use audio_core::Track;
 
 pub use sidecar::{Analysis, Store};
 pub use tempo::Beatgrid;
+pub use tonart::Tonart;
 
 /// Analysiert einen dekodierten Track vollständig.
 pub fn analyze(track: &Track) -> Analysis {
@@ -23,6 +25,7 @@ pub fn analyze(track: &Track) -> Analysis {
     let grid = tempo::detect(&envelope)
         .map(|g| tempo::refine_anchor(&track.samples, track.sample_rate, g));
     let levels = peaks::compute(&track.samples);
+    let key = tonart::erkenne(&track.samples, track.sample_rate);
 
     Analysis {
         version: sidecar::FORMAT_VERSION,
@@ -33,6 +36,8 @@ pub fn analyze(track: &Track) -> Analysis {
         bpm: grid.map(|g| g.bpm),
         beat_anchor_frames: grid.map(|g| g.anchor_frames),
         bpm_confidence: grid.map(|g| g.confidence),
+        musical_key: key.map(|k| k.tonart.name()),
+        key_confidence: key.map(|k| k.konfidenz),
         peaks: levels
             .iter()
             .map(sidecar::PeakLevelData::from_level)
@@ -55,7 +60,7 @@ pub fn analyze_cached(track: &Track, store: &Store) -> (Analysis, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::click_track;
+    use crate::testing::{akkordfolge, click_track};
 
     fn track(bpm: f64, secs: f64) -> Track {
         Track {
@@ -78,6 +83,29 @@ mod tests {
         let bpm = a.bpm.expect("kein BPM erkannt");
         assert!((bpm - 128.0).abs() < 1.0, "BPM {bpm:.2}");
         assert!(a.beat_anchor_frames.is_some());
+    }
+
+    #[test]
+    fn die_tonart_landet_in_der_analyse() {
+        // Die Erkennung selbst prüft `tonart`; hier zählt nur, dass sie
+        // überhaupt aufgerufen wird und ihr Ergebnis im Sidecar ankommt.
+        let t = Track {
+            samples: akkordfolge(0, false),
+            sample_rate: 44_100,
+        };
+        let a = analyze(&t);
+
+        assert_eq!(a.musical_key.as_deref(), Some("C"));
+        assert_eq!(a.tonart().map(|k| k.camelot()), Some("8B".to_string()));
+        assert!(a.key_confidence.is_some_and(|k| k > 0.0));
+    }
+
+    #[test]
+    fn perkussion_bekommt_keine_tonart_angedichtet() {
+        // Ein Klick-Track hat keine Harmonik. Eine geratene Tonart wäre beim
+        // harmonischen Mischen schlimmer als gar keine.
+        let a = analyze(&track(128.0, 25.0));
+        assert_eq!(a.musical_key, None, "Tonart geraten: {:?}", a.musical_key);
     }
 
     #[test]

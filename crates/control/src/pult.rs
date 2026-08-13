@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use audio_core::deck::DeckState;
+use audio_core::Tonart;
 use audio_engine::{Assign, Aufnahme, Command, Effekt, EngineHandle};
 
 use crate::katalog::{self, Beschreibung};
@@ -31,6 +32,8 @@ pub struct Treffer {
     pub titel: String,
     pub artist: Option<String>,
     pub bpm: Option<f32>,
+    /// Tonart, wie sie in der Sammlung steht — `None`, wenn keine bekannt ist.
+    pub tonart: Option<Tonart>,
 }
 
 /// Was das Pult nicht selbst kann: suchen und laden.
@@ -47,6 +50,12 @@ pub trait Sammlung: Send {
     fn suchen(&self, text: &str, grenze: usize) -> Vec<Treffer>;
     /// Tracks, die tempomäßig zu `bpm` passen.
     fn suchen_mischbar(&self, bpm: f32, grenze: usize) -> Vec<Treffer>;
+    /// Tracks, deren Tonart harmonisch zu `tonart` passt.
+    fn suchen_harmonisch(&self, tonart: Tonart, grenze: usize) -> Vec<Treffer>;
+    /// Namen aller Playlists.
+    fn playlists(&self) -> Vec<String>;
+    /// Die Tracks einer Playlist, in ihrer Reihenfolge.
+    fn playlist(&self, name: &str, grenze: usize) -> Vec<Treffer>;
     fn laden(&self, deck: usize, pfad: &str) -> Result<(), String>;
 }
 
@@ -106,6 +115,11 @@ pub struct DeckEintrag {
     pub frames: u64,
     pub titel: String,
     pub artist: String,
+    /// Tonart des geladenen Tracks, sofern die Analyse eine gefunden hat.
+    ///
+    /// Sie liegt hier und nicht im `DeckState`: Der ist der Echtzeitteil und
+    /// kennt nur Atomics; eine Tonart wird nie pro Sample gebraucht.
+    pub tonart: Option<Tonart>,
     /// Was der letzte Ladeauftrag macht: `bereit`, `laedt` oder ein Fehler.
     pub lade_status: String,
 }
@@ -119,6 +133,7 @@ impl DeckEintrag {
             frames: 0,
             titel: String::new(),
             artist: String::new(),
+            tonart: None,
             lade_status: "bereit".into(),
         }
     }
@@ -360,6 +375,17 @@ impl Steuerpult {
             },
             "title" => Wert::Text(d.titel.clone()),
             "artist" => Wert::Text(d.artist.clone()),
+            // Zwei Felder statt eines: Menschen lesen `Am`, gemischt wird nach
+            // `8A`. Beides in eine Zeichenkette zu packen hieße, dass jeder
+            // Leser sie wieder auseinandernehmen muss.
+            "key" => match d.tonart {
+                Some(t) => Wert::Text(t.name()),
+                None => Wert::Leer,
+            },
+            "key_camelot" => match d.tonart {
+                Some(t) => Wert::Text(t.camelot()),
+                None => Wert::Leer,
+            },
             "finished" => Wert::Schalter(d.state.is_finished()),
             "load_status" => Wert::Text(d.lade_status.clone()),
             _ => {
@@ -477,9 +503,38 @@ impl Steuerpult {
                 let treffer = self.suche(argument.unwrap_or(""));
                 Ok(treffer_zeilen(&treffer))
             }
+            (Gruppe::Master, "playlists") => {
+                let namen = self.playlists();
+                if namen.is_empty() {
+                    return Ok(vec!["hinweis keine Playlists in der Sammlung".into()]);
+                }
+                Ok(namen.into_iter().map(|n| format!("playlist {n}")).collect())
+            }
+            (Gruppe::Master, "playlist") => {
+                let name = argument.ok_or_else(fehlt)?;
+                let treffer = self.playlist(name);
+                if treffer.is_empty() {
+                    return Err(Fehler::Gescheitert(format!(
+                        "Playlist '{name}' ist leer oder gibt es nicht"
+                    )));
+                }
+                Ok(treffer_zeilen(&treffer))
+            }
             (Gruppe::Master, "search_mixable") => {
                 let bpm: f32 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
                 let treffer = self.suche_mischbar(bpm);
+                Ok(treffer_zeilen(&treffer))
+            }
+            (Gruppe::Master, "search_harmonic") => {
+                let roh = argument.ok_or_else(fehlt)?;
+                // Eine unlesbare Tonart muss auffallen. Sie stillschweigend
+                // als „keine Treffer" zu beantworten hieße, einen Tippfehler
+                // wie eine leere Sammlung aussehen zu lassen.
+                let tonart = Tonart::parse(roh).ok_or_else(|| Fehler::Argument {
+                    control: k.to_string(),
+                    erwartet: format!("eine Tonart wie Am, F# oder 8A — '{roh}' ist keine"),
+                })?;
+                let treffer = self.suche_harmonisch(tonart);
                 Ok(treffer_zeilen(&treffer))
             }
             _ => Err(Fehler::UnbekanntesControl(k.to_string())),
@@ -672,6 +727,36 @@ impl Steuerpult {
     pub fn suche_mischbar(&self, bpm: f32) -> Vec<Treffer> {
         match self.sammlung.as_ref() {
             Some(s) => s.suchen_mischbar(bpm, GRENZE),
+            None => Vec::new(),
+        }
+    }
+
+    /// Tracks, deren Tonart harmonisch zu `tonart` passt.
+    pub fn suche_harmonisch(&self, tonart: Tonart) -> Vec<Treffer> {
+        match self.sammlung.as_ref() {
+            Some(s) => s.suchen_harmonisch(tonart, GRENZE),
+            None => Vec::new(),
+        }
+    }
+
+    /// Tonart eines Decks — der übliche Ausgangspunkt für die harmonische
+    /// Suche.
+    pub fn deck_tonart(&self, deck: usize) -> Option<Tonart> {
+        self.decks.get(deck).and_then(|d| d.tonart)
+    }
+
+    /// Namen aller Playlists.
+    pub fn playlists(&self) -> Vec<String> {
+        match self.sammlung.as_ref() {
+            Some(s) => s.playlists(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Die Tracks einer Playlist.
+    pub fn playlist(&self, name: &str) -> Vec<Treffer> {
+        match self.sammlung.as_ref() {
+            Some(s) => s.playlist(name, GRENZE),
             None => Vec::new(),
         }
     }
@@ -922,7 +1007,13 @@ fn treffer_zeilen(treffer: &[Treffer]) -> Vec<String> {
                 Some(b) => format!("{b:.2}"),
                 None => "-".into(),
             };
-            format!("track {bpm} {} {}", t.pfad, t.titel)
+            // Camelot, nicht der Name: Wer die Zeile liest, will mischen, und
+            // dafür ist die Zahl auf dem Rad die brauchbare Form.
+            let key = match t.tonart {
+                Some(k) => k.camelot(),
+                None => "-".into(),
+            };
+            format!("track {bpm} {key} {} {}", t.pfad, t.titel)
         })
         .collect();
 
@@ -1163,6 +1254,8 @@ mod tests {
                 "beatjump" => Some("4"),
                 "search" => Some("test"),
                 "search_mixable" => Some("128"),
+                "search_harmonic" => Some("Am"),
+                "playlist" => Some("Freitag"),
                 "fx_sync" => Some("1"),
                 "record" => Some("/tmp/musik-katalogtest.wav"),
                 _ => None,
@@ -1299,9 +1392,58 @@ mod aktions_tests {
         let zeilen = pult.ausloesen(&k("master.search"), Some("techno")).unwrap();
         assert_eq!(zeilen.len(), 3);
         assert!(
-            zeilen[0].starts_with("track 128.00 /musik/techno-0.wav"),
+            zeilen[0].starts_with("track 128.00 8A /musik/techno-0.wav"),
             "{zeilen:?}"
         );
+    }
+
+    #[test]
+    fn die_tonart_eines_decks_steht_in_beiden_schreibweisen() {
+        let (pult, _runner) = pult_mit_zwei_decks();
+
+        assert_eq!(pult.lies(&k("deck1.key")).unwrap(), Wert::Text("Am".into()));
+        assert_eq!(
+            pult.lies(&k("deck1.key_camelot")).unwrap(),
+            Wert::Text("8A".into())
+        );
+    }
+
+    #[test]
+    fn ein_deck_ohne_tonart_erfindet_keine() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.deck_mut(0).unwrap().tonart = None;
+
+        assert_eq!(pult.lies(&k("deck1.key")).unwrap(), Wert::Leer);
+        assert_eq!(pult.lies(&k("deck1.key_camelot")).unwrap(), Wert::Leer);
+    }
+
+    #[test]
+    fn harmonisch_suchen_nimmt_beide_schreibweisen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+
+        // Die Test-Sammlung gibt die angefragte Tonart im Pfad zurück — so
+        // lässt sich prüfen, dass `Am` und `8A` dieselbe Anfrage ergeben.
+        for eingabe in ["Am", "8A", "  am  "] {
+            let zeilen = pult
+                .ausloesen(&k("master.search_harmonic"), Some(eingabe))
+                .unwrap_or_else(|e| panic!("{eingabe}: {e}"));
+            assert!(
+                zeilen[0].contains("/musik/8A-0.wav"),
+                "{eingabe}: {zeilen:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn eine_unlesbare_tonart_wird_gemeldet_statt_leer_zu_antworten() {
+        // Ein Tippfehler darf nicht wie eine leere Sammlung aussehen.
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+
+        let fehler = pult.ausloesen(&k("master.search_harmonic"), Some("H-Dur"));
+        assert!(matches!(fehler, Err(Fehler::Argument { .. })), "{fehler:?}");
+
+        let ohne = pult.ausloesen(&k("master.search_harmonic"), None);
+        assert!(matches!(ohne, Err(Fehler::Argument { .. })), "{ohne:?}");
     }
 
     #[test]

@@ -46,7 +46,7 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
 | `musik_status` | Momentaufnahme: Decks, Kanalzüge, Summe, Mitschnitt |
 | `musik_list_controls` | Was es gibt — mit Bereich, Einheit und Bedeutung |
 | `musik_get` | Einen Wert lesen |
-| `musik_search` | Sammlung durchsuchen, nach Text oder passendem Tempo |
+| `musik_search` | Sammlung durchsuchen, nach Text, Tempo oder Tonart |
 | `musik_set` | Einen Wert setzen |
 | `musik_do` | Eine Aktion auslösen: laden, syncen, Cue, Mitschnitt |
 

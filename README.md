@@ -60,7 +60,8 @@ Alternativenvergleich in [docs/APIS.md](docs/APIS.md).
 
 **Neun von zehn Phasen sind gebaut.** Die Software lässt sich bedienen:
 Tracks aus der Sammlung auf die Decks legen, Wellenform und Beatgrid sehen,
-mischen, mit Effekten, und das Ganze mitschneiden. Was fehlt, sind Stems und MIDI.
+nach Tempo und Tonart aussuchen, mischen, mit Effekten, und das Ganze
+mitschneiden. Was fehlt, sind Stems und MIDI.
 
 Der ausführliche Bauplan der DJ-Software mit Architektur, Abnahmekriterien und
 Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
@@ -68,11 +69,11 @@ Risiken liegt in **[docs/PLAN.md](docs/PLAN.md)**. Grobe Reihenfolge:
 | Phase | Inhalt |
 | --- | --- |
 | 1 ⚙️ | Mehrdeck-Engine mit Mixer, Cue-Bus und AUX — Code steht, Abnahme braucht Hardware |
-| ~~2~~ ✅ | ~~Analyse-Pipeline (BPM, Grid, Peaks)~~ |
+| ~~2~~ ✅ | ~~Analyse-Pipeline (BPM, Grid, Tonart, Peaks)~~ |
 | ~~3~~ ✅ | ~~UI mit Wellenformen, Beatgrid und Plattenkiste~~ |
 | ~~4~~ ✅ | ~~Sync und Beatmatching über Tempo und Phase~~ |
 | ~~5~~ ✅ | ~~Hot Cues und Loops~~ |
-| ~~6~~ ✅ | ~~Library inkl. Traktor-Import~~ |
+| ~~6~~ ✅ | ~~Library inkl. Traktor-Import, Suche nach Tempo und Tonart~~ |
 | ~~S~~ ✅ | ~~Steuerraum und Fernsteuerung~~ — [docs/STEUERUNG.md](docs/STEUERUNG.md) |
 | ~~7~~ ✅ | ~~Effekte: Delay, Gater, Flanger, Crusher — post-fader, tempo-synchron~~ |
 | ~~9~~ ✅ | ~~Mitschnitt der Summe als WAV~~ |
@@ -196,7 +197,7 @@ Tracks analysieren — braucht **kein** Audiogerät:
 cargo run -p musik-cli --bin musik-analyze -- ~/Musik/*.mp3
 ```
 
-Liefert BPM, Beatgrid-Anker und Wellenform-Spitzen und legt sie als Sidecar
+Liefert BPM, Beatgrid-Anker, Tonart und Wellenform-Spitzen und legt sie als Sidecar
 unter `.musik-analyse/` ab, adressiert über einen Hash des Audioinhalts. Ein
 zweiter Lauf über dieselbe Datei liest aus dem Cache; ein umbenannter Ordner
 entwertet die Analyse nicht.
@@ -219,10 +220,12 @@ Sammlung aufbauen — ebenfalls **ohne** Audiogerät:
 cargo run -p musik-cli --bin musik-lib -- scan ~/Musik
 cargo run -p musik-cli --bin musik-lib -- import-traktor ~/Documents/Native\ Instruments/Traktor/collection.nml
 cargo run -p musik-cli --bin musik-lib -- mixable 128
+cargo run -p musik-cli --bin musik-lib -- harmonic 8A
 ```
 
-`scan` dekodiert, analysiert und legt Tempo, Beatgrid und Inhalts-Hash in einer
-SQLite-Datei ab. `import-traktor` übernimmt Tempo, Beatgrid und Hot Cues aus
+`scan` dekodiert, analysiert und legt Tempo, Beatgrid, Tonart und Inhalts-Hash
+in einer SQLite-Datei ab. `mixable` sucht nach Tempo, `harmonic` nach Tonart —
+letzteres nach der Regel des Camelot-Rads und wahlweise als `Am` oder `8A`. `import-traktor` übernimmt Tempo, Beatgrid und Hot Cues aus
 einer bestehenden Traktor-Sammlung — ⚠️ gegen eine *echte* `collection.nml` ist
 das noch nicht geprüft, nur gegen selbst geschriebene Beispiele. Der erste Lauf
 gehört stichprobenartig nachgesehen.

@@ -91,6 +91,9 @@ pub struct MusikApp {
     pub decks: Vec<DeckUi>,
     pub suche: String,
     pub treffer: Vec<Treffer>,
+    /// Namen der Playlists, einmal beim Start geholt.
+    pub playlisten: Vec<String>,
+    pub playliste: String,
     pub status: String,
     pub screenshot: Option<Screenshot>,
 }
@@ -174,6 +177,7 @@ impl MusikApp {
                         e.titel = fertig.titel.clone();
                         e.artist = fertig.artist;
                         e.frames = fertig.frames;
+                        e.tonart = fertig.tonart;
                         e.lade_status = "bereit".into();
                     }
                     drop(pult);
@@ -249,12 +253,12 @@ impl MusikApp {
         uebersicht: f32,
         zoom: f32,
     ) {
-        let (titel, artist) = match self.pult.lock() {
+        let (titel, artist, tonart) = match self.pult.lock() {
             Ok(pult) => match pult.decks().get(index) {
-                Some(d) => (d.titel.clone(), d.artist.clone()),
-                None => (String::new(), String::new()),
+                Some(d) => (d.titel.clone(), d.artist.clone(), d.tonart),
+                None => (String::new(), String::new(), None),
             },
-            Err(_) => (String::new(), String::new()),
+            Err(_) => (String::new(), String::new(), None),
         };
 
         let (dauer, position, bpm, keylock, laeuft) = {
@@ -291,6 +295,18 @@ impl MusikApp {
                     .monospace()
                     .color(theme::TEXT_LEISE),
             );
+
+            // Beide Schreibweisen nebeneinander: Der Name sagt, was klingt,
+            // die Camelot-Zahl sagt, wozu es passt. Wer harmonisch mischt,
+            // vergleicht die Zahlen der beiden Decks.
+            if let Some(k) = tonart {
+                ui.label(
+                    RichText::new(format!("{}  {}", k.name(), k.camelot()))
+                        .monospace()
+                        .color(theme::TEXT_LEISE),
+                )
+                .on_hover_text("Tonart und Camelot-Zahl — gleiche Zahl oder ±1 passt");
+            }
         });
 
         ui.add_space(2.0);
@@ -519,6 +535,48 @@ impl MusikApp {
                 self.mischbar_suchen(1);
             }
 
+            // Tempo und Tonart sind zwei Fragen, und die Antworten
+            // überschneiden sich nur zufällig. Deshalb zwei Knöpfe und keiner,
+            // der beides zugleich einschränkt: Wer harmonisch sucht, nimmt
+            // gern ein Tempo in Kauf, das der Fader noch hinbiegt.
+            if ui
+                .button("Harmonisch zu A")
+                .on_hover_text("Tracks, deren Tonart zu Deck A passt")
+                .clicked()
+            {
+                self.harmonisch_suchen(0);
+            }
+            if ui
+                .button("Harmonisch zu B")
+                .on_hover_text("Tracks, deren Tonart zu Deck B passt")
+                .clicked()
+            {
+                self.harmonisch_suchen(1);
+            }
+
+            // Playlists gab es in der Sammlung schon lange; erreichbar waren
+            // sie nie — weder hier noch über den Steuerraum.
+            if !self.playlisten.is_empty() {
+                let vorher = self.playliste.clone();
+                egui::ComboBox::from_id_salt("playliste")
+                    .width(150.0)
+                    .selected_text(if self.playliste.is_empty() {
+                        "Playlist …"
+                    } else {
+                        &self.playliste
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.playliste, String::new(), "— alle —");
+                        for name in self.playlisten.clone() {
+                            ui.selectable_value(&mut self.playliste, name.clone(), name);
+                        }
+                    });
+
+                if self.playliste != vorher {
+                    self.playliste_zeigen();
+                }
+            }
+
             if self.treffer.is_empty() && self.suche.is_empty() {
                 ui.label(
                     RichText::new("keine Sammlung geladen — mit --db öffnen")
@@ -536,11 +594,11 @@ impl MusikApp {
             .auto_shrink(false)
             .show(ui, |ui| {
                 egui::Grid::new("trefferliste")
-                    .num_columns(4)
+                    .num_columns(5)
                     .striped(true)
                     .min_col_width(70.0)
                     .show(ui, |ui| {
-                        for spalte in ["BPM", "KÜNSTLER", "TITEL", "LADEN"] {
+                        for spalte in ["BPM", "KEY", "KÜNSTLER", "TITEL", "LADEN"] {
                             ui.label(
                                 RichText::new(spalte)
                                     .color(theme::TEXT_LEISE)
@@ -556,6 +614,21 @@ impl MusikApp {
                                 .map(|b| format!("{b:6.2}"))
                                 .unwrap_or_else(|| "     —".into());
                             ui.label(RichText::new(bpm).monospace());
+
+                            // Camelot statt Name: In einer Liste zählt, wozu
+                            // etwas passt, und dafür ist die Zahl auf dem Rad
+                            // die Form, die sich vergleichen lässt.
+                            let key = eintrag
+                                .tonart
+                                .map(|k| k.camelot())
+                                .unwrap_or_else(|| "—".into());
+                            ui.label(RichText::new(key).monospace()).on_hover_text(
+                                eintrag
+                                    .tonart
+                                    .map(|k| k.name())
+                                    .unwrap_or_else(|| "keine Tonart bekannt".into()),
+                            );
+
                             ui.label(eintrag.artist.clone().unwrap_or_else(|| "—".into()));
                             ui.label(&eintrag.titel);
 
@@ -580,8 +653,22 @@ impl MusikApp {
             });
     }
 
+    fn playliste_zeigen(&mut self) {
+        let Ok(pult) = self.pult.lock() else {
+            return;
+        };
+        if self.playliste.is_empty() {
+            self.treffer = pult.suche("");
+            self.status = String::new();
+        } else {
+            self.treffer = pult.playlist(&self.playliste);
+            self.status = format!("{}: {} Tracks", self.playliste, self.treffer.len());
+        }
+    }
+
     /// Sucht über das Pult — denselben Weg, den ein Agent nimmt.
     fn suchen(&mut self) {
+        self.playliste.clear();
         if let Ok(pult) = self.pult.lock() {
             self.treffer = pult.suche(&self.suche);
         }
@@ -597,6 +684,36 @@ impl MusikApp {
             self.treffer = pult.suche_mischbar(bpm);
         }
         self.status = format!("Mischbar mit {bpm:.2} BPM: {} Treffer", self.treffer.len());
+    }
+
+    fn harmonisch_suchen(&mut self, deck: usize) {
+        let tonart = {
+            let Ok(pult) = self.pult.lock() else {
+                return;
+            };
+            pult.deck_tonart(deck)
+        };
+
+        // Ohne Tonart gibt es nichts zu suchen. Die Liste unverändert stehen
+        // zu lassen und nichts zu sagen, sähe aus wie ein leeres Ergebnis.
+        let Some(tonart) = tonart else {
+            self.status = format!(
+                "Deck {} hat keine Tonart — analysiert wird beim Laden",
+                if deck == 0 { "A" } else { "B" }
+            );
+            return;
+        };
+
+        self.playliste.clear();
+        if let Ok(pult) = self.pult.lock() {
+            self.treffer = pult.suche_harmonisch(tonart);
+        }
+        self.status = format!(
+            "Harmonisch zu {} ({}): {} Treffer",
+            tonart.name(),
+            tonart.camelot(),
+            self.treffer.len()
+        );
     }
 
     /// Lädt über denselben Weg, den ein Agent nimmt.
