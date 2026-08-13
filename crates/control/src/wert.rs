@@ -71,6 +71,14 @@ pub enum Art {
     Zahl,
     Auswahl,
     Text,
+    /// Ein Auslöser, kein Wert: `sync`, `load`, einen Hot Cue anspringen.
+    ///
+    /// Mixxx modelliert so etwas als Control, in das man 1.0 schreibt
+    /// (`[Channel1],cue_gotoandplay`). Das funktioniert, ist aber genau die
+    /// Schwäche, die wir vermeiden wollten: Ein Auslöser hat keinen Zustand,
+    /// den man lesen könnte, und `get` darauf müsste etwas erfinden. Hier ist
+    /// er ein eigener Typ mit einem eigenen Verb im Protokoll.
+    Aktion,
 }
 
 impl Art {
@@ -80,6 +88,7 @@ impl Art {
             Art::Zahl => "zahl",
             Art::Auswahl => "auswahl",
             Art::Text => "text",
+            Art::Aktion => "aktion",
         }
     }
 }

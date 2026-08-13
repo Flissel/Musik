@@ -26,6 +26,8 @@ pub struct Beschreibung {
     pub einheit: Einheit,
     pub auswahl: &'static [&'static str],
     pub schreibbar: bool,
+    /// Nur bei [`Art::Aktion`]: was der Auslöser als Argument erwartet.
+    pub argument: &'static str,
     pub text: &'static str,
 }
 
@@ -74,6 +76,7 @@ const fn zahl(
         einheit,
         auswahl: &[],
         schreibbar,
+        argument: "",
         text,
     }
 }
@@ -86,6 +89,21 @@ const fn schalter(element: &'static str, schreibbar: bool, text: &'static str) -
         einheit: Einheit::Keine,
         auswahl: &[],
         schreibbar,
+        argument: "",
+        text,
+    }
+}
+
+/// Ein Auslöser. `argument` beschreibt, was er erwartet — leer heißt: nichts.
+const fn aktion(element: &'static str, argument: &'static str, text: &'static str) -> Beschreibung {
+    Beschreibung {
+        element,
+        art: Art::Aktion,
+        bereich: None,
+        einheit: Einheit::Keine,
+        auswahl: &[],
+        schreibbar: true,
+        argument,
         text,
     }
 }
@@ -98,6 +116,7 @@ const fn text_feld(element: &'static str, text: &'static str) -> Beschreibung {
         einheit: Einheit::Keine,
         auswahl: &[],
         schreibbar: false,
+        argument: "",
         text,
     }
 }
@@ -172,6 +191,29 @@ pub static DECK: &[Beschreibung] = &[
     ),
     text_feld("title", "Titel des geladenen Tracks"),
     text_feld("artist", "Künstler des geladenen Tracks"),
+    // Ohne das erfährt ein Agent nie, dass er den nächsten Track auflegen
+    // muss. Für autonomes Auflegen ist es die zentrale Information.
+    schalter("finished", false, "Track ist durchgelaufen"),
+    text_feld(
+        "load_status",
+        "Stand des letzten Ladeauftrags: bereit, laedt oder ein Fehler",
+    ),
+    aktion(
+        "sync",
+        "[deck]",
+        "Auf das andere Deck ziehen — Tempo UND Phase; ohne Argument das jeweils andere",
+    ),
+    aktion(
+        "load",
+        "<pfad>",
+        "Track laden; arbeitet im Hintergrund, Fortschritt über load_status",
+    ),
+    aktion("jump_cue", "<1..8>", "Einen gesetzten Hot Cue anspringen"),
+    aktion(
+        "beatjump",
+        "<beats>",
+        "Um so viele Beats springen, negativ zurück",
+    ),
 ];
 
 /// Hot Cues heißen `cue1` bis `cue8` und lassen sich nicht als feste Liste
@@ -190,6 +232,7 @@ pub fn hot_cue_beschreibung(index: usize) -> Option<Beschreibung> {
         einheit: Einheit::Sekunden,
         auswahl: &[],
         schreibbar: true,
+        argument: "",
         text: "Hot Cue; Schreiben setzt ihn, Lesen gibt seine Position oder '-'",
     })
 }
@@ -234,11 +277,22 @@ pub static KANAL: &[Beschreibung] = &[
         einheit: Einheit::Keine,
         auswahl: &["a", "b", "thru"],
         schreibbar: true,
+        argument: "",
         text: "Seite am Crossfader; 'thru' geht am Crossfader vorbei",
     },
 ];
 
 pub static MASTER: &[Beschreibung] = &[
+    aktion(
+        "search",
+        "<text>",
+        "Die Sammlung durchsuchen; antwortet mit einer Zeile je Treffer",
+    ),
+    aktion(
+        "search_mixable",
+        "<bpm>",
+        "Tracks suchen, die tempomäßig zu diesem Wert passen",
+    ),
     zahl(
         "crossfader",
         -1.0,

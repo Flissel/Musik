@@ -24,6 +24,32 @@ use crate::katalog::{self, Beschreibung};
 use crate::schluessel::{Gruppe, Schluessel};
 use crate::wert::{Art, Wert};
 
+/// Ein Treffer aus der Sammlung, so knapp wie er über die Leitung geht.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Treffer {
+    pub pfad: String,
+    pub titel: String,
+    pub artist: Option<String>,
+    pub bpm: Option<f32>,
+}
+
+/// Was das Pult nicht selbst kann: suchen und laden.
+///
+/// Beides braucht Dinge, die hier nichts zu suchen haben — eine SQLite-Datei
+/// und einen Dekodierer. Statt `control` von beidem abhängig zu machen,
+/// reicht der Betreiber sie herein.
+///
+/// `laden` **darf nicht blockieren.** Dekodieren und Analysieren dauern
+/// Sekunden, und das Pult liegt währenddessen unter einem Mutex, an dem die
+/// Oberfläche hängt. Die Umsetzung nimmt den Auftrag an und arbeitet
+/// woanders; der Fortschritt kommt über `deckN.load_status` zurück.
+pub trait Sammlung: Send {
+    fn suchen(&self, text: &str, grenze: usize) -> Vec<Treffer>;
+    /// Tracks, die tempomäßig zu `bpm` passen.
+    fn suchen_mischbar(&self, bpm: f32, grenze: usize) -> Vec<Treffer>;
+    fn laden(&self, deck: usize, pfad: &str) -> Result<(), String>;
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Fehler {
     UnbekanntesControl(String),
@@ -36,6 +62,16 @@ pub enum Fehler {
         control: String,
         erlaubt: Vec<String>,
     },
+    /// Eine Aktion lässt sich nicht wie ein Wert setzen und umgekehrt.
+    IstEineAktion(String),
+    IstKeineAktion(String),
+    /// Die Aktion braucht ein Argument, oder es taugt nicht.
+    Argument {
+        control: String,
+        erwartet: String,
+    },
+    /// Die Aktion war zulässig, ging aber schief.
+    Gescheitert(String),
 }
 
 impl std::fmt::Display for Fehler {
@@ -49,6 +85,12 @@ impl std::fmt::Display for Fehler {
             Fehler::UnbekannteAuswahl { control, erlaubt } => {
                 write!(f, "{control} kennt nur: {}", erlaubt.join(", "))
             }
+            Fehler::IstEineAktion(k) => write!(f, "{k} ist eine Aktion — mit 'do' auslösen"),
+            Fehler::IstKeineAktion(k) => write!(f, "{k} ist keine Aktion — mit 'set' setzen"),
+            Fehler::Argument { control, erwartet } => {
+                write!(f, "{control} braucht ein Argument: {erwartet}")
+            }
+            Fehler::Gescheitert(text) => f.write_str(text),
         }
     }
 }
@@ -64,6 +106,22 @@ pub struct DeckEintrag {
     pub frames: u64,
     pub titel: String,
     pub artist: String,
+    /// Was der letzte Ladeauftrag macht: `bereit`, `laedt` oder ein Fehler.
+    pub lade_status: String,
+}
+
+impl DeckEintrag {
+    pub fn neu(state: Arc<DeckState>, kanal: usize, sample_rate: u32) -> DeckEintrag {
+        DeckEintrag {
+            state,
+            kanal,
+            sample_rate,
+            frames: 0,
+            titel: String::new(),
+            artist: String::new(),
+            lade_status: "bereit".into(),
+        }
+    }
 }
 
 /// Gespiegelte Reglerstellung eines Kanalzuges.
@@ -123,6 +181,7 @@ pub struct Steuerpult {
     kanaele: Vec<KanalSpiegel>,
     master: MasterSpiegel,
     handle: EngineHandle,
+    sammlung: Option<Box<dyn Sammlung>>,
 }
 
 impl Steuerpult {
@@ -132,7 +191,14 @@ impl Steuerpult {
             kanaele: Vec::new(),
             master: MasterSpiegel::default(),
             handle,
+            sammlung: None,
         }
+    }
+
+    /// Hängt Suche und Laden an. Ohne das antworten beide mit einem Fehler,
+    /// statt stillschweigend nichts zu tun.
+    pub fn sammlung_setzen(&mut self, sammlung: Box<dyn Sammlung>) {
+        self.sammlung = Some(sammlung);
     }
 
     pub fn deck_hinzufuegen(&mut self, eintrag: DeckEintrag) -> usize {
@@ -227,8 +293,12 @@ impl Steuerpult {
     }
 
     pub fn lies(&self, k: &Schluessel) -> Result<Wert, Fehler> {
-        if self.beschreibung(k).is_none() {
-            return Err(Fehler::UnbekanntesControl(k.to_string()));
+        match self.beschreibung(k) {
+            None => return Err(Fehler::UnbekanntesControl(k.to_string())),
+            // Ein Auslöser hat keinen Zustand. Etwas zurückzugeben hieße,
+            // etwas zu erfinden.
+            Some(b) if b.art == Art::Aktion => return Err(Fehler::IstEineAktion(k.to_string())),
+            Some(_) => {}
         }
 
         match k.gruppe {
@@ -274,6 +344,8 @@ impl Steuerpult {
             },
             "title" => Wert::Text(d.titel.clone()),
             "artist" => Wert::Text(d.artist.clone()),
+            "finished" => Wert::Schalter(d.state.is_finished()),
+            "load_status" => Wert::Text(d.lade_status.clone()),
             _ => {
                 let c = self.hot_cue_index(element)?;
                 match d.state.cue(c) {
@@ -315,10 +387,184 @@ impl Steuerpult {
         Some(wert)
     }
 
+    /// Löst eine Aktion aus.
+    ///
+    /// Antwortet mit Zeilen, die der Aufrufer zu sehen bekommt — `sync` meldet
+    /// zurück, wie weit die Phase danebenlag, `search` gibt seine Treffer aus.
+    /// Ein leerer Rückgabewert heißt schlicht: hat geklappt.
+    pub fn ausloesen(
+        &mut self,
+        k: &Schluessel,
+        argument: Option<&str>,
+    ) -> Result<Vec<String>, Fehler> {
+        let Some(b) = self.beschreibung(k) else {
+            return Err(Fehler::UnbekanntesControl(k.to_string()));
+        };
+        if b.art != Art::Aktion {
+            return Err(Fehler::IstKeineAktion(k.to_string()));
+        }
+
+        let fehlt = || Fehler::Argument {
+            control: k.to_string(),
+            erwartet: b.argument.to_string(),
+        };
+
+        match (k.gruppe, k.element.as_str()) {
+            (Gruppe::Deck(i), "sync") => self.sync(i, argument),
+            (Gruppe::Deck(i), "load") => {
+                let pfad = argument.ok_or_else(fehlt)?;
+                self.laden(i, pfad)
+            }
+            (Gruppe::Deck(i), "jump_cue") => {
+                let nummer: usize = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
+                self.hot_cue_anspringen(i, nummer)
+            }
+            (Gruppe::Deck(i), "beatjump") => {
+                let beats: f64 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
+                self.beatjump(i, beats)
+            }
+            (Gruppe::Master, "search") => {
+                let treffer = self.suche(argument.unwrap_or(""));
+                Ok(treffer_zeilen(&treffer))
+            }
+            (Gruppe::Master, "search_mixable") => {
+                let bpm: f32 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
+                let treffer = self.suche_mischbar(bpm);
+                Ok(treffer_zeilen(&treffer))
+            }
+            _ => Err(Fehler::UnbekanntesControl(k.to_string())),
+        }
+    }
+
+    /// Zieht ein Deck auf ein anderes — Tempo **und** Phase.
+    ///
+    /// Ohne Argument das jeweils andere, was bei zwei Decks das Erwartbare
+    /// ist. Bei mehr Decks muss man sagen, welches gemeint ist, statt dass
+    /// eine Reihenfolge entscheidet.
+    fn sync(&mut self, slave: usize, argument: Option<&str>) -> Result<Vec<String>, Fehler> {
+        let master = match argument {
+            Some(name) => match Gruppe::parse(name) {
+                Some(Gruppe::Deck(i)) => i,
+                _ => {
+                    return Err(Fehler::Argument {
+                        control: format!("deck{}.sync", slave + 1),
+                        erwartet: "ein Deck, etwa deck1".into(),
+                    })
+                }
+            },
+            None if self.decks.len() == 2 => 1 - slave.min(1),
+            None => {
+                return Err(Fehler::Argument {
+                    control: format!("deck{}.sync", slave + 1),
+                    erwartet: "bei mehr als zwei Decks das Ziel benennen".into(),
+                })
+            }
+        };
+
+        if master == slave {
+            return Err(Fehler::Gescheitert(
+                "ein Deck lässt sich nicht auf sich selbst ziehen".into(),
+            ));
+        }
+
+        let (Some(m), Some(s)) = (self.decks.get(master), self.decks.get(slave)) else {
+            return Err(Fehler::UnbekanntesControl(format!("deck{}", master + 1)));
+        };
+        let rate = s.sample_rate;
+
+        match audio_engine::sync(&m.state, &s.state, rate) {
+            Some(plan) => Ok(vec![format!(
+                "sync deck{} auf deck{} tempo {:.5} phase {:+.4}",
+                slave + 1,
+                master + 1,
+                plan.tempo,
+                plan.phase_error_beats
+            )]),
+            None => Err(Fehler::Gescheitert(
+                "Sync braucht auf beiden Decks ein Beatgrid".into(),
+            )),
+        }
+    }
+
+    fn laden(&mut self, deck: usize, pfad: &str) -> Result<Vec<String>, Fehler> {
+        if deck >= self.decks.len() {
+            return Err(Fehler::UnbekanntesControl(format!("deck{}", deck + 1)));
+        }
+        let Some(sammlung) = self.sammlung.as_ref() else {
+            return Err(Fehler::Gescheitert(
+                "keine Sammlung angeschlossen — Laden geht nicht".into(),
+            ));
+        };
+
+        sammlung.laden(deck, pfad).map_err(Fehler::Gescheitert)?;
+        // Der Auftrag ist angenommen, nicht erledigt. Wer wissen will, wann
+        // der Track liegt, fragt `load_status` oder abonniert es.
+        self.decks[deck].lade_status = "laedt".into();
+        Ok(vec![format!("load deck{} angenommen", deck + 1)])
+    }
+
+    fn hot_cue_anspringen(&mut self, deck: usize, nummer: usize) -> Result<Vec<String>, Fehler> {
+        let Some(d) = self.decks.get(deck) else {
+            return Err(Fehler::UnbekanntesControl(format!("deck{}", deck + 1)));
+        };
+        let Some(index) = nummer.checked_sub(1).filter(|i| *i < katalog::HOT_CUES) else {
+            return Err(Fehler::Argument {
+                control: format!("deck{}.jump_cue", deck + 1),
+                erwartet: format!("1 bis {}", katalog::HOT_CUES),
+            });
+        };
+
+        // Ein ungesetzter Cue springt nirgendwohin — das stumm an den Anfang
+        // zu deuten wäre auf einer Anlage ein Unfall.
+        if d.state.cue(index).is_none() {
+            return Err(Fehler::Gescheitert(format!(
+                "deck{}.cue{nummer} ist nicht gesetzt",
+                deck + 1
+            )));
+        }
+
+        d.state.jump_to_cue(index);
+        Ok(Vec::new())
+    }
+
+    fn beatjump(&mut self, deck: usize, beats: f64) -> Result<Vec<String>, Fehler> {
+        let Some(d) = self.decks.get(deck) else {
+            return Err(Fehler::UnbekanntesControl(format!("deck{}", deck + 1)));
+        };
+        let Some(grid) = d.state.grid() else {
+            return Err(Fehler::Gescheitert("Beatjump braucht ein Beatgrid".into()));
+        };
+
+        let je_beat = grid.frames_per_beat(d.sample_rate);
+        let jetzt = d.state.position_frames() as f64;
+        let ziel = (jetzt + beats * je_beat).clamp(0.0, d.frames as f64);
+        d.state.seek_frames(ziel as u64);
+        Ok(Vec::new())
+    }
+
+    /// Freitextsuche. Auch die Oberfläche geht hier durch — zwei Suchwege
+    /// wären zwei Stellen, an denen sich das Ergebnis unterscheiden könnte.
+    pub fn suche(&self, text: &str) -> Vec<Treffer> {
+        match self.sammlung.as_ref() {
+            Some(s) => s.suchen(text, GRENZE),
+            None => Vec::new(),
+        }
+    }
+
+    pub fn suche_mischbar(&self, bpm: f32) -> Vec<Treffer> {
+        match self.sammlung.as_ref() {
+            Some(s) => s.suchen_mischbar(bpm, GRENZE),
+            None => Vec::new(),
+        }
+    }
+
     pub fn schreibe(&mut self, k: &Schluessel, wert: Wert) -> Result<(), Fehler> {
         let Some(b) = self.beschreibung(k) else {
             return Err(Fehler::UnbekanntesControl(k.to_string()));
         };
+        if b.art == Art::Aktion {
+            return Err(Fehler::IstEineAktion(k.to_string()));
+        }
         if !b.schreibbar {
             return Err(Fehler::NichtSchreibbar(k.to_string()));
         }
@@ -521,6 +767,29 @@ impl Steuerpult {
     }
 }
 
+/// Wie viele Treffer eine Suche höchstens zurückgibt.
+pub const GRENZE: usize = 200;
+
+fn treffer_zeilen(treffer: &[Treffer]) -> Vec<String> {
+    let mut zeilen: Vec<String> = treffer
+        .iter()
+        .map(|t| {
+            let bpm = match t.bpm {
+                Some(b) => format!("{b:.2}"),
+                None => "-".into(),
+            };
+            format!("track {bpm} {} {}", t.pfad, t.titel)
+        })
+        .collect();
+
+    // Wenn die Grenze greift, muss das dastehen. Eine abgeschnittene Liste,
+    // die wie eine vollständige aussieht, ist eine Falschaussage.
+    if treffer.len() >= GRENZE {
+        zeilen.push(format!("hinweis auf {GRENZE} Treffer begrenzt"));
+    }
+    zeilen
+}
+
 pub fn assign_name(assign: Assign) -> &'static str {
     match assign {
         Assign::A => "a",
@@ -701,8 +970,12 @@ mod tests {
         assert!(!liste.iter().any(|(k, _)| k.to_string() == "deck3.play"));
         assert!(!liste.iter().any(|(k, _)| k.to_string() == "channel4.fader"));
 
-        // Und jedes aufgezählte Control lässt sich auch wirklich lesen.
-        for (schluessel, _) in &liste {
+        // Und jedes aufgezählte Control lässt sich auch wirklich lesen —
+        // Aktionen ausgenommen, die haben keinen Zustand.
+        for (schluessel, b) in &liste {
+            if b.art == Art::Aktion {
+                continue;
+            }
             pult.lies(schluessel)
                 .unwrap_or_else(|e| panic!("{schluessel} steht in der Liste, aber: {e}"));
         }
@@ -715,7 +988,7 @@ mod tests {
         let (mut pult, _runner) = pult_mit_zwei_decks();
 
         for (schluessel, b) in pult.liste() {
-            if !b.schreibbar {
+            if !b.schreibbar || b.art == Art::Aktion {
                 continue;
             }
             let wert = match b.art {
@@ -726,5 +999,192 @@ mod tests {
             pult.schreibe(&schluessel, wert)
                 .unwrap_or_else(|e| panic!("{schluessel} ist als schreibbar gemeldet, aber: {e}"));
         }
+    }
+
+    #[test]
+    fn jede_aufgezaehlte_aktion_ist_auch_umgesetzt() {
+        // Die Gegenprobe zur Liste: Eine Aktion, die im Katalog steht, aber
+        // im Pult nicht verdrahtet ist, würde sich mit „unbekanntes Control"
+        // melden — und das wäre eine Lüge, denn aufgezählt hat sie sich.
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+
+        for (schluessel, b) in pult.liste() {
+            if b.art != Art::Aktion {
+                continue;
+            }
+            // Mit einem plausiblen Argument, damit nicht schon daran scheitert.
+            let argument = match schluessel.element.as_str() {
+                "load" => Some("/musik/track.wav"),
+                "jump_cue" => Some("1"),
+                "beatjump" => Some("4"),
+                "search" => Some("test"),
+                "search_mixable" => Some("128"),
+                _ => None,
+            };
+
+            match pult.ausloesen(&schluessel, argument) {
+                Ok(_) => {}
+                // Ein sachlicher Fehlschlag ist in Ordnung — ein nicht
+                // gesetzter Hot Cue etwa. Ein unbekanntes Control nicht.
+                Err(Fehler::Gescheitert(_)) => {}
+                Err(e) => panic!("{schluessel} steht im Katalog, aber: {e}"),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod aktions_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    #[test]
+    fn sync_zieht_das_deck_auf_das_andere() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.decks()[0]
+            .state
+            .set_grid(Some(audio_core::Beatgrid::new(128.0, 0, 1.0)));
+        pult.decks()[1]
+            .state
+            .set_grid(Some(audio_core::Beatgrid::new(124.0, 0, 1.0)));
+
+        let zeilen = pult.ausloesen(&k("deck2.sync"), None).expect("sync");
+        assert!(zeilen[0].starts_with("sync deck2 auf deck1"), "{zeilen:?}");
+
+        // Das Tempo muss wirklich angekommen sein: 128/124 ≈ 1.0323.
+        let Wert::Zahl(tempo) = pult.lies(&k("deck2.tempo")).unwrap() else {
+            panic!("Tempo ist keine Zahl");
+        };
+        assert!((tempo - 128.0 / 124.0).abs() < 1e-3, "Tempo {tempo}");
+    }
+
+    #[test]
+    fn sync_ohne_beatgrid_sagt_das_statt_zu_raten() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.decks()[1].state.set_grid(None);
+
+        let fehler = pult.ausloesen(&k("deck2.sync"), None);
+        assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
+    }
+
+    #[test]
+    fn ein_deck_laesst_sich_nicht_auf_sich_selbst_ziehen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let fehler = pult.ausloesen(&k("deck1.sync"), Some("deck1"));
+        assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
+    }
+
+    #[test]
+    fn hot_cues_lassen_sich_ausloesen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.cue2"), Wert::Zahl(10.0)).unwrap();
+
+        // Der Sprung selbst ist erst ein Wunsch, den der Audio-Thread
+        // ausführt — dass er ankommt, prüfen die Tests in `audio-core`. Hier
+        // zählt, dass die Aktion überhaupt durchgereicht wird.
+        assert!(pult.ausloesen(&k("deck1.jump_cue"), Some("2")).is_ok());
+    }
+
+    #[test]
+    fn ein_ungesetzter_hot_cue_springt_nirgendwohin() {
+        // Stumm an den Anfang zu springen wäre auf einer Anlage ein Unfall.
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let fehler = pult.ausloesen(&k("deck1.jump_cue"), Some("5"));
+        assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
+
+        let daneben = pult.ausloesen(&k("deck1.jump_cue"), Some("99"));
+        assert!(
+            matches!(daneben, Err(Fehler::Argument { .. })),
+            "{daneben:?}"
+        );
+    }
+
+    #[test]
+    fn beatjump_braucht_ein_grid() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.ausloesen(&k("deck1.beatjump"), Some("4")).unwrap();
+
+        pult.decks()[0].state.set_grid(None);
+        let fehler = pult.ausloesen(&k("deck1.beatjump"), Some("4"));
+        assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
+    }
+
+    #[test]
+    fn laden_meldet_sich_als_angenommen_und_nicht_als_fertig() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+
+        let zeilen = pult
+            .ausloesen(&k("deck1.load"), Some("/musik/track.wav"))
+            .unwrap();
+        assert_eq!(zeilen, vec!["load deck1 angenommen"]);
+        assert_eq!(
+            pult.lies(&k("deck1.load_status")).unwrap(),
+            Wert::Text("laedt".into())
+        );
+    }
+
+    #[test]
+    fn ein_abgelehnter_ladeauftrag_faelscht_den_status_nicht() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let fehler = pult.ausloesen(&k("deck1.load"), Some("/musik/liste.txt"));
+
+        assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
+        assert_eq!(
+            pult.lies(&k("deck1.load_status")).unwrap(),
+            Wert::Text("bereit".into()),
+            "ein abgelehnter Auftrag darf nicht als laufend dastehen"
+        );
+    }
+
+    #[test]
+    fn laden_ohne_pfad_wird_abgewiesen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let fehler = pult.ausloesen(&k("deck1.load"), None);
+        assert!(matches!(fehler, Err(Fehler::Argument { .. })), "{fehler:?}");
+    }
+
+    #[test]
+    fn die_sammlung_laesst_sich_durchsuchen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let zeilen = pult.ausloesen(&k("master.search"), Some("techno")).unwrap();
+        assert_eq!(zeilen.len(), 3);
+        assert!(
+            zeilen[0].starts_with("track 128.00 /musik/techno-0.wav"),
+            "{zeilen:?}"
+        );
+    }
+
+    #[test]
+    fn aktionen_und_werte_werden_nicht_verwechselt() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+
+        // Eine Aktion hat keinen Zustand, den man lesen könnte.
+        assert!(matches!(
+            pult.lies(&k("deck1.sync")),
+            Err(Fehler::IstEineAktion(_))
+        ));
+        assert!(matches!(
+            pult.schreibe(&k("deck1.sync"), Wert::Schalter(true)),
+            Err(Fehler::IstEineAktion(_))
+        ));
+        // Und umgekehrt.
+        assert!(matches!(
+            pult.ausloesen(&k("deck1.play"), None),
+            Err(Fehler::IstKeineAktion(_))
+        ));
+    }
+
+    #[test]
+    fn das_ende_eines_tracks_ist_von_aussen_sichtbar() {
+        // Ohne das erfährt ein Agent nie, wann er nachlegen muss.
+        let (pult, _runner) = pult_mit_zwei_decks();
+        assert_eq!(
+            pult.lies(&k("deck1.finished")).unwrap(),
+            Wert::Schalter(false)
+        );
     }
 }

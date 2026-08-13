@@ -37,8 +37,10 @@ pub(crate) mod testing;
 
 pub use katalog::Beschreibung;
 pub use protokoll::behandle;
+pub use protokoll::Sitzung;
 pub use pult::{
-    assign_aus_name, assign_name, DeckEintrag, Fehler, KanalSpiegel, MasterSpiegel, Steuerpult,
+    assign_aus_name, assign_name, DeckEintrag, Fehler, KanalSpiegel, MasterSpiegel, Sammlung,
+    Steuerpult, Treffer,
 };
 pub use schluessel::{Gruppe, Schluessel};
 pub use server::{Server, ServerFehler};

@@ -13,7 +13,7 @@
 
 mod app;
 mod demo;
-mod laden;
+mod sammlung;
 mod theme;
 mod waveform;
 
@@ -111,18 +111,11 @@ fn main() -> Result<()> {
         engine.channel(kanal).set_fader(fader);
         state.set_playing(demo);
 
-        eintraege.push((
-            DeckEintrag {
-                state: Arc::clone(&state),
-                kanal,
-                sample_rate: RATE,
-                frames,
-                titel,
-                artist,
-            },
-            fader,
-            name,
-        ));
+        let mut eintrag = DeckEintrag::neu(Arc::clone(&state), kanal, RATE);
+        eintrag.frames = frames;
+        eintrag.titel = titel;
+        eintrag.artist = artist;
+        eintraege.push((eintrag, fader, name));
 
         decks.push(DeckUi {
             name: name.to_string(),
@@ -153,6 +146,23 @@ fn main() -> Result<()> {
         pult.deck_hinzufuegen(eintrag);
     }
     pult.kanal_hinzufuegen(KanalSpiegel::neu("AUX", assign_fuer(2)));
+
+    let mut library = args.db.as_ref().and_then(|p| Library::open(p).ok());
+
+    // Suchen und Laden hängen das Pult an die Sammlung und an den Dekodierer.
+    // Ohne das antworten `search` und `load` mit einem Fehler, statt
+    // stillschweigend nichts zu tun.
+    let deck_zustaende: Vec<_> = pult
+        .decks()
+        .iter()
+        .map(|d| (Arc::clone(&d.state), d.sample_rate))
+        .collect();
+    let (sammlung, ergebnisse) =
+        sammlung::AppSammlung::neu(library.take(), deck_zustaende, args.cache.clone());
+    pult.sammlung_setzen(Box::new(sammlung));
+    // Die erste Liste kommt über denselben Weg wie jede spätere Suche.
+    let treffer = pult.suche("");
+
     let pult = Arc::new(std::sync::Mutex::new(pult));
 
     let (output, hinweis) = match Output::open(runner) {
@@ -174,12 +184,6 @@ fn main() -> Result<()> {
         }
     };
 
-    let library = args.db.as_ref().and_then(|p| Library::open(p).ok());
-    let treffer = library
-        .as_ref()
-        .and_then(|l| l.search(&library::Query::default()).ok())
-        .unwrap_or_default();
-
     // Ab hier ist die Anlage von außen bedienbar. Scheitert das, läuft die
     // Oberfläche trotzdem — nur eben allein.
     let steuerung = match Server::starten(&args.socket, Arc::clone(&pult)) {
@@ -194,12 +198,11 @@ fn main() -> Result<()> {
     };
 
     let anwendung = MusikApp {
+        ergebnisse,
         pult,
         output,
         audio_hinweis: hinweis,
         decks,
-        library,
-        analyse_cache: args.cache.clone(),
         suche: String::new(),
         treffer,
         status: if demo {

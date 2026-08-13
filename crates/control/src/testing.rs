@@ -10,7 +10,7 @@ use std::sync::Arc;
 use audio_core::deck::DeckState;
 use audio_engine::{Assign, DeckSource, Engine, EngineRunner, SilentSource};
 
-use crate::pult::{DeckEintrag, KanalSpiegel, Steuerpult};
+use crate::pult::{DeckEintrag, KanalSpiegel, Sammlung, Steuerpult, Treffer};
 
 pub const RATE: u32 = 48_000;
 
@@ -32,15 +32,12 @@ pub fn pult_mit_zwei_decks() -> (Steuerpult, EngineRunner) {
 
     for (name, kanal, assign) in &kanaele {
         pult.kanal_hinzufuegen(KanalSpiegel::neu(*name, *assign));
-        pult.deck_hinzufuegen(DeckEintrag {
-            state: Arc::new(DeckState::new()),
-            kanal: *kanal,
-            sample_rate: RATE,
-            // Eine Minute, damit Positionen und Hot Cues Platz haben.
-            frames: RATE as u64 * 60,
-            titel: format!("Testtrack {name}"),
-            artist: "Test".into(),
-        });
+        let mut eintrag = DeckEintrag::neu(Arc::new(DeckState::new()), *kanal, RATE);
+        // Eine Minute, damit Positionen und Hot Cues Platz haben.
+        eintrag.frames = RATE as u64 * 60;
+        eintrag.titel = format!("Testtrack {name}");
+        eintrag.artist = "Test".into();
+        pult.deck_hinzufuegen(eintrag);
     }
     pult.kanal_hinzufuegen(KanalSpiegel::neu("AUX", Assign::Thru));
 
@@ -53,5 +50,36 @@ pub fn pult_mit_zwei_decks() -> (Steuerpult, EngineRunner) {
     }
 
     let _ = DeckSource::new as fn(_) -> _;
+    pult.sammlung_setzen(Box::new(TestSammlung));
     (pult, runner)
+}
+
+/// Eine Sammlung, die nichts liest und nichts dekodiert.
+///
+/// Sie hält fest, dass ein Ladeauftrag *angenommen* wurde — mehr verspricht
+/// die Schnittstelle nicht, und mehr soll ein Test hier auch nicht prüfen.
+pub struct TestSammlung;
+
+impl Sammlung for TestSammlung {
+    fn suchen(&self, text: &str, grenze: usize) -> Vec<Treffer> {
+        (0..3.min(grenze))
+            .map(|i| Treffer {
+                pfad: format!("/musik/{text}-{i}.wav"),
+                titel: format!("{text} {i}"),
+                artist: None,
+                bpm: Some(128.0 + i as f32),
+            })
+            .collect()
+    }
+
+    fn suchen_mischbar(&self, bpm: f32, grenze: usize) -> Vec<Treffer> {
+        self.suchen(&format!("{bpm:.0}"), grenze)
+    }
+
+    fn laden(&self, _deck: usize, pfad: &str) -> Result<(), String> {
+        if pfad.ends_with(".txt") {
+            return Err("keine Audiodatei".into());
+        }
+        Ok(())
+    }
 }

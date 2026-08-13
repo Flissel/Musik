@@ -20,10 +20,20 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use crate::protokoll;
+use crate::protokoll::{self, Sitzung};
 use crate::pult::Steuerpult;
+
+/// Wie oft nach Änderungen für Abonnenten gesehen wird.
+///
+/// Fünfzig Millisekunden sind für einen Menschen unmittelbar und für einen
+/// Regler feiner, als die Hand ihn bewegt. Häufiger wäre nur mehr Verkehr:
+/// Die Abspielposition ändert sich mit jedem Sample, die will niemand
+/// vollständig.
+const ABO_TAKT: Duration = Duration::from_millis(50);
 
 #[derive(Debug)]
 pub enum ServerFehler {
@@ -122,29 +132,81 @@ impl Drop for Server {
 
 #[cfg(unix)]
 fn bediene(strom: std::os::unix::net::UnixStream, pult: Arc<Mutex<Steuerpult>>) {
-    let Ok(schreiber) = strom.try_clone() else {
+    let Ok(zum_schreiben) = strom.try_clone() else {
         return;
     };
-    let leser = BufReader::new(strom);
-    let mut aus = schreiber;
 
+    // Zwei Threads teilen sich die Leitung: dieser antwortet auf Befehle, der
+    // andere meldet Änderungen. Beide schreiben, also braucht der Ausgang ein
+    // Schloss — sonst schöben sich zwei Zeilen ineinander.
+    let aus = Arc::new(Mutex::new(zum_schreiben));
+    let sitzung = Arc::new(Mutex::new(Sitzung::neu()));
+    let laeuft = Arc::new(AtomicBool::new(true));
+
+    let melder = {
+        let aus = Arc::clone(&aus);
+        let sitzung = Arc::clone(&sitzung);
+        let pult = Arc::clone(&pult);
+        let laeuft = Arc::clone(&laeuft);
+
+        std::thread::Builder::new()
+            .name("control-abo".into())
+            .spawn(move || {
+                while laeuft.load(Ordering::Relaxed) {
+                    std::thread::sleep(ABO_TAKT);
+
+                    let zeilen = {
+                        let (Ok(mut s), Ok(p)) = (sitzung.lock(), pult.lock()) else {
+                            continue;
+                        };
+                        if !s.hat_abos() {
+                            continue;
+                        }
+                        s.aenderungen(&p)
+                    };
+
+                    for zeile in zeilen {
+                        if !schreibe(&aus, &zeile) {
+                            return;
+                        }
+                    }
+                }
+            })
+            .ok()
+    };
+
+    let leser = BufReader::new(strom);
     for zeile in leser.lines() {
         let Ok(zeile) = zeile else { break };
 
-        let antwort = match pult.lock() {
-            Ok(mut p) => protokoll::behandle(&mut p, &zeile),
+        let antwort = match (pult.lock(), sitzung.lock()) {
+            (Ok(mut p), Ok(mut s)) => protokoll::behandle(&mut p, &mut s, &zeile),
             // Ein vergifteter Mutex heißt: irgendwo ist ein Thread mit dem
             // Pult in der Hand gestorben. Weiterbedienen wäre geraten.
-            Err(_) => "err Steuerpult ist in einem unklaren Zustand".to_string(),
+            _ => "err Steuerpult ist in einem unklaren Zustand".to_string(),
         };
 
         if antwort.is_empty() {
             continue;
         }
-        if writeln!(aus, "{antwort}").is_err() || aus.flush().is_err() {
+        if !schreibe(&aus, &antwort) {
             break;
         }
     }
+
+    // Der Melder hängt sonst an einer toten Leitung.
+    laeuft.store(false, Ordering::Relaxed);
+    if let Some(t) = melder {
+        let _ = t.join();
+    }
+}
+
+#[cfg(unix)]
+fn schreibe(aus: &Mutex<std::os::unix::net::UnixStream>, zeile: &str) -> bool {
+    let Ok(mut strom) = aus.lock() else {
+        return false;
+    };
+    writeln!(strom, "{zeile}").is_ok() && strom.flush().is_ok()
 }
 
 #[cfg(all(test, unix))]
@@ -213,6 +275,39 @@ mod tests {
         assert_eq!(sprich(&a, "set deck1.play 1"), "ok deck1.play 1");
         // Der zweite Bediener sieht, was der erste getan hat.
         assert_eq!(sprich(&b, "get deck1.play"), "value deck1.play 1");
+    }
+
+    #[test]
+    fn abonnenten_bekommen_aenderungen_ungefragt() {
+        // Der Unterschied zum Pollen: Der Bediener sagt einmal Bescheid und
+        // hört danach zu.
+        let (pult, _runner) = pult_mit_zwei_decks();
+        let pult = Arc::new(Mutex::new(pult));
+        let p = pfad("abo");
+        let server = Server::starten(&p, Arc::clone(&pult)).unwrap();
+
+        let strom = UnixStream::connect(server.pfad()).unwrap();
+        assert_eq!(sprich(&strom, "sub deck1.play"), "ok sub 1 neu, 1 gesamt");
+
+        let mut leser = BufReader::new(strom.try_clone().unwrap());
+        let mut zeile = String::new();
+
+        // Erst der Ist-Zustand …
+        leser.read_line(&mut zeile).unwrap();
+        assert_eq!(zeile.trim_end(), "value deck1.play 0");
+
+        // … dann die Änderung, ohne dass jemand danach fragt.
+        pult.lock()
+            .unwrap()
+            .schreibe(
+                &crate::Schluessel::parse("deck1.play").unwrap(),
+                crate::Wert::Schalter(true),
+            )
+            .unwrap();
+
+        zeile.clear();
+        leser.read_line(&mut zeile).unwrap();
+        assert_eq!(zeile.trim_end(), "value deck1.play 1");
     }
 
     #[test]

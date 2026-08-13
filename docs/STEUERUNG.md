@@ -42,10 +42,68 @@ bei uns der AUX-Eingang, der einen Zug hat und kein Deck.
 | `get <control>` | Wert lesen |
 | `set <control> <wert>` | Wert setzen; `-` leert (Hot Cues) |
 | `setn <control> <0..1>` | normiert setzen — für MIDI |
+| `do <control> [arg]` | Aktion auslösen |
+| `sub <control>…` | Änderungen melden lassen, statt zu fragen |
+| `unsub [control]…` | abbestellen; ohne Argument alles |
 | `help` | Übersicht |
 
 Antworten beginnen mit `control`, `value`, `ok` oder `err`. Ein `err` ist immer
 als solches erkennbar; nichts scheitert stumm.
+
+## Aktionen sind keine Werte
+
+`sync`, `load`, einen Hot Cue anspringen — das sind Auslöser, keine
+Reglerstellungen. Mixxx modelliert so etwas als Control, in das man 1.0
+schreibt (`[Channel1],cue_gotoandplay`). Das funktioniert, ist aber dieselbe
+Schwäche wie beim `double`: Ein Auslöser hat keinen Zustand, den man lesen
+könnte, und `get` darauf müsste etwas erfinden.
+
+Hier haben sie ein eigenes Verb:
+
+```text
+do deck2.sync                → sync deck2 auf deck1 tempo 1.01570 phase -0.1178
+do deck1.load /musik/a.wav   → load deck1 angenommen
+do deck2.jump_cue 1
+do deck1.beatjump -4
+do master.search techno
+do master.search_mixable 128
+get deck1.sync               → err deck1.sync ist eine Aktion — mit 'do' auslösen
+set deck1.sync 1             → err deck1.sync ist eine Aktion — mit 'do' auslösen
+do deck1.play                → err deck1.play ist keine Aktion — mit 'set' setzen
+```
+
+**`sync` ist Tempo *und* Phase**, in einem Befehl. Ohne das müsste ein Agent
+beide BPM lesen, den Quotienten bilden, das Tempo setzen und die Phase selbst
+ausrechnen — und die Phase vergisst man dabei, weil das Ergebnis auch ohne sie
+plausibel aussieht.
+
+**`load` arbeitet im Hintergrund.** Dekodieren und Analysieren dauern Sekunden,
+und das Pult liegt währenddessen unter einem Mutex, an dem die Oberfläche
+hängt. Der Befehl meldet deshalb *Annahme*, nicht Erledigung; der Fortschritt
+steht in `deckN.load_status`. Ein Auftrag, der abgelehnt wird — falscher Pfad
+etwa — lässt den Status unberührt, statt ein Laden vorzutäuschen, das nie
+begonnen hat.
+
+## Zuhören statt fragen
+
+```text
+sub deck1.finished deck1.position
+ok sub 2 neu, 2 gesamt
+value deck1.finished 0
+value deck1.position 12.354000
+value deck1.position 12.404000
+…
+value deck1.finished 1
+```
+
+Das erste, was ein Abo meldet, ist der Ist-Zustand — sonst müsste man nach dem
+Abonnieren noch einmal `get` sagen. Danach kommt nur, was sich geändert hat.
+
+Ehrlich gesagt: Das Pult meldet nichts von sich aus, der Server vergleicht alle
+50 ms. Für Werte, die im Audio-Thread laufen, wäre eine echte Benachrichtigung
+auch sinnlos — die Position ändert sich mit jedem Sample, die will niemand
+vollständig. Der Gewinn liegt darin, dass der Bediener das nicht selbst bauen
+muss, und dass `deckN.finished` ohne Dauerabfrage ankommt.
 
 ## Der Steuerraum beschreibt sich selbst
 
@@ -94,27 +152,44 @@ Zwei bewusste Ausnahmen von der Strenge:
 - **Die Bestätigung nennt den Wert, der wirklich angekommen ist** — nicht den
   gesendeten. `set channel1.fader 9` antwortet `ok channel1.fader 1`.
 
-## Ein Beispiel, das wirklich lief
+## Ein vollständiger Übergang, der wirklich lief
 
-Zwei Decks von außen ineinandergefahren, während die Oberfläche zusah:
+Kein Mausklick, keine Kenntnis der Oberfläche — nur Control-Namen:
 
 ```sh
+do master.search Alpen                  # was gibt es?
+do deck1.load "…/Alpenglühen.wav"       # auflegen
+do master.search_mixable 128            # was passt dazu?
+do deck2.load "…/Nachtschicht.wav"
 set deck1.play 1
-set deck2.play 1
 set channel1.fader 0.9
-set channel2.fader 0.55
-setn channel2.eq_low 0.0        # Bass-Kill über den normierten Weg
-set channel2.filter 0.45
-set channel1.cue 1
-set master.crossfader -0.35
-set deck1.cue1 4.0
-set deck1.loop_beats 4
-set deck2.tempo 1.032           # 124 × 1,032 = 127,97 — auf Deck A gezogen
+do deck2.sync                           # Tempo UND Phase, in einem Befehl
+set deck2.cue1 8.0
+do deck2.jump_cue 1
+set deck2.play 1
+setn channel2.eq_low 0                  # Bass raus …
+set channel2.fader 0.9
+set master.crossfader 0.25
+setn channel1.eq_low 0                  # … und drüben rein: Bass-Swap
+setn channel2.eq_low 0.5
+do deck1.beatjump -4
+sub deck1.finished deck1.position       # aufs Ende horchen
 ```
 
-Danach zeigte die Oberfläche 127,99 gegen 127,98 BPM, den gesetzten Loop, die
-Hot-Cue-Marken in der Wellenform und jeden bewegten Regler an der richtigen
-Stelle. Screenshot: [`bilder/fernsteuerung.png`](bilder/fernsteuerung.png).
+Die Antwort auf `do deck2.sync` war
+
+```text
+sync deck2 auf deck1 tempo 1.01570 phase -0.1178
+```
+
+und danach standen beide Decks auf **127,986 BPM** — 126,008 × 1,0157. Die
+Oberfläche zeigte das Ergebnis unmittelbar: geladene Titel, Tempo +1,57 %,
+die Hot-Cue-Marke in der Wellenform, gekillten Bass, Crossfader auf +0,25.
+
+![Ein Übergang, komplett von außen](bilder/agent-uebergang.png)
+
+Für eine ältere, einfachere Aufnahme ohne Laden und Sync siehe
+[`bilder/fernsteuerung.png`](bilder/fernsteuerung.png).
 
 ## Warum ein Unix-Socket und kein TCP-Port
 
@@ -139,15 +214,26 @@ lock-freie Schlange, die auch die Oberfläche benutzt, und liest aus Atomics
 und aus dem eigenen Spiegel. Der Mutex um das Pult wird nur von Bedienern
 genommen — Oberfläche, Socket, später MIDI. Der Audio-Thread sieht ihn nie.
 
+## Auch die Oberfläche geht hier durch
+
+Nicht nur die Regler: Suchen und Laden nehmen inzwischen denselben Weg. Ein
+Klick auf „A" in der Plattenkiste löst `deck1.load` aus, das Suchfeld ruft
+`master.search`.
+
+Das ist kein Selbstzweck. Vorher hatte die Oberfläche einen eigenen Ladepfad —
+zwei Wege zum selben Ziel heißt zwei Stellen, an denen es schiefgehen kann, und
+die seltener benutzte fällt seltener auf. Jetzt gilt: Was ein Agent kann, kann
+die Oberfläche auch, und umgekehrt. Bricht der eine Weg, bricht der andere
+sofort mit — und wird bemerkt.
+
 ## Was noch fehlt
 
-- **Abonnieren.** Wer den Zustand verfolgen will, muss zurzeit pollen. Ein
-  `sub deck1.position` mit Meldungen bei Änderung ist der nächste Schritt und
-  Voraussetzung für Controller mit Motorfadern und Displays.
-- **Laden von außen.** `deck1.load <pfad>` fehlt. Dekodieren und Analysieren
-  dauern; das braucht einen asynchronen Auftrag statt einer Antwortzeile.
+- **Beatgrid korrigieren.** `set deck1.bpm_grid` ist nur lesbar; ein falsch
+  erkanntes Grid lässt sich von außen nicht geraderücken.
 - **Windows.** Unix-Sockets gibt es dort nicht; eine Named Pipe wäre die
   Entsprechung.
 - **MIDI.** Der normierte Weg (`setn`) ist da, der Übersetzer von MIDI-CC auf
   Control-Namen noch nicht. Das ist Phase 10 — und mit dem Steuerraum im Rücken
   fast nur noch eine Tabelle.
+- **MCP.** Die Werkzeugbeschreibungen lassen sich aus dem Katalog erzeugen; der
+  Erzeuger fehlt noch.

@@ -16,9 +16,8 @@ use std::sync::{Arc, Mutex};
 use analysis::peaks::PeakLevel;
 use audio_core::deck::{DeckState, HOT_CUES};
 use audio_engine::{Assign, Output};
-use control::{Einheit, Gruppe, Schluessel, Steuerpult, Wert};
+use control::{Einheit, Gruppe, Schluessel, Steuerpult, Treffer, Wert};
 use egui::{Color32, RichText, Ui};
-use library::{Library, Query, TrackRecord};
 
 use crate::theme;
 use crate::waveform;
@@ -79,6 +78,8 @@ pub struct Screenshot {
 }
 
 pub struct MusikApp {
+    /// Fertige Ladeaufträge vom Arbeiter-Thread.
+    pub ergebnisse: std::sync::mpsc::Receiver<crate::sammlung::Ergebnis>,
     /// Der gemeinsame Steuerraum. Die Oberfläche ist einer von mehreren
     /// Bedienern — ein Skript am Socket sieht dieselben Werte.
     pub pult: Arc<Mutex<Steuerpult>>,
@@ -88,10 +89,8 @@ pub struct MusikApp {
     pub output: Option<Output>,
     pub audio_hinweis: String,
     pub decks: Vec<DeckUi>,
-    pub library: Option<Library>,
-    pub analyse_cache: PathBuf,
     pub suche: String,
-    pub treffer: Vec<TrackRecord>,
+    pub treffer: Vec<Treffer>,
     pub status: String,
     pub screenshot: Option<Screenshot>,
 }
@@ -103,6 +102,7 @@ impl eframe::App for MusikApp {
         if let Ok(mut pult) = self.pult.lock() {
             pult.handle_mut().collect_retired();
         }
+        self.ladeergebnisse_einsetzen();
 
         // Kopie, weil `ui` gleich selbst ausgeliehen wird und der Kontext
         // danach noch für den Screenshot gebraucht wird.
@@ -140,6 +140,62 @@ impl eframe::App for MusikApp {
 }
 
 impl MusikApp {
+    /// Setzt fertig geladene Tracks ein.
+    ///
+    /// Im UI-Thread, weil die Wellenform-Spitzen hier liegen und weil das
+    /// Einsetzen selbst kurz ist — die teure Arbeit ist längst getan.
+    fn ladeergebnisse_einsetzen(&mut self) {
+        while let Ok(ergebnis) = self.ergebnisse.try_recv() {
+            let deck = ergebnis.deck;
+
+            match ergebnis.ausgang {
+                Ok(fertig) => {
+                    let Ok(mut pult) = self.pult.lock() else {
+                        return;
+                    };
+                    let Some(kanal) = pult.decks().get(deck).map(|d| d.kanal) else {
+                        continue;
+                    };
+
+                    if !pult
+                        .handle_mut()
+                        .load(kanal, Box::new(audio_engine::DeckSource::new(fertig.voice)))
+                    {
+                        // Die Ladeschlange ist voll. Das ist ein echter
+                        // Fehlschlag und darf nicht als Erfolg dastehen.
+                        if let Some(e) = pult.deck_mut(deck) {
+                            e.lade_status = "fehler: Ladeschlange voll".into();
+                        }
+                        self.status = "Ladeschlange voll — gleich noch einmal".into();
+                        continue;
+                    }
+
+                    if let Some(e) = pult.deck_mut(deck) {
+                        e.titel = fertig.titel.clone();
+                        e.artist = fertig.artist;
+                        e.frames = fertig.frames;
+                        e.lade_status = "bereit".into();
+                    }
+                    drop(pult);
+
+                    if let Some(ui) = self.decks.get_mut(deck) {
+                        ui.peaks = fertig.peaks;
+                        ui.frames = fertig.frames;
+                    }
+                    self.status = format!("{} → Deck {}", fertig.titel, deck + 1);
+                }
+                Err(text) => {
+                    if let Ok(mut pult) = self.pult.lock() {
+                        if let Some(e) = pult.deck_mut(deck) {
+                            e.lade_status = format!("fehler: {text}");
+                        }
+                    }
+                    self.status = format!("{} ließ sich nicht laden: {text}", ergebnis.pfad);
+                }
+            }
+        }
+    }
+
     fn kopfzeile(&mut self, ui: &mut Ui) {
         ui.add_space(3.0);
         ui.horizontal(|ui| {
@@ -463,7 +519,7 @@ impl MusikApp {
                 self.mischbar_suchen(1);
             }
 
-            if self.library.is_none() {
+            if self.treffer.is_empty() && self.suche.is_empty() {
                 ui.label(
                     RichText::new("keine Sammlung geladen — mit --db öffnen")
                         .color(theme::WARNUNG)
@@ -501,7 +557,7 @@ impl MusikApp {
                                 .unwrap_or_else(|| "     —".into());
                             ui.label(RichText::new(bpm).monospace());
                             ui.label(eintrag.artist.clone().unwrap_or_else(|| "—".into()));
-                            ui.label(anzeigename(&eintrag));
+                            ui.label(&eintrag.titel);
 
                             // Nur „A" und „B": ein Pfeilzeichen wäre schöner,
                             // aber die mitgelieferte Schrift hat keins, und ein
@@ -524,35 +580,43 @@ impl MusikApp {
             });
     }
 
+    /// Sucht über das Pult — denselben Weg, den ein Agent nimmt.
     fn suchen(&mut self) {
-        let Some(lib) = self.library.as_ref() else {
-            return;
-        };
-        let mut query = Query::text(self.suche.clone());
-        query.limit = Some(200);
-        self.treffer = lib.search(&query).unwrap_or_default();
+        if let Ok(pult) = self.pult.lock() {
+            self.treffer = pult.suche(&self.suche);
+        }
     }
 
     fn mischbar_suchen(&mut self, deck: usize) {
-        let Some(lib) = self.library.as_ref() else {
-            return;
-        };
         let Some(bpm) = self.decks.get(deck).and_then(|d| d.state.effective_bpm()) else {
             self.status = "Das Deck hat kein Tempo".into();
             return;
         };
 
-        let mut query = Query::mixable_with(bpm, 0.06);
-        query.limit = Some(200);
-        self.treffer = lib.search(&query).unwrap_or_default();
+        if let Ok(pult) = self.pult.lock() {
+            self.treffer = pult.suche_mischbar(bpm);
+        }
         self.status = format!("Mischbar mit {bpm:.2} BPM: {} Treffer", self.treffer.len());
     }
 
-    fn laden(&mut self, deck: usize, eintrag: &TrackRecord) {
-        match crate::laden::track_auf_deck(self, deck, eintrag) {
-            Ok(()) => self.status = format!("{} → {}", anzeigename(eintrag), self.decks[deck].name),
-            Err(e) => self.status = format!("Laden fehlgeschlagen: {e}"),
-        }
+    /// Lädt über denselben Weg, den ein Agent nimmt.
+    ///
+    /// Vorher hatte die Oberfläche ihren eigenen Ladepfad. Zwei Wege zum
+    /// selben Ziel heißt zwei Stellen, an denen es schiefgehen kann — und die
+    /// seltener benutzte fällt seltener auf.
+    fn laden(&mut self, deck: usize, eintrag: &Treffer) {
+        let ergebnis = {
+            let Ok(mut pult) = self.pult.lock() else {
+                return;
+            };
+            let schluessel = Schluessel::neu(Gruppe::Deck(deck), "load");
+            pult.ausloesen(&schluessel, Some(&eintrag.pfad))
+        };
+
+        self.status = match ergebnis {
+            Ok(_) => format!("{} wird geladen …", eintrag.titel),
+            Err(e) => format!("Laden fehlgeschlagen: {e}"),
+        };
     }
 
     /// Nimmt nach ein paar Bildern ein Abbild auf und beendet sich.
@@ -611,22 +675,6 @@ pub fn assign_fuer(index: usize) -> Assign {
         1 => Assign::B,
         _ => Assign::Thru,
     }
-}
-
-/// Was in der Liste als Titel steht.
-///
-/// Ohne Tags — bei WAV-Dateien der Normalfall — bleibt der Dateiname. Der
-/// ganze Pfad wäre in einer Trefferliste unbrauchbar: er ist zu lang, und der
-/// unterscheidende Teil steht ganz hinten.
-pub fn anzeigename(eintrag: &TrackRecord) -> String {
-    if let Some(titel) = eintrag.title.as_ref().filter(|t| !t.trim().is_empty()) {
-        return titel.clone();
-    }
-
-    std::path::Path::new(&eintrag.path)
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| eintrag.path.clone())
 }
 
 /// Zahl ohne überflüssige Nachkommastellen — "4" statt "4.00".
@@ -822,19 +870,5 @@ mod tests {
         assert_eq!(assign_fuer(1), Assign::B);
         // Alles Weitere — AUX etwa — bleibt unberührt vom Crossfader.
         assert_eq!(assign_fuer(2), Assign::Thru);
-    }
-
-    #[test]
-    fn ohne_titel_bleibt_der_dateiname_stehen() {
-        let mut eintrag =
-            TrackRecord::from_path("/musik/Ordner/Alpenglühen - Vier auf die Eins.wav");
-        assert_eq!(anzeigename(&eintrag), "Alpenglühen - Vier auf die Eins");
-
-        eintrag.title = Some("Richtiger Titel".into());
-        assert_eq!(anzeigename(&eintrag), "Richtiger Titel");
-
-        // Ein leerer Tag ist so gut wie keiner.
-        eintrag.title = Some("   ".into());
-        assert_eq!(anzeigename(&eintrag), "Alpenglühen - Vier auf die Eins");
     }
 }
