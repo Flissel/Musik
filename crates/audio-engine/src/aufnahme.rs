@@ -214,6 +214,14 @@ pub fn mitschnitt(sample_rate: u32) -> (Mitschnitt, Aufnahme) {
 /// Leert den Ring **immer**, auch ohne offene Datei. Täte er das nicht, liefe
 /// der Puffer nach einem Stopp voll, und der nächste Start begänne mit den
 /// Resten des letzten.
+///
+/// Beim `Start` wird dagegen **nicht** geleert, und das ist wichtiger, als es
+/// aussieht. Der Aufnehmende schreibt in den Ring, sobald `starten` zurück ist;
+/// dieser Thread bekommt den Befehl erst, wenn er das nächste Mal an der Reihe
+/// ist. Auf einem ausgelasteten Rechner liegen dann schon Samples im Ring, und
+/// ein Leeren an dieser Stelle würfe genau den Anfang des Mitschnitts weg.
+/// Nötig ist es auch nicht: Nach dem Schließen ist der Ring leer, und außerhalb
+/// einer laufenden Aufnahme legt niemand etwas hinein.
 fn schreiben(mut rx: rtrb::Consumer<f32>, befehle: Receiver<Befehl>) {
     const TAKT: std::time::Duration = std::time::Duration::from_millis(20);
     let mut datei: Option<WavDatei> = None;
@@ -226,8 +234,6 @@ fn schreiben(mut rx: rtrb::Consumer<f32>, befehle: Receiver<Befehl>) {
         while let Ok(befehl) = befehle.try_recv() {
             match befehl {
                 Befehl::Start { pfad, sample_rate } => {
-                    // Reste des vorigen Mitschnitts gehören nicht in den neuen.
-                    while rx.pop().is_ok() {}
                     match WavDatei::anlegen(&pfad, sample_rate) {
                         Ok(d) => datei = Some(d),
                         Err(e) => eprintln!("Mitschnitt: {e}"),
@@ -271,6 +277,9 @@ fn schreiben(mut rx: rtrb::Consumer<f32>, befehle: Receiver<Befehl>) {
                     eprintln!("Mitschnitt: {e}");
                 }
             }
+            // Ab hier ist der Ring leer — darauf verlässt sich der nächste
+            // Start, statt selbst zu leeren.
+            while rx.pop().is_ok() {}
         }
 
         if beenden {
@@ -416,6 +425,67 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&pfad);
+    }
+
+    /// Der Fall, der auf einem ausgelasteten Läufer schiefging.
+    ///
+    /// Ohne Pause zwischen Start, Aufnehmen und Stopp bekommt der Schreiber
+    /// alle drei auf einmal. Leerte er dabei den Ring — was er tat, um Reste
+    /// loszuwerden —, landete kein einziges Sample in der Datei, und heraus
+    /// kam ein WAV mit nichts als einem Kopf.
+    #[test]
+    fn ein_sofortiger_stopp_verliert_den_anfang_nicht() {
+        let pfad = scratch("sofort");
+        let (mut tap, mut aufnahme) = mitschnitt(RATE);
+
+        aufnahme.starten(&pfad).expect("Start");
+        let block: Vec<f32> = (0..1_000).flat_map(|_| [0.5f32, -0.5]).collect();
+        tap.nimm_auf(&block);
+        aufnahme.stoppen();
+
+        let erwartet = KOPF_BYTES as u64 + block.len() as u64 * 2;
+        assert!(
+            warte_bis(|| std::fs::metadata(&pfad)
+                .map(|m| m.len() == erwartet)
+                .unwrap_or(false)),
+            "die Datei hat {:?} statt {erwartet} Bytes",
+            std::fs::metadata(&pfad).map(|m| m.len())
+        );
+
+        let _ = std::fs::remove_file(&pfad);
+    }
+
+    #[test]
+    fn ein_zweiter_mitschnitt_erbt_nichts_vom_ersten() {
+        let erster = scratch("erbe1");
+        let zweiter = scratch("erbe2");
+        let (mut tap, mut aufnahme) = mitschnitt(RATE);
+
+        aufnahme.starten(&erster).unwrap();
+        tap.nimm_auf(&vec![0.5; 2_000]);
+        aufnahme.stoppen();
+        assert!(warte_bis(|| std::fs::metadata(&erster)
+            .map(|m| m.len() > KOPF_BYTES as u64)
+            .unwrap_or(false)));
+
+        // Zwischen den Aufnahmen schreibt niemand — was jetzt käme, wäre ein
+        // Rest, und der gehört nicht in den zweiten Mitschnitt.
+        let block: Vec<f32> = (0..500).flat_map(|_| [0.25f32, -0.25]).collect();
+        aufnahme.starten(&zweiter).unwrap();
+        tap.nimm_auf(&block);
+        aufnahme.stoppen();
+
+        let erwartet = KOPF_BYTES as u64 + block.len() as u64 * 2;
+        assert!(
+            warte_bis(|| std::fs::metadata(&zweiter)
+                .map(|m| m.len() == erwartet)
+                .unwrap_or(false)),
+            "der zweite hat {:?} statt {erwartet} Bytes",
+            std::fs::metadata(&zweiter).map(|m| m.len())
+        );
+
+        let _ = std::fs::remove_file(&erster);
+        let _ = std::fs::remove_file(&zweiter);
     }
 
     #[test]
