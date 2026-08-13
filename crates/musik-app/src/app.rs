@@ -26,10 +26,10 @@ use crate::waveform;
 /// genug, dass vier Züge nebeneinander passen, breit genug zum Greifen.
 const KANALBREITE: f32 = 132.0;
 /// Länge des Linefaders. Ein kurzer Fader lässt sich nicht sauber einblenden.
-const FADERHOEHE: f32 = 96.0;
+const FADERHOEHE: f32 = 84.0;
 /// Höhe des Mixerfeldes. Muss den ganzen Kanalzug fassen — ist es zu wenig,
 /// schneidet das Panel oben die Beschriftung und unten die Fader ab.
-const MIXER_HOEHE: f32 = 262.0;
+const MIXER_HOEHE: f32 = 318.0;
 /// Anfangshöhe der Plattenkiste. Sie ist ziehbar, weil man beim Suchen mehr
 /// Liste will und beim Mixen mehr Wellenform.
 const SAMMLUNG_HOEHE: f32 = 190.0;
@@ -758,23 +758,34 @@ fn kanalzug_inhalt(ui: &mut Ui, pult: &mut Steuerpult, index: usize, farbe: Colo
 
     ui.set_width(KANALBREITE);
     ui.label(RichText::new(&name).color(farbe).strong().size(12.0));
-    ui.spacing_mut().slider_width = KANALBREITE - 34.0;
+    ui.spacing_mut().slider_width = KANALBREITE - 40.0;
+    // Enger als sonst: Acht Regler übereinander brauchen den Platz, und die
+    // Decks darüber brauchen ihn auch.
+    ui.spacing_mut().item_spacing.y = 2.0;
 
+    // Nicht von Hand aufgezählt, sondern aus dem Katalog. Ein neues Control
+    // erscheint damit ohne eine Zeile hier — die Effekte waren die Probe
+    // darauf, und sie standen sofort da.
     let gruppe = Gruppe::Kanal(index);
-    for (element, beschriftung) in [
-        ("trim", "TRIM"),
-        ("eq_high", "HI"),
-        ("eq_mid", "MID"),
-        ("eq_low", "LOW"),
-        ("filter", "FLT"),
-    ] {
-        regler(
-            ui,
-            pult,
-            &Schluessel::neu(gruppe, element),
-            beschriftung,
-            false,
-        );
+    let controls: Vec<_> = pult
+        .liste()
+        .into_iter()
+        .filter(|(k, b)| {
+            k.gruppe == gruppe
+                && b.schreibbar
+                && !b.kurz.is_empty()
+                // Fader und Cue sind unten, als Fader und als Knopf.
+                && k.element != "fader"
+                && k.element != "cue"
+        })
+        .collect();
+
+    for (schluessel, b) in controls {
+        match b.art {
+            control::Art::Zahl => regler(ui, pult, &schluessel, b.kurz, false),
+            control::Art::Auswahl => auswahl(ui, pult, &schluessel, &b),
+            _ => {}
+        }
     }
 
     ui.add_space(4.0);
@@ -798,6 +809,32 @@ fn kanalzug_inhalt(ui: &mut Ui, pult: &mut Steuerpult, index: usize, farbe: Colo
         ui.spacing_mut().slider_width = FADERHOEHE;
         regler(ui, pult, &Schluessel::neu(gruppe, "fader"), "", true);
     });
+}
+
+/// Ein Auswahlfeld, das seine Optionen aus dem Katalog holt.
+fn auswahl(ui: &mut Ui, pult: &mut Steuerpult, key: &Schluessel, b: &control::Beschreibung) {
+    let Ok(Wert::Auswahl(aktuell)) = pult.lies(key) else {
+        return;
+    };
+
+    let mut gewaehlt = aktuell.clone();
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(b.kurz).size(10.0));
+        egui::ComboBox::from_id_salt(key.to_string())
+            .width(KANALBREITE - 46.0)
+            .selected_text(&gewaehlt)
+            .show_ui(ui, |ui| {
+                for option in b.auswahl {
+                    ui.selectable_value(&mut gewaehlt, option.to_string(), *option);
+                }
+            })
+            .response
+            .on_hover_text(b.text);
+    });
+
+    if gewaehlt != aktuell {
+        let _ = pult.schreibe(key, Wert::Auswahl(gewaehlt));
+    }
 }
 
 fn summe(ui: &mut Ui, pult: &mut Steuerpult) {

@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! Quelle → Trim → EQ → Filter →┬→ Cue-Abgriff (pre-fader)
-//!                              └→ Fader → Crossfader → Summe
+//!                              └→ Fader → FX → Crossfader → Summe
 //! ```
 //!
 //! **Der Cue-Abgriff liegt vor dem Fader, aber hinter EQ und Filter.** Beides
@@ -15,8 +15,14 @@
 //!   nichts, wenn man ihn braucht.
 //! - *Hinter EQ und Filter*, weil man seine Klangeingriffe kontrollieren
 //!   können muss, bevor sie auf die Anlage gehen.
+//!
+//! **Die Effekte liegen hinter dem Fader.** Zieht man ihn zu, während ein
+//! Delay klingt, soll die Fahne ausklingen statt abzureißen — genau dafür
+//! sitzen Mixer-FX auf jedem Gerät an dieser Stelle. Im Kopfhörer hört man sie
+//! deshalb nicht: Der Cue-Abgriff liegt davor.
 
 use crate::crossfader::Assign;
+use crate::effects::{Effekt, FxUnit};
 use crate::eq::ThreeBandEq;
 use crate::filter::DjFilter;
 use crate::source::Source;
@@ -26,6 +32,7 @@ pub struct Channel {
     source: Box<dyn Source>,
     eq: ThreeBandEq,
     filter: DjFilter,
+    fx: FxUnit,
     trim: f32,
     fader: f32,
     cue: bool,
@@ -40,6 +47,7 @@ impl Channel {
             source,
             eq: ThreeBandEq::new(sample_rate),
             filter: DjFilter::new(sample_rate),
+            fx: FxUnit::new(sample_rate),
             trim: 1.0,
             fader: 0.0,
             cue: false,
@@ -51,7 +59,26 @@ impl Channel {
     pub fn set_source(&mut self, source: Box<dyn Source>) -> Box<dyn Source> {
         self.eq.reset();
         self.filter.reset();
+        // Der neue Track soll nicht die Hallfahne des alten erben.
+        self.fx.reset();
         std::mem::replace(&mut self.source, source)
+    }
+
+    pub fn fx(&mut self) -> &mut FxUnit {
+        &mut self.fx
+    }
+
+    pub fn fx_effekt(&self) -> Effekt {
+        self.fx.effekt()
+    }
+
+    /// Ob der Kanal noch etwas zu sagen hat, obwohl er stumm ist.
+    ///
+    /// Der Mixer überspringt stumme Kanäle. Ohne diese Frage risse er jedem
+    /// Delay die Fahne ab, sobald der Fader unten ist — und damit genau das
+    /// weg, wofür die Effekte hinter dem Fader sitzen.
+    pub fn klingt_nach(&self) -> bool {
+        self.fx.klingt_nach()
     }
 
     /// Eingangsverstärkung vor dem EQ.
@@ -129,6 +156,19 @@ impl Channel {
         self.filter.process(buffer);
 
         &self.buffer[..len]
+    }
+
+    /// Legt Fader und Effekte an — in dieser Reihenfolge.
+    ///
+    /// Getrennt von [`Channel::render_pre_fader`], weil der Cue-Bus das
+    /// Signal davor abgreift und der Mixer es sonst zweimal puffern müsste.
+    pub fn process_post_fader(&mut self, buffer: &mut [f32]) {
+        if (self.fader - 1.0).abs() > f32::EPSILON {
+            for sample in buffer.iter_mut() {
+                *sample *= self.fader;
+            }
+        }
+        self.fx.process(buffer);
     }
 }
 

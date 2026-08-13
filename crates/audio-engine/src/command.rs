@@ -32,6 +32,11 @@ pub enum Command {
     },
     Filter(usize, f32),
     Cue(usize, bool),
+    Fx(usize, crate::effects::Effekt),
+    FxMix(usize, f32),
+    FxAmount(usize, f32),
+    /// Effektzeit in Sekunden.
+    FxTime(usize, f32),
     Assign(usize, Assign),
     Crossfader(f32),
     CrossfaderCurve(f32),
@@ -170,6 +175,16 @@ impl EngineRunner {
             } if gueltig(channel) => self.engine.channel(channel).set_eq(low, mid, high),
             Command::Filter(ch, value) if gueltig(ch) => self.engine.channel(ch).set_filter(value),
             Command::Cue(ch, on) if gueltig(ch) => self.engine.channel(ch).set_cue(on),
+            Command::Fx(ch, effekt) if gueltig(ch) => {
+                self.engine.channel(ch).fx().set_effekt(effekt)
+            }
+            Command::FxMix(ch, value) if gueltig(ch) => self.engine.channel(ch).fx().set_mix(value),
+            Command::FxAmount(ch, value) if gueltig(ch) => {
+                self.engine.channel(ch).fx().set_amount(value)
+            }
+            Command::FxTime(ch, value) if gueltig(ch) => {
+                self.engine.channel(ch).fx().set_zeit(value)
+            }
             Command::Assign(ch, assign) if gueltig(ch) => {
                 self.engine.channel(ch).set_assign(assign)
             }

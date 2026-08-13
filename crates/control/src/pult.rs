@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use audio_core::deck::DeckState;
-use audio_engine::{Assign, Command, EngineHandle};
+use audio_engine::{Assign, Command, Effekt, EngineHandle};
 
 use crate::katalog::{self, Beschreibung};
 use crate::schluessel::{Gruppe, Schluessel};
@@ -136,6 +136,10 @@ pub struct KanalSpiegel {
     pub fader: f64,
     pub cue: bool,
     pub assign: Assign,
+    pub fx: Effekt,
+    pub fx_mix: f64,
+    pub fx_amount: f64,
+    pub fx_time: f64,
 }
 
 impl KanalSpiegel {
@@ -151,6 +155,10 @@ impl KanalSpiegel {
             fader: 0.0,
             cue: false,
             assign,
+            fx: Effekt::Aus,
+            fx_mix: 0.0,
+            fx_amount: 0.5,
+            fx_time: 0.5,
         }
     }
 }
@@ -369,6 +377,10 @@ impl Steuerpult {
             "fader" => Wert::Zahl(k.fader),
             "cue" => Wert::Schalter(k.cue),
             "assign" => Wert::Auswahl(assign_name(k.assign).to_string()),
+            "fx" => Wert::Auswahl(k.fx.name().to_string()),
+            "fx_mix" => Wert::Zahl(k.fx_mix),
+            "fx_amount" => Wert::Zahl(k.fx_amount),
+            "fx_time" => Wert::Zahl(k.fx_time),
             _ => return None,
         };
         Some(wert)
@@ -422,6 +434,10 @@ impl Steuerpult {
             (Gruppe::Deck(i), "beatjump") => {
                 let beats: f64 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
                 self.beatjump(i, beats)
+            }
+            (Gruppe::Kanal(i), "fx_sync") => {
+                let beats: f64 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
+                self.fx_sync(i, beats)
             }
             (Gruppe::Master, "search") => {
                 let treffer = self.suche(argument.unwrap_or(""));
@@ -525,6 +541,42 @@ impl Steuerpult {
 
         d.state.jump_to_cue(index);
         Ok(Vec::new())
+    }
+
+    /// Setzt die Effektzeit auf so viele Beats des zugehörigen Decks.
+    ///
+    /// Ein Delay, das nicht im Takt steht, klingt nach Fehler. Die Umrechnung
+    /// braucht das Beatgrid, und das kennt nur das Deck — deshalb liegt sie
+    /// hier und nicht im Mixer, der von Decks nichts weiß.
+    fn fx_sync(&mut self, kanal: usize, beats: f64) -> Result<Vec<String>, Fehler> {
+        if beats <= 0.0 {
+            return Err(Fehler::Argument {
+                control: format!("channel{}.fx_sync", kanal + 1),
+                erwartet: "eine positive Zahl von Beats".into(),
+            });
+        }
+
+        // Welches Deck hängt an diesem Zug? Ein AUX-Kanal hat keins.
+        let Some(deck) = self.decks.iter().find(|d| d.kanal == kanal) else {
+            return Err(Fehler::Gescheitert(format!(
+                "an channel{} hängt kein Deck — fx_time direkt setzen",
+                kanal + 1
+            )));
+        };
+        let Some(bpm) = deck.state.effective_bpm() else {
+            return Err(Fehler::Gescheitert(
+                "das Deck hat kein Beatgrid — fx_time direkt setzen".into(),
+            ));
+        };
+
+        let sekunden = beats * 60.0 / bpm as f64;
+        let schluessel = Schluessel::neu(Gruppe::Kanal(kanal), "fx_time");
+        self.schreibe(&schluessel, Wert::Zahl(sekunden))?;
+
+        Ok(vec![format!(
+            "fx_sync channel{} {beats} Beats bei {bpm:.2} BPM = {sekunden:.4} s",
+            kanal + 1
+        )])
     }
 
     fn beatjump(&mut self, deck: usize, beats: f64) -> Result<Vec<String>, Fehler> {
@@ -671,6 +723,20 @@ impl Steuerpult {
         // Prüfung, ist der Spiegel unberührt und stimmt weiter mit dem Mixer
         // überein.
         let element = k.element.as_str();
+        if element == "fx" {
+            let name = wert.als_text().ok_or_else(|| Fehler::FalscherTyp {
+                control: k.to_string(),
+                erwartet: Art::Auswahl,
+            })?;
+            let effekt = Effekt::aus_name(name).ok_or_else(|| Fehler::UnbekannteAuswahl {
+                control: k.to_string(),
+                erlaubt: b.auswahl.iter().map(|s| s.to_string()).collect(),
+            })?;
+            self.kanaele[i].fx = effekt;
+            self.handle.send(Command::Fx(i, effekt));
+            return Ok(());
+        }
+
         if element == "assign" {
             let name = wert.als_text().ok_or_else(|| Fehler::FalscherTyp {
                 control: k.to_string(),
@@ -707,6 +773,18 @@ impl Steuerpult {
             "filter" => {
                 kanal.filter = v;
                 Command::Filter(i, v as f32)
+            }
+            "fx_mix" => {
+                kanal.fx_mix = v;
+                Command::FxMix(i, v as f32)
+            }
+            "fx_amount" => {
+                kanal.fx_amount = v;
+                Command::FxAmount(i, v as f32)
+            }
+            "fx_time" => {
+                kanal.fx_time = v;
+                Command::FxTime(i, v as f32)
             }
             "eq_low" | "eq_mid" | "eq_high" => {
                 match element {
@@ -1019,6 +1097,7 @@ mod tests {
                 "beatjump" => Some("4"),
                 "search" => Some("test"),
                 "search_mixable" => Some("128"),
+                "fx_sync" => Some("1"),
                 _ => None,
             };
 
@@ -1186,5 +1265,77 @@ mod aktions_tests {
             pult.lies(&k("deck1.finished")).unwrap(),
             Wert::Schalter(false)
         );
+    }
+}
+
+#[cfg(test)]
+mod fx_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    #[test]
+    fn effekte_lassen_sich_beim_namen_nennen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+
+        pult.schreibe(&k("channel1.fx"), Wert::Auswahl("delay".into()))
+            .unwrap();
+        assert_eq!(
+            pult.lies(&k("channel1.fx")).unwrap(),
+            Wert::Auswahl("delay".into())
+        );
+
+        let fehler = pult.schreibe(&k("channel1.fx"), Wert::Auswahl("hall".into()));
+        assert!(
+            matches!(fehler, Err(Fehler::UnbekannteAuswahl { .. })),
+            "{fehler:?}"
+        );
+    }
+
+    #[test]
+    fn fx_sync_rechnet_beats_in_sekunden() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        // Die Testdecks laufen auf 128 BPM: ein Beat = 60/128 = 0,46875 s.
+        let zeilen = pult.ausloesen(&k("channel1.fx_sync"), Some("1")).unwrap();
+        assert!(zeilen[0].contains("128.00 BPM"), "{zeilen:?}");
+
+        let Wert::Zahl(zeit) = pult.lies(&k("channel1.fx_time")).unwrap() else {
+            panic!("fx_time ist keine Zahl");
+        };
+        assert!((zeit - 60.0 / 128.0).abs() < 1e-6, "{zeit}");
+
+        // Ein Achtel ist halb so lang.
+        pult.ausloesen(&k("channel1.fx_sync"), Some("0.5")).unwrap();
+        let Wert::Zahl(halb) = pult.lies(&k("channel1.fx_time")).unwrap() else {
+            panic!()
+        };
+        assert!((halb - 30.0 / 128.0).abs() < 1e-6, "{halb}");
+    }
+
+    #[test]
+    fn ohne_deck_sagt_fx_sync_das_statt_zu_raten() {
+        // Kanal 3 ist AUX — der hat keinen Abspieler und damit kein Tempo.
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let fehler = pult.ausloesen(&k("channel3.fx_sync"), Some("1"));
+        assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
+    }
+
+    #[test]
+    fn ohne_beatgrid_wird_die_effektzeit_nicht_geraten() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.decks()[0].state.set_grid(None);
+
+        let fehler = pult.ausloesen(&k("channel1.fx_sync"), Some("1"));
+        assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
+    }
+
+    #[test]
+    fn eine_effektzeit_von_null_beats_ergibt_keinen_sinn() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let fehler = pult.ausloesen(&k("channel1.fx_sync"), Some("0"));
+        assert!(matches!(fehler, Err(Fehler::Argument { .. })), "{fehler:?}");
     }
 }

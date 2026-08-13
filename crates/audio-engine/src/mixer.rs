@@ -21,6 +21,8 @@ pub struct Engine {
     cue_mix: f32,
     master: Vec<f32>,
     cue: Vec<f32>,
+    /// Zwischenspeicher für das Signal hinter dem Fader.
+    post: Vec<f32>,
 }
 
 impl Engine {
@@ -35,6 +37,7 @@ impl Engine {
             cue_mix: 0.0,
             master: Vec::new(),
             cue: Vec::new(),
+            post: Vec::new(),
         }
     }
 
@@ -100,14 +103,19 @@ impl Engine {
         if self.master.len() < len {
             self.master.resize(len, 0.0);
             self.cue.resize(len, 0.0);
+            self.post.resize(len, 0.0);
         }
         self.master[..len].fill(0.0);
         self.cue[..len].fill(0.0);
 
         for channel in self.channels.iter_mut() {
-            let gain = channel.fader() * self.crossfader.gain(channel.assign());
+            let cross = self.crossfader.gain(channel.assign());
             let cued = channel.is_cued();
-            if gain <= 0.0 && !cued {
+            // Ein Kanal mit klingendem Effekt ist nicht still, auch wenn sein
+            // Fader unten ist — sonst risse jedes Zuziehen die Delayfahne ab.
+            let hoerbar = cross > 0.0 && (channel.fader() > 0.0 || channel.klingt_nach());
+
+            if !hoerbar && !cued {
                 // Still und nicht im Kopfhörer — die Kette trotzdem laufen
                 // lassen wäre Rechenzeit ohne Wirkung. Der Filterzustand
                 // altert dabei, was beim Aufziehen einen Einschwinger kostet;
@@ -115,18 +123,25 @@ impl Engine {
                 continue;
             }
 
-            let pre = channel.render_pre_fader(frames);
+            {
+                let pre = channel.render_pre_fader(frames);
 
-            if cued {
-                for (dst, src) in self.cue[..len].iter_mut().zip(pre) {
-                    *dst += *src;
+                if cued {
+                    for (dst, src) in self.cue[..len].iter_mut().zip(pre) {
+                        *dst += *src;
+                    }
                 }
+                self.post[..len].copy_from_slice(pre);
             }
 
-            if gain > 0.0 {
-                for (dst, src) in self.master[..len].iter_mut().zip(pre) {
-                    *dst += *src * gain;
-                }
+            if !hoerbar {
+                continue;
+            }
+
+            // Fader und Effekte, dann erst der Crossfader.
+            channel.process_post_fader(&mut self.post[..len]);
+            for (dst, src) in self.master[..len].iter_mut().zip(&self.post[..len]) {
+                *dst += *src * cross;
             }
         }
 
@@ -175,7 +190,7 @@ pub fn assign_deck_pair(engine: &mut Engine, left: usize, right: usize) {
 mod tests {
     use super::*;
     use crate::source::{LoopSource, SilentSource};
-    use crate::testing::{peak, rms_channel, sine_stereo};
+    use crate::testing::{peak, rms, rms_channel, sine_stereo};
 
     const RATE: f32 = 48_000.0;
     const FRAMES: usize = 4_800;
@@ -356,5 +371,119 @@ mod tests {
 
         let out = rendern(&mut engine, 4);
         assert!(master_rms(&out, 4) > 0.1);
+    }
+
+    /// Der Grund, warum die Effekte hinter dem Fader sitzen.
+    ///
+    /// Zieht man den Fader zu, während ein Delay klingt, muss die Fahne
+    /// ausklingen. Ohne die Nachfrage bei [`Channel::klingt_nach`] würde der
+    /// Mixer den stummen Kanal überspringen und den Hall abschneiden — die
+    /// Post-Fader-Anordnung wäre dann nur auf dem Papier richtig.
+    #[test]
+    fn die_delayfahne_ueberlebt_den_zugezogenen_fader() {
+        use crate::effects::Effekt;
+
+        let mut engine = Engine::new(RATE);
+        let kanal = engine.add_channel(
+            "A",
+            Box::new(LoopSource::new(sine_stereo(440.0, RATE as u32, 0.02))),
+        );
+        engine.channel(kanal).set_assign(Assign::Thru);
+        engine.channel(kanal).set_fader(1.0);
+
+        {
+            let fx = engine.channel(kanal).fx();
+            fx.set_effekt(Effekt::Delay);
+            fx.set_mix(1.0);
+            fx.set_amount(0.8);
+            fx.set_zeit(0.15);
+        }
+
+        // Erst füttern, damit die Leitung voll ist.
+        let mut block = vec![0.0f32; 4_096];
+        for _ in 0..20 {
+            engine.render(&mut block, 2);
+        }
+
+        // Jetzt zuziehen — und trotzdem muss etwas herauskommen.
+        engine.channel(kanal).set_fader(0.0);
+
+        let mut lautester = 0.0f32;
+        for _ in 0..6 {
+            block.fill(0.0);
+            engine.render(&mut block, 2);
+            lautester = lautester.max(block.iter().fold(0.0f32, |m, v| m.max(v.abs())));
+        }
+
+        assert!(
+            lautester > 0.001,
+            "die Fahne reißt beim Zuziehen ab: Restpegel {lautester}"
+        );
+    }
+
+    /// Die Gegenprobe: Ohne Effekt bleibt ein zugezogener Kanal still.
+    #[test]
+    fn ohne_effekt_bleibt_der_zugezogene_kanal_still() {
+        let mut engine = Engine::new(RATE);
+        let kanal = engine.add_channel(
+            "A",
+            Box::new(LoopSource::new(sine_stereo(440.0, RATE as u32, 0.02))),
+        );
+        engine.channel(kanal).set_assign(Assign::Thru);
+        engine.channel(kanal).set_fader(0.0);
+
+        let mut block = vec![0.0f32; 2_048];
+        engine.render(&mut block, 2);
+        assert!(rms(&block) < 1e-6, "stummer Kanal ist nicht still");
+    }
+
+    /// Der Kopfhörer greift **vor** den Effekten ab.
+    ///
+    /// Man bereitet den nächsten Track im Kopfhörer vor; ein Effekt, den man
+    /// für die Anlage eingestellt hat, gehört dort nicht hinein.
+    #[test]
+    fn der_kopfhoerer_hoert_die_effekte_nicht() {
+        use crate::effects::Effekt;
+
+        // Zwei gleich aufgebaute Mixer, gleich weit gerendert — sonst
+        // vergliche man zwei verschiedene Stellen derselben Schleife, und der
+        // Unterschied käme vom Signal statt vom Effekt.
+        fn bauen(mit_effekt: bool) -> f32 {
+            let mut engine = Engine::new(RATE);
+            let kanal = engine.add_channel(
+                "A",
+                Box::new(LoopSource::new(sine_stereo(440.0, RATE as u32, 0.05))),
+            );
+            engine.channel(kanal).set_cue(true);
+            engine.channel(kanal).set_fader(0.0);
+
+            if mit_effekt {
+                let fx = engine.channel(kanal).fx();
+                fx.set_effekt(Effekt::Gater);
+                fx.set_mix(1.0);
+                // Fast immer zu — wirkte das auf den Cue-Bus, wäre es nicht
+                // zu übersehen.
+                fx.set_amount(0.0);
+                fx.set_zeit(0.01);
+            }
+
+            let mut block = vec![0.0f32; 4 * 1_024];
+            let mut summe = 0.0;
+            for _ in 0..8 {
+                block.fill(0.0);
+                engine.render(&mut block, 4);
+                summe += rms_channel(&block, 2, 4);
+            }
+            summe / 8.0
+        }
+
+        let ohne = bauen(false);
+        let mit = bauen(true);
+
+        assert!(ohne > 0.05, "der Cue-Bus ist von vornherein still: {ohne}");
+        assert!(
+            (ohne - mit).abs() / ohne < 0.01,
+            "der Gater wirkt bis in den Kopfhörer: {ohne:.4} gegen {mit:.4}"
+        );
     }
 }

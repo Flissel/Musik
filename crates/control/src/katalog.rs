@@ -25,6 +25,10 @@ pub struct Beschreibung {
     pub bereich: Option<(f64, f64)>,
     pub einheit: Einheit,
     pub auswahl: &'static [&'static str],
+    /// Kurzbeschriftung für enge Stellen — ein Kanalzug ist keine
+    /// Handbuchseite. Leer heißt: keine sinnvolle Kurzform, das Control
+    /// gehört nicht auf einen Knopf.
+    pub kurz: &'static str,
     pub schreibbar: bool,
     /// Nur bei [`Art::Aktion`]: was der Auslöser als Argument erwartet.
     pub argument: &'static str,
@@ -61,8 +65,10 @@ impl Beschreibung {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 const fn zahl(
     element: &'static str,
+    kurz: &'static str,
     min: f64,
     max: f64,
     einheit: Einheit,
@@ -75,19 +81,26 @@ const fn zahl(
         bereich: Some((min, max)),
         einheit,
         auswahl: &[],
+        kurz,
         schreibbar,
         argument: "",
         text,
     }
 }
 
-const fn schalter(element: &'static str, schreibbar: bool, text: &'static str) -> Beschreibung {
+const fn schalter(
+    element: &'static str,
+    kurz: &'static str,
+    schreibbar: bool,
+    text: &'static str,
+) -> Beschreibung {
     Beschreibung {
         element,
         art: Art::Schalter,
         bereich: None,
         einheit: Einheit::Keine,
         auswahl: &[],
+        kurz,
         schreibbar,
         argument: "",
         text,
@@ -102,6 +115,7 @@ const fn aktion(element: &'static str, argument: &'static str, text: &'static st
         bereich: None,
         einheit: Einheit::Keine,
         auswahl: &[],
+        kurz: "",
         schreibbar: true,
         argument,
         text,
@@ -115,6 +129,7 @@ const fn text_feld(element: &'static str, text: &'static str) -> Beschreibung {
         bereich: None,
         einheit: Einheit::Keine,
         auswahl: &[],
+        kurz: "",
         schreibbar: false,
         argument: "",
         text,
@@ -130,9 +145,10 @@ pub const TEMPO_MAX: f64 = 1.08;
 pub const HOT_CUES: usize = audio_core::deck::HOT_CUES;
 
 pub static DECK: &[Beschreibung] = &[
-    schalter("play", true, "Läuft das Deck"),
+    schalter("play", "PLAY", true, "Läuft das Deck"),
     zahl(
         "position",
+        "POS",
         0.0,
         f64::MAX,
         Einheit::Sekunden,
@@ -141,6 +157,7 @@ pub static DECK: &[Beschreibung] = &[
     ),
     zahl(
         "duration",
+        "LEN",
         0.0,
         f64::MAX,
         Einheit::Sekunden,
@@ -149,6 +166,7 @@ pub static DECK: &[Beschreibung] = &[
     ),
     zahl(
         "bpm",
+        "BPM",
         0.0,
         400.0,
         Einheit::Bpm,
@@ -157,6 +175,7 @@ pub static DECK: &[Beschreibung] = &[
     ),
     zahl(
         "bpm_grid",
+        "GRID",
         0.0,
         400.0,
         Einheit::Bpm,
@@ -165,24 +184,32 @@ pub static DECK: &[Beschreibung] = &[
     ),
     zahl(
         "tempo",
+        "TEMPO",
         TEMPO_MIN,
         TEMPO_MAX,
         Einheit::Faktor,
         true,
         "Tempo-Regler; 1.0 ist die Originalgeschwindigkeit",
     ),
-    schalter("keylock", true, "Tonhöhe beim Tempowechsel halten"),
+    schalter(
+        "keylock",
+        "KEYLOCK",
+        true,
+        "Tonhöhe beim Tempowechsel halten",
+    ),
     zahl(
         "beat_phase",
+        "PHASE",
         0.0,
         1.0,
         Einheit::Beats,
         false,
         "Lage im Beat, 0 ist auf dem Schlag",
     ),
-    schalter("loop_active", true, "Läuft gerade eine Schleife"),
+    schalter("loop_active", "LOOP", true, "Läuft gerade eine Schleife"),
     zahl(
         "loop_beats",
+        "LOOP",
         0.0,
         64.0,
         Einheit::Beats,
@@ -193,7 +220,7 @@ pub static DECK: &[Beschreibung] = &[
     text_feld("artist", "Künstler des geladenen Tracks"),
     // Ohne das erfährt ein Agent nie, dass er den nächsten Track auflegen
     // muss. Für autonomes Auflegen ist es die zentrale Information.
-    schalter("finished", false, "Track ist durchgelaufen"),
+    schalter("finished", "", false, "Track ist durchgelaufen"),
     text_feld(
         "load_status",
         "Stand des letzten Ladeauftrags: bereit, laedt oder ein Fehler",
@@ -227,6 +254,7 @@ pub fn hot_cue_beschreibung(index: usize) -> Option<Beschreibung> {
         // Der Name wird zur Laufzeit gebraucht, `element` ist aber `'static`.
         // Deshalb eine kleine feste Tabelle statt einer geleakten Zeichenkette.
         element: HOT_CUE_NAMEN[index],
+        kurz: "",
         art: Art::Zahl,
         bereich: Some((0.0, f64::MAX)),
         einheit: Einheit::Sekunden,
@@ -241,37 +269,97 @@ static HOT_CUE_NAMEN: [&str; HOT_CUES] = [
     "cue1", "cue2", "cue3", "cue4", "cue5", "cue6", "cue7", "cue8",
 ];
 
+/// Ein Kanalzug, in der Reihenfolge, in der er am Gerät steht.
+///
+/// Die Reihenfolge ist nicht beliebig: Die Oberfläche holt sich ihre Regler
+/// aus dem Katalog und zeichnet sie so, wie sie hier stehen. Höhen oben,
+/// Bässe unten — andersherum greift man beim Auflegen ständig daneben.
 pub static KANAL: &[Beschreibung] = &[
     zahl(
         "trim",
+        "TRIM",
         0.0,
         2.0,
         Einheit::Faktor,
         true,
         "Eingangsverstärkung vor dem EQ",
     ),
+    zahl("eq_high", "HI", 0.0, 2.0, Einheit::Faktor, true, "Höhen"),
+    zahl("eq_mid", "MID", 0.0, 2.0, Einheit::Faktor, true, "Mitten"),
     zahl(
         "eq_low",
+        "LOW",
         0.0,
         2.0,
         Einheit::Faktor,
         true,
         "Bässe; 0 ist ein echter Kill",
     ),
-    zahl("eq_mid", 0.0, 2.0, Einheit::Faktor, true, "Mitten"),
-    zahl("eq_high", 0.0, 2.0, Einheit::Faktor, true, "Höhen"),
     zahl(
         "filter",
+        "FLT",
         -1.0,
         1.0,
         Einheit::Bipolar,
         true,
         "DJ-Filter; negativ Tiefpass, positiv Hochpass",
     ),
-    zahl("fader", 0.0, 1.0, Einheit::Faktor, true, "Linefader"),
-    schalter("cue", true, "Kanal auf den Kopfhörer legen"),
+    zahl(
+        "fader",
+        "FADER",
+        0.0,
+        1.0,
+        Einheit::Faktor,
+        true,
+        "Linefader",
+    ),
+    schalter("cue", "CUE", true, "Kanal auf den Kopfhörer legen"),
+    Beschreibung {
+        element: "fx",
+        kurz: "FX",
+        art: Art::Auswahl,
+        bereich: None,
+        einheit: Einheit::Keine,
+        auswahl: audio_engine::Effekt::NAMEN,
+        schreibbar: true,
+        argument: "",
+        text: "Effekt hinter dem Fader; die Fahne überlebt den zugezogenen Fader",
+    },
+    zahl(
+        "fx_mix",
+        "MIX",
+        0.0,
+        1.0,
+        Einheit::Faktor,
+        true,
+        "Trocken bis nass",
+    ),
+    zahl(
+        "fx_amount",
+        "AMT",
+        0.0,
+        1.0,
+        Einheit::Faktor,
+        true,
+        "Stärke: Rückkopplung, Öffnungsdauer, Tiefe oder Härte",
+    ),
+    zahl(
+        "fx_time",
+        "ZEIT",
+        0.001,
+        4.0,
+        Einheit::Sekunden,
+        true,
+        "Effektzeit; mit fx_sync auf das Tempo des Decks setzen",
+    ),
+    aktion(
+        "fx_sync",
+        "<beats>",
+        "Effektzeit auf so viele Beats des zugehörigen Decks setzen",
+    ),
     Beschreibung {
         element: "assign",
+        kurz: "",
         art: Art::Auswahl,
         bereich: None,
         einheit: Einheit::Keine,
@@ -295,6 +383,7 @@ pub static MASTER: &[Beschreibung] = &[
     ),
     zahl(
         "crossfader",
+        "XFADER",
         -1.0,
         1.0,
         Einheit::Bipolar,
@@ -303,15 +392,25 @@ pub static MASTER: &[Beschreibung] = &[
     ),
     zahl(
         "crossfader_curve",
+        "KURVE",
         0.0,
         1.0,
         Einheit::Faktor,
         true,
         "Kurve; 0 weich, 1 hart",
     ),
-    zahl("gain", 0.0, 1.5, Einheit::Faktor, true, "Summenlautstärke"),
+    zahl(
+        "gain",
+        "MASTER",
+        0.0,
+        1.5,
+        Einheit::Faktor,
+        true,
+        "Summenlautstärke",
+    ),
     zahl(
         "cue_gain",
+        "KOPFH",
         0.0,
         1.5,
         Einheit::Faktor,
@@ -320,6 +419,7 @@ pub static MASTER: &[Beschreibung] = &[
     ),
     zahl(
         "cue_mix",
+        "CUE/MST",
         0.0,
         1.0,
         Einheit::Faktor,

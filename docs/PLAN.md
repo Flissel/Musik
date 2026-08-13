@@ -176,7 +176,7 @@ Ordner liegen. Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 | ~~4~~ | ~~Sync und Beatmatching~~ ✅ | Zwei Tracks bleiben über 5 Minuten im Takt — als Test abgesichert | M | 2 |
 | ~~5~~ | ~~Hot Cues und Loops~~ ✅ | 8 Cues pro Deck, Loop beat-quantisiert, in der Oberfläche bedienbar | M | 4 |
 | ~~6~~ | ~~Library~~ ✅ | Import, Suche, Playlists, Traktor-`collection.nml` | L | 2 |
-| 7 | Effekte | 6–8 gute Effekte, Mixer-FX post-fader | M | 1 |
+| ~~7~~ | ~~Effekte~~ ✅ | Vier Effekte post-fader, tempo-synchron · Offen: Reverb, und ob vier reichen | M | 1 |
 | 8 | Stems | Beim Import vorberechnet, Stem-Deck-Modus | L | 6 |
 | 9 | Mitschnitt | Master-Bus als WAV/FLAC, ohne Aussetzer | S | 1 |
 | 10 | MIDI-Controller | Generic-MIDI-Mapping, speicherbar | M | 3 |
@@ -196,19 +196,26 @@ die Engine nicht.
 Ab Phase 6 ist die Software als DJ-Werkzeug benutzbar. 7 bis 10 machen sie gut.
 
 **Wenige gute Effekte statt vierzig.** Traktor hat über 40; die meisten davon
-benutzt niemand. Sinnvoll sind Filter, Delay, Reverb, Beatmasher/Gater, Flanger
-und ein Bitcrusher — richtig gebaut und mit vernünftigen Regelwegen.
+benutzt niemand. Gebaut sind Delay, Gater, Flanger und Crusher — der Filter
+sitzt ohnehin schon fest im Kanalzug. **Reverb fehlt bewusst:** Ein schlechter
+Hall ist schlimmer als keiner, und ein guter ist ein eigenes Stück Arbeit.
+
+Alle vier liegen **hinter dem Fader**. Das ist der Punkt, an dem Mixer-FX sich
+von Insert-Effekten unterscheiden: Zieht man den Fader zu, während ein Delay
+klingt, soll die Fahne ausklingen statt abzureißen. Der Mixer muss dafür einen
+stummen Kanal weiterrechnen, solange sein Effekt noch klingt — sonst wäre die
+Anordnung nur auf dem Papier richtig.
 
 ## Was inzwischen steht
 
-Sieben von zehn Phasen sind gebaut. Die Software lässt sich bedienen: Tracks
+Acht von zehn Phasen sind gebaut. Die Software lässt sich bedienen: Tracks
 aus der Sammlung auf die Decks legen, Wellenform und Beatgrid sehen, mischen.
-Was fehlt, sind Effekte, Stems, Mitschnitt und MIDI.
+Was fehlt, sind Stems, Mitschnitt und MIDI.
 
 | Crate | Inhalt |
 | --- | --- |
 | `audio-core` | Deck: Dekodierung, WSOLA, Beatgrid, Hot Cues, Loops |
-| `audio-engine` | Mixer: Kanalzüge, EQ, Filter, Crossfader, Cue-Bus, Begrenzer, AUX, Sync, Kommandoschlange, Geräteausgabe |
+| `audio-engine` | Mixer: Kanalzüge, EQ, Filter, Effekte, Crossfader, Cue-Bus, Begrenzer, AUX, Sync, Kommandoschlange, Geräteausgabe |
 | `analysis` | Tempo, Beatgrid, Wellenform-Spitzen, Sidecar-Cache |
 | `library` | SQLite-Sammlung, Suche, Playlists, Traktor-Import |
 | `musik-cli` | Deck fahren, analysieren, Mix rendern, Sammlung verwalten |

@@ -214,6 +214,26 @@ lock-freie Schlange, die auch die Oberfläche benutzt, und liest aus Atomics
 und aus dem eigenen Spiegel. Der Mutex um das Pult wird nur von Bedienern
 genommen — Oberfläche, Socket, später MIDI. Der Audio-Thread sieht ihn nie.
 
+## Die Probe aufs Exempel: die Effekte
+
+Als die Effekte dazukamen, bekam die Oberfläche **keine einzige Zeile** für
+sie. Der Kanalzug holt sich seine Regler aus dem Katalog — Reihenfolge,
+Bereich, Beschriftung, Hilfetext. Vier neue Einträge im Katalog, und das
+FX-Feld stand da, samt Auswahlfeld mit den richtigen Namen:
+
+```text
+$ echo 'list channel1.fx' | nc -U -q1 "$XDG_RUNTIME_DIR/musik.sock"
+control channel1.fx auswahl off|delay|gater|flanger|crush - rw Effekt hinter dem Fader; …
+```
+
+Ein Nebeneffekt davon ist, dass die Katalogreihenfolge jetzt die Anordnung am
+Gerät ist: Höhen oben, Bässe unten. Beim ersten Versuch stand der EQ
+verkehrtherum, weil im Katalog `eq_low` vor `eq_high` stand — im Zweifel greift
+man beim Auflegen daneben, und deshalb ist die Reihenfolge dort jetzt
+festgehalten und begründet.
+
+![Effekte, von außen gesetzt](bilder/effekte.png)
+
 ## Auch die Oberfläche geht hier durch
 
 Nicht nur die Regler: Suchen und Laden nehmen inzwischen denselben Weg. Ein
@@ -228,6 +248,8 @@ sofort mit — und wird bemerkt.
 
 ## Was noch fehlt
 
+- **Reverb.** Vier Effekte gibt es; ein guter Hall fehlt und ist ein eigenes
+  Stück Arbeit.
 - **Beatgrid korrigieren.** `set deck1.bpm_grid` ist nur lesbar; ein falsch
   erkanntes Grid lässt sich von außen nicht geraderücken.
 - **Windows.** Unix-Sockets gibt es dort nicht; eine Named Pipe wäre die
