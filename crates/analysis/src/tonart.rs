@@ -42,13 +42,50 @@ pub const SPRUNG: usize = 4096;
 /// **Gemessen wird die Güte, nicht der Vorsprung.** Der naheliegende Weg wäre
 /// der Abstand zum zweitbesten Treffer — der taugt aber nicht: Perkussion kam
 /// damit auf 0,062 und eine echte Moll-Folge auf 0,088, also praktisch
-/// dasselbe. Die Korrelation selbst trennt tonales Material sauber ab:
-/// Akkordfolgen und Demo-Tracks liegen bei 0,87 bis 0,95, ein Dauerton bei
-/// 0,70, ein Klick-Track bei 0,36, Rauschen bei 0,30.
+/// dasselbe.
 ///
-/// Was sie **nicht** trennt, ist eine Bassfigur ohne Akkorde (0,80–0,85) von
-/// einem echten Stück (ab 0,87) — dafür ist [`MIN_TERZ`] da.
-const MIN_PASSUNG: f32 = 0.80;
+/// **Der Wert ist an echten Aufnahmen geeicht, nicht an synthetischen.** Das
+/// ist der Unterschied, an dem die erste Fassung danebenlag: Selbstgebaute
+/// Akkordfolgen erreichen 0,92 bis 0,95, echte Aufnahmen kommen über 0,82 kaum
+/// hinaus. Eine an synthetischem Material geeichte Schwelle von 0,80 wies
+/// vier von fünf echten Tracks ab — dieselbe Falle wie beim Tempo, wo eine an
+/// Klick-Tracks geeichte Schwelle echte Musik verwarf.
+///
+/// Geeicht an fünf Aufnahmen, gegengeprüft über die Stabilität in
+/// 30-Sekunden-Abschnitten. Eine echte Tonart bleibt über den Track stehen,
+/// eine erfundene springt:
+///
+/// | r    | Abschnitte einig | Urteil |
+/// |------|------------------|--------|
+/// | 0,81 | 4 von 4          | Tonart |
+/// | 0,79 | 5 von 7          | Tonart |
+/// | 0,77 | 6 von 7          | Tonart |
+/// | 0,71 | 4 von 6, springt | keine  |
+/// | 0,56 | 4 von 8, springt | keine  |
+///
+/// **Warum echte Musik niedriger liegt, ist nicht, wofür man es hält.** Nicht
+/// Rauschen und nicht Perkussion: Gleichmäßiges Rauschen hebt alle zwölf
+/// Klassen um denselben Betrag an, und eine Korrelation ist gegen so einen
+/// Offset unempfindlich — gemessen sinkt die Güte selbst bei grobem Rauschen
+/// und lauten Drums nur von 0,95 auf 0,90. Was sie drückt, ist **fremde
+/// Harmonik**: Töne außerhalb der Tonart, Zwischenteile in anderen Tonarten,
+/// Stimmen mit gleitender Tonhöhe. Eine Aufnahme bei 0,75 ist also keine
+/// schlechte Aufnahme, sondern eine harmonisch bewegte.
+///
+/// **Diese Schwelle lässt sich nicht durch einen Test bewachen.** Um sie zu
+/// prüfen, bräuchte es synthetisches Material im Bereich echter Musik, und
+/// genau das ist nicht herstellbar: Selbst eine Tritonus-Modulation über ein
+/// Drittel der Länge kommt nur auf 0,864, weil Akkorde aus sauberen
+/// Obertonreihen über einem starren Halbtonraster immer zu gut korrelieren.
+/// Was hier bewacht wird, ist die Tabelle oben — wer den Wert ändert, muss
+/// gegen echte Aufnahmen nachmessen.
+///
+/// **Fünf Aufnahmen sind eine dünne Grundlage.** Der Abstand zwischen 0,71 und
+/// 0,77 ist schmal, und mehr Material würde ihn schärfen. In dieser Richtung
+/// zu irren ist aber die richtige: Ein Track ohne Angabe fehlt in der
+/// harmonischen Suche, ein Track mit falscher Angabe führt beim Auflegen in
+/// den Griff daneben.
+const MIN_PASSUNG: f32 = 0.72;
 
 /// Wie stark die Terz mindestens gegenüber dem Grundton stehen muss.
 ///

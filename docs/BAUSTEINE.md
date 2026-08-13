@@ -128,8 +128,25 @@ Camelot-Ausgabe. Rund 200 Zeilen.
 Was es kann und was nicht, steht ausführlich im Modul. Kurz: Auf Material mit
 Akkorden trifft es; auf Bass und Drums allein sagt es **nichts**, weil dort das
 Tongeschlecht nicht im Signal steht und ein geratenes Dur auf dem Camelot-Rad
-zum Fehlgriff führt. Beide Schwellen sind an synthetischem Material gemessen
-und gegen eine echte Sammlung nie geprüft — dasselbe Vorbehalt wie beim Tempo.
+zum Fehlgriff führt.
+
+**An echten Aufnahmen nachgeeicht.** Die erste Schwelle war an synthetischen
+Akkordfolgen gemessen, die 0,92 bis 0,95 erreichen — echte Aufnahmen kommen
+über 0,82 kaum hinaus, und vier von fünf Testtracks wurden abgewiesen.
+Dieselbe Falle wie beim Tempo, wo eine an Klick-Tracks geeichte Schwelle
+echte Musik verwarf; sie ist offenbar die Standardfalle bei allem, was hier
+an Signalen gemessen wird.
+
+Der Grund liegt nicht, wo man ihn vermutet: Rauschen und Perkussion drücken
+die Güte kaum, weil sie alle zwölf Halbtonklassen gleichmäßig anheben und eine
+Korrelation gegen so einen Offset unempfindlich ist. Was sie drückt, ist
+fremde Harmonik — Zwischenteile in anderen Tonarten, Töne außerhalb der
+Skala, Stimmen mit gleitender Tonhöhe.
+
+Die Eichung beruht auf **fünf** Aufnahmen, gegengeprüft über die Stabilität in
+30-Sekunden-Abschnitten. Das ist dünn. Mehr Material würde sie schärfen — und
+diese Schwelle lässt sich nicht durch einen Test bewachen, weil sich der
+Bereich echter Musik synthetisch nicht herstellen lässt.
 
 **Praktischer Hinweis:** Beatgrid-Erkennung ist bei geradem 4/4-Material fast
 gelöst und bei allem anderen mühsam. Traktor löst das über manuelle

@@ -216,8 +216,13 @@ Die Tonarterkennung ist selbst gebaut — libKeyFinder und der QM Key Detector
 stehen unter GPL und hätten den Weg zu VibeMind zugemacht. Sie sagt bewusst
 **nichts**, wenn ein Track nur aus Bass und Drums besteht: Dort steht das
 Tongeschlecht nicht im Signal, und ein geratenes Dur führt auf dem Camelot-Rad
-zum Fehlgriff. Die Schwellen sind an synthetischem Material gemessen und
-gegen eine echte Sammlung nie geprüft.
+zum Fehlgriff.
+
+Ihre Schwelle ist an **fünf** echten Aufnahmen nachgeeicht, nachdem die erste,
+an synthetischem Material gemessene, vier davon abgewiesen hatte. Fünf ist
+dünn; die Schwelle gehört nachgemessen, sobald mehr Material da ist. Beim
+Tempo steht dieselbe Aufgabe noch aus — dort liegen die Konfidenzen echter
+Tracks bei 0,05 bis 0,46 und damit durchweg im unteren Bereich.
 
 | Crate | Inhalt |
 | --- | --- |
