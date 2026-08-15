@@ -43,18 +43,61 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
 
 | Werkzeug | Wofür |
 | --- | --- |
-| `musik_status` | Momentaufnahme: Decks, Kanalzüge, Summe, Mitschnitt |
+| `musik_status` | Momentaufnahme: Decks, Kanalzüge, Summe, Mitschnitt, Plan |
 | `musik_list_controls` | Was es gibt — mit Bereich, Einheit und Bedeutung |
 | `musik_get` | Einen Wert lesen |
 | `musik_search` | Sammlung durchsuchen, nach Text, Tempo oder Tonart |
 | `musik_set` | Einen Wert setzen |
 | `musik_do` | Eine Aktion auslösen: laden, syncen, Cue, Mitschnitt |
+| `musik_ramp` | Einen Regler über Beats bewegen — eine Blende |
+| `musik_schedule` | Eine Aktion oder einen Wert auf einen späteren Beat legen |
+| `musik_cancel` | Vorgemerktes zurücknehmen |
 
-Sechs statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
+Neun statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
 Übersetzung und die schlechtere: Der Steuerraum hat über zweihundert Einträge,
 und ein Agent, der sie alle als Werkzeuge sieht, findet keins davon.
 `musik_set` und `musik_do` erreichen alles, `musik_status` und `musik_search`
 sparen die Wege, die man sonst am häufigsten doppelt ginge.
+
+## Warum es Zeit-Werkzeuge braucht
+
+`musik_set` allein reicht für Reglerstellungen, nicht für Übergänge. Eine
+Blende ist eine Bewegung über Takte; wer sie von außen nachbaut, ruft
+`musik_set` in einer Schleife und schläft dazwischen — über eine
+Werkzeugschnittstelle, deren Timing bei jedem Aufruf eine Modellantwort weit
+entfernt ist. Das eiert hörbar, und der Agent kann in der Zeit nichts anderes
+tun.
+
+`musik_ramp` und `musik_schedule` sagen einmal, was passieren soll, und kommen
+sofort zurück. Gerechnet wird in **Beats, nicht in Sekunden**: Dreht jemand am
+Tempo, bleibt die Blende musikalisch richtig; steht das Deck, wartet sie.
+
+```text
+musik_ramp(control='channel1.eq_low', ziel=0, ueber_beats=8)
+musik_ramp(control='master.crossfader', ziel=1, ueber_beats=32, in_beats=16)
+musik_schedule(beats=64, aktion='deck2.sync')
+```
+
+## Der Plan ist das gemeinsame Blatt
+
+Selten bedient nur einer. Deshalb steht im Feld `plan` von `musik_status`, was
+vorgemerkt ist — von wem auch immer:
+
+```json
+"plan": [
+  {"id": 1, "art": "ramp", "text": "ramp channel1.eq_low 1.0000 → 0.0000 über 8 Beats, 2.5 gelaufen (deck1)"},
+  {"id": 2, "art": "in",   "text": "in 61.5 Beats: do deck2.sync (deck1)"}
+]
+```
+
+Wer das liest, greift nicht mitten in eine fremde Blende. Und wenn doch: **Der
+letzte Griff gewinnt.** Eine Rampe gibt auf, sobald jemand anders denselben
+Regler anfasst — ein zweiter Agent wie der Mensch an der Oberfläche. Ohne das
+wäre der Plan stärker als die Hand daneben.
+
+`musik_cancel` streicht deshalb ohne ausdrückliches `alle=true` nur den einen
+genannten Auftrag; eine vergessene `plan_id` leert nicht die Arbeit der
+anderen.
 
 ## Die Beschreibungen werden erzeugt, nicht gepflegt
 
@@ -86,7 +129,8 @@ Laufzeit.
   jedes Argument auf Zeilenumbrüche geprüft und sonst abgewiesen. Ein Pfad mit
   `\n` wäre sonst ein zweiter Befehl, den niemand geschickt hat.
 - `musik_do` ist als `destructiveHint` gemeldet: `load` tauscht den Track eines
-  Decks, `record` schreibt eine Datei — beides überschreibt etwas.
+  Decks, `record` schreibt eine Datei — beides überschreibt etwas. `musik_cancel`
+  ebenso: Gestrichenes ist weg und kann von jemand anderem stammen.
 
 ## Prüfen
 

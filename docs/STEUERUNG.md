@@ -276,9 +276,10 @@ abonniert, sollte deshalb getrennt lesen und schreiben.
 ## Anschluss für Agenten: MCP
 
 Für Agenten liegt eine Brücke bei — [`mcp/`](../mcp/README.md), ein
-MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Sechs Werkzeuge statt
+MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Neun Werkzeuge statt
 zweihundert: `musik_set` und `musik_do` erreichen alles, `musik_status` und
-`musik_search` sparen die häufigsten Wege.
+`musik_search` sparen die häufigsten Wege, `musik_ramp`, `musik_schedule` und
+`musik_cancel` reichen den Zeitplan des nächsten Abschnitts durch.
 
 Der Gewinn aus dem selbstbeschreibenden Katalog wird dort eingelöst: Die
 Beschreibungen von `musik_set` und `musik_do` **erzeugt der Server beim Start
@@ -349,6 +350,24 @@ Der Takt liegt bei 5 ms — bei 128 BPM etwa ein Prozent eines Beats. Für eine
 Blende unhörbar, für einen harten Schnitt auf die Eins gerade noch vertretbar.
 **Sample-genau ist das ausdrücklich nicht**; dafür müssten die Befehle im
 Audio-Callback liegen, und dorthin gehört keine Reglerlogik.
+
+### Über MCP
+
+Dieselben vier Verben, für einen Agenten, der kein Zeilenprotokoll spricht:
+
+| Protokoll | MCP |
+| --- | --- |
+| `ramp <control> <ziel> <beats> [deck]` | `musik_ramp` |
+| `in <beats> ramp …` | `musik_ramp` mit `in_beats` |
+| `in <beats> <befehl>` | `musik_schedule` |
+| `plan` | Feld `plan` in `musik_status` |
+| `cancel [id]` | `musik_cancel` |
+
+Der Plan hängt bewusst an `musik_status` statt an einem eigenen Werkzeug: Wer
+eine Momentaufnahme nimmt, bevor er zugreift, soll die Absichten der anderen
+sehen, ohne sie extra abfragen zu müssen. Und `musik_cancel` verlangt für
+„alles" einen eigenen Schalter — eine vergessene Nummer soll nicht die Arbeit
+der anderen leeren.
 
 ## Was am Deck eingestellt wird, bleibt
 

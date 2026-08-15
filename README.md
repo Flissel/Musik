@@ -263,7 +263,24 @@ setn channel2.eq_low 0        # normiert, für MIDI
 
 `list` liefert zu jedem Control Typ, Bereich, Einheit, Schreibbarkeit und
 Bedeutung — der Steuerraum beschreibt sich selbst, ein Handbuch ist dafür nicht
-nötig. Das ist die Grundlage für die Agenten-Schicht und für den Anschluss an
+nötig.
+
+Ein Übergang ist aber keine Folge von Reglerstellungen, sondern eine Bewegung
+über Takte. Dafür gibt es Verben für Zeit:
+
+```sh
+ramp channel1.eq_low 0.0 8            # Bass raus über 8 Beats
+in 8 ramp channel2.fader 0.9 16       # danach Deck B rein über 16
+plan                                  # was vorgemerkt ist — auch von anderen
+```
+
+Gerechnet wird in **Beats, nicht in Sekunden**: Dreht jemand am Tempo, bleibt
+die Blende musikalisch richtig; steht das Deck, wartet sie. Und **eine Rampe
+gibt auf, sobald jemand anders denselben Regler anfasst** — der Griff daneben
+ist stärker als die Automatik, ob er von einem Menschen kommt oder von einem
+zweiten Agenten.
+
+Das ist die Grundlage für die Agenten-Schicht und für den Anschluss an
 VibeMind — für die liegt in [`mcp/`](mcp/README.md) eine MCP-Brücke bereit,
 deren Werkzeugbeschreibungen aus demselben Katalog erzeugt werden. Details in
 [docs/STEUERUNG.md](docs/STEUERUNG.md).

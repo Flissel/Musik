@@ -32,6 +32,9 @@ ERWARTETE_WERKZEUGE = {
     "musik_search",
     "musik_set",
     "musik_do",
+    "musik_ramp",
+    "musik_schedule",
+    "musik_cancel",
 }
 
 
@@ -50,11 +53,16 @@ async def hauptteil() -> int:
         return 77
 
     fehler: list[str] = []
+    uebersprungen: list[str] = []
 
     def pruefe(bedingung: bool, was: str) -> None:
         print(f"{'ok  ' if bedingung else 'FEHL'} {was}")
         if not bedingung:
             fehler.append(was)
+
+    def ausgelassen(was: str, warum: str) -> None:
+        print(f"--   {was} — {warum}")
+        uebersprungen.append(f"{was} ({warum})")
 
     async with Client(musik_mcp.mcp) as client:
         werkzeuge = await client.list_tools()
@@ -84,6 +92,10 @@ async def hauptteil() -> int:
         daten = json.loads(status)
         pruefe(len(daten["decks"]) >= 2, "musik_status zeigt beide Decks")
         pruefe("recording" in daten["master"], "musik_status kennt den Mitschnitt")
+        pruefe(
+            isinstance(daten.get("plan"), list),
+            "musik_status zeigt den gemeinsamen Plan",
+        )
 
         liste = text_von(
             await client.call_tool(
@@ -175,7 +187,165 @@ async def hauptteil() -> int:
         except Exception:
             pruefe(True, "ein eingeschleuster Befehl wird abgewiesen")
 
+        # ------------------------------------------------------------------
+        # Zeit: Blenden und vorgemerkte Befehle
+        # ------------------------------------------------------------------
+
+        async def plan_jetzt() -> list[dict]:
+            roh = text_von(
+                await client.call_tool(
+                    "musik_status", {"params": {"response_format": "json"}}
+                )
+            )
+            return json.loads(roh)["plan"]
+
+        # Ein Schalter ist keine Bewegung — das muss auffallen, bevor
+        # irgendetwas vorgemerkt wird.
+        kein_regler = text_von(
+            await client.call_tool(
+                "musik_ramp",
+                {"params": {"control": "deck1.play", "ziel": 1, "ueber_beats": 8}},
+            )
+        )
+        pruefe(
+            kein_regler.startswith("Fehler:"),
+            "eine Blende auf einem Schalter wird abgewiesen",
+        )
+
+        # Ein halber Befehl ist schlimmer als gar keiner: Er sähe aus, als wäre
+        # etwas vorgemerkt.
+        for was, eingabe in [
+            ("weder Aktion noch Control", {"beats": 8}),
+            (
+                "beides zugleich",
+                {
+                    "beats": 8,
+                    "aktion": "deck2.sync",
+                    "control": "channel1.fader",
+                    "wert": "1",
+                },
+            ),
+            ("ein Control ohne Wert", {"beats": 8, "control": "channel1.fader"}),
+        ]:
+            try:
+                await client.call_tool("musik_schedule", {"params": eingabe})
+                pruefe(False, f"musik_schedule weist {was} ab")
+            except Exception:
+                pruefe(True, f"musik_schedule weist {was} ab")
+
+        try:
+            await client.call_tool("musik_cancel", {"params": {}})
+            pruefe(False, "musik_cancel ohne Ziel streicht nicht einfach alles")
+        except Exception:
+            pruefe(True, "musik_cancel ohne Ziel streicht nicht einfach alles")
+
+        vorher = await plan_jetzt()
+        hat_grid = any(d["bpm"] for d in daten["decks"])
+        if not hat_grid:
+            ausgelassen(
+                "Blende und Vormerkung",
+                "kein Deck hat ein Beatgrid, also gibt es keine Beats",
+            )
+        else:
+            eq_vorher = text_von(
+                await client.call_tool(
+                    "musik_get", {"params": {"control": "channel1.eq_low"}}
+                )
+            ).strip()
+
+            blende = text_von(
+                await client.call_tool(
+                    "musik_ramp",
+                    {
+                        "params": {
+                            "control": "channel1.eq_low",
+                            "ziel": 0,
+                            "ueber_beats": 64,
+                        }
+                    },
+                )
+            ).strip()
+            pruefe(blende.startswith("ok plan "), f"musik_ramp blendet ({blende})")
+
+            # Dasselbe, aber erst in 32 Beats — die Zusammensetzung, die ein
+            # Agent wirklich braucht.
+            spaeter = text_von(
+                await client.call_tool(
+                    "musik_ramp",
+                    {
+                        "params": {
+                            "control": "channel2.eq_low",
+                            "ziel": 0,
+                            "ueber_beats": 16,
+                            "in_beats": 32,
+                        }
+                    },
+                )
+            ).strip()
+            pruefe(
+                spaeter.startswith("ok plan "),
+                f"musik_ramp kann auch warten, bevor sie losfährt ({spaeter})",
+            )
+
+            vorgemerkt = text_von(
+                await client.call_tool(
+                    "musik_schedule",
+                    {"params": {"beats": 64, "aktion": "deck2.sync"}},
+                )
+            ).strip()
+            pruefe(
+                vorgemerkt.startswith("ok plan "),
+                f"musik_schedule legt einen Befehl auf einen Beat ({vorgemerkt})",
+            )
+
+            alte_ids = {a["id"] for a in vorher}
+            neu = [a for a in await plan_jetzt() if a["id"] not in alte_ids]
+            pruefe(len(neu) == 3, f"alle drei Aufträge stehen im Plan ({len(neu)})")
+            arten = sorted(a["art"] for a in neu)
+            pruefe(
+                arten == ["in", "in", "ramp"],
+                f"der Plan sagt, welcher Art die Aufträge sind ({arten})",
+            )
+
+            weg = text_von(
+                await client.call_tool(
+                    "musik_cancel", {"params": {"plan_id": neu[0]["id"]}}
+                )
+            ).strip()
+            pruefe(weg == "ok 1 gestrichen", f"musik_cancel nimmt einen zurück ({weg})")
+
+            if vorher:
+                # Da steht fremde Arbeit im Plan — die wird nicht mitgestrichen.
+                ausgelassen(
+                    "musik_cancel mit alle=true",
+                    "es standen schon fremde Aufträge im Plan",
+                )
+                for a in neu[1:]:
+                    await client.call_tool(
+                        "musik_cancel", {"params": {"plan_id": a["id"]}}
+                    )
+            else:
+                alles = text_von(
+                    await client.call_tool("musik_cancel", {"params": {"alle": True}})
+                ).strip()
+                pruefe(
+                    alles == "ok 2 gestrichen",
+                    f"musik_cancel räumt mit alle=true auf ({alles})",
+                )
+                pruefe(not await plan_jetzt(), "danach ist der Plan leer")
+
+            # Die Blende hat den EQ ein Stück bewegt; er kommt zurück.
+            if eq_vorher not in ("-", ""):
+                await client.call_tool(
+                    "musik_set",
+                    {"params": {"control": "channel1.eq_low", "wert": eq_vorher}},
+                )
+
     print()
+    if uebersprungen:
+        print(f"{len(uebersprungen)} Prüfungen ausgelassen:")
+        for u in uebersprungen:
+            print(f"  - {u}")
     if fehler:
         print(f"{len(fehler)} Prüfungen fehlgeschlagen:", file=sys.stderr)
         for f in fehler:

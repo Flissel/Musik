@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastmcp import FastMCP
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 mcp = FastMCP("musik_mcp")
 
@@ -355,6 +355,131 @@ class StatusEingabe(Basis):
     response_format: Format = Field(default=Format.MARKDOWN, description="Ausgabeform")
 
 
+def _zahl_als_text(wert: float) -> str:
+    """Zahl fürs Protokoll — ohne Exponentialschreibweise.
+
+    `str(1e-05)` wäre '1e-05', und das Pult liest es zwar, aber in einer
+    Protokollzeile sieht es aus wie ein Tippfehler.
+    """
+    return f"{wert:.6f}".rstrip("0").rstrip(".") or "0"
+
+
+class DeckName(str, Enum):
+    """Die Decks, die es gibt.
+
+    Von Hand aufgezählt und nicht aus dem Katalog erzeugt: Lief die Anwendung
+    beim Start nicht, wäre die Auswahl leer und das Schema kaputt. Kommt ein
+    drittes Deck dazu, gehört es hierher — das Protokoll selbst nimmt jedes
+    `deckN` an.
+    """
+
+    DECK1 = "deck1"
+    DECK2 = "deck2"
+
+
+class RampeEingabe(Basis):
+    control: str = Field(
+        ...,
+        description="Regler, der wandern soll, etwa 'channel1.eq_low'",
+        min_length=3,
+        max_length=64,
+    )
+    ziel: float = Field(..., description="Wert am Ende der Bewegung")
+    ueber_beats: float = Field(
+        ...,
+        description="Länge der Bewegung in Beats. 0 setzt sofort.",
+        ge=0,
+        le=4096,
+    )
+    in_beats: Optional[float] = Field(
+        default=None,
+        description="Erst so viele Beats warten, dann losfahren",
+        ge=0,
+        le=4096,
+    )
+    taktgeber_deck: Optional[DeckName] = Field(
+        default=None,
+        description=(
+            "Wessen Beats gezählt werden. Ohne Angabe erbt ein Kanalzug den "
+            "Takt von seinem Deck, die Summe nimmt das erste Deck mit Grid."
+        ),
+    )
+
+    @field_validator("control")
+    @classmethod
+    def _einzeilig(cls, v: str) -> str:
+        return _pruefe_einzeilig(v, "control")
+
+
+class VormerkEingabe(Basis):
+    beats: float = Field(
+        ...,
+        description="In wie vielen Beats der Befehl ausgeführt wird",
+        ge=0,
+        le=4096,
+    )
+    aktion: Optional[str] = Field(
+        default=None,
+        description="Aktion, die dann ausgelöst wird, etwa 'deck2.sync'",
+        max_length=64,
+    )
+    argument: Optional[str] = Field(
+        default=None,
+        description="Argument der Aktion, etwa ein Dateipfad",
+        max_length=4096,
+    )
+    control: Optional[str] = Field(
+        default=None,
+        description="Statt einer Aktion: Control, das dann gesetzt wird",
+        max_length=64,
+    )
+    wert: Optional[str] = Field(
+        default=None,
+        description="Wert für das Control; Pflicht, wenn control gesetzt ist",
+        max_length=256,
+    )
+
+    @field_validator("aktion", "argument", "control", "wert")
+    @classmethod
+    def _einzeilig(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _pruefe_einzeilig(v, "Argument")
+
+    @model_validator(mode="after")
+    def _genau_eines(self) -> VormerkEingabe:
+        if bool(self.aktion) == bool(self.control):
+            raise ValueError("entweder aktion oder control angeben, nicht beides")
+        if self.control and not self.wert:
+            raise ValueError("control braucht einen wert")
+        return self
+
+    def befehl(self) -> str:
+        if self.aktion:
+            return f"do {self.aktion}" + (f" {self.argument}" if self.argument else "")
+        return f"set {self.control} {self.wert}"
+
+
+class StreichEingabe(Basis):
+    plan_id: Optional[int] = Field(
+        default=None,
+        description="Nummer aus `musik_status` — der eine Auftrag, der weg soll",
+        ge=1,
+    )
+    alle: bool = Field(
+        default=False,
+        description=(
+            "Alles streichen, auch was andere vorgemerkt haben. Bewusst ein "
+            "eigener Schalter, damit ein vergessenes plan_id nicht den ganzen "
+            "Plan leert."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _eines_von_beiden(self) -> StreichEingabe:
+        if (self.plan_id is None) == (not self.alle):
+            raise ValueError("entweder plan_id nennen oder alle=true setzen")
+        return self
+
+
 # --------------------------------------------------------------------------
 # Werkzeuge
 # --------------------------------------------------------------------------
@@ -372,10 +497,15 @@ NUR_LESEN = {
     annotations={"title": "Momentaufnahme der Anlage", **NUR_LESEN},
 )
 async def musik_status(params: StatusEingabe) -> str:
-    """Was gerade läuft: beide Decks, die Kanalzüge und die Summe.
+    """Was gerade läuft: beide Decks, die Kanalzüge, die Summe — und der Plan.
 
     Der erste Griff, bevor man etwas verändert. Eine Momentaufnahme statt eines
     Dutzends einzelner Abfragen.
+
+    **Der Plan steht mit drin, weil selten nur einer bedient.** Wer sieht, dass
+    schon eine Blende auf `channel1.fader` läuft, greift nicht mitten hinein —
+    und wenn doch, bricht die Blende ab (die Anlage bevorzugt den letzten
+    Griff, nicht den Plan).
 
     Args:
         params (StatusEingabe): response_format — 'markdown' oder 'json'.
@@ -384,17 +514,20 @@ async def musik_status(params: StatusEingabe) -> str:
         str: Markdown-Übersicht oder JSON mit dieser Form:
         {
           "decks": [{"deck": "deck1", "title": str, "artist": str,
-                     "bpm": float|null, "position": float, "duration": float,
+                     "bpm": float|null, "key": str|null, "key_camelot": str|null,
+                     "position": float, "duration": float,
                      "playing": bool, "finished": bool, "load_status": str}],
           "channels": [{"channel": "channel1", "fader": float, "cue": bool,
                         "fx": str}],
           "master": {"crossfader": float, "gain": float, "recording": bool,
-                     "record_seconds": float, "record_dropped": float}
+                     "record_seconds": float, "record_dropped": float},
+          "plan": [{"id": int, "art": "ramp"|"in", "text": str}]
         }
 
     Beispiele:
         - „Was liegt auf den Decks?"
         - „Läuft die Aufnahme noch?"
+        - „Hat jemand schon etwas vorgemerkt?" → das Feld `plan`.
         - Nicht dafür: einen einzelnen Wert lesen → `musik_get`.
     """
     try:
@@ -426,6 +559,25 @@ async def _werte(controls: list[str]) -> dict[str, str]:
     for control, zeilen in zip(controls, antworten):
         zeile = zeilen[-1] if zeilen else ""
         aus[control] = zeile.split(" ", 2)[2] if zeile.startswith("value ") else "-"
+    return aus
+
+
+def _plan_aus_zeilen(zeilen: list[str]) -> list[dict[str, Any]]:
+    """`plan 1 ramp channel1.fader 0.0000 → 1.0000 über 16 Beats, …`"""
+    aus: list[dict[str, Any]] = []
+    for zeile in zeilen:
+        if not zeile.startswith("plan "):
+            continue
+        teile = zeile.split(" ", 2)
+        if len(teile) < 3 or not teile[1].isdigit():
+            continue
+        aus.append(
+            {
+                "id": int(teile[1]),
+                "art": teile[2].split(" ", 1)[0],
+                "text": teile[2],
+            }
+        )
     return aus
 
 
@@ -461,6 +613,7 @@ async def _status(form: Format) -> str:
         + [f"master.{f}" for f in master_felder]
     )
     roh = await _werte(gefragt)
+    plan = _plan_aus_zeilen(await eine_antwort("plan"))
 
     daten: dict[str, Any] = {
         "decks": [
@@ -495,6 +648,7 @@ async def _status(form: Format) -> str:
             "record_seconds": _als_zahl(roh.get("master.record_seconds", "-")) or 0.0,
             "record_dropped": _als_zahl(roh.get("master.record_dropped", "-")) or 0.0,
         },
+        "plan": plan,
     }
 
     if form is Format.JSON:
@@ -535,6 +689,10 @@ async def _status(form: Format) -> str:
             else ""
         )
         zeilen.append(f"- Mitschnitt läuft: {m['record_seconds']:.1f} s{warnung}")
+
+    if plan:
+        zeilen.append("\n## Vorgemerkt")
+        zeilen += [f"- **{a['id']}** {a['text']}" for a in plan]
 
     return "\n".join(zeilen)
 
@@ -813,6 +971,164 @@ async def musik_do(params: AktionEingabe) -> str:
 
     if fehler := _fehlerzeile(zeilen):
         return f"Fehler: {fehler}. `musik_list_controls` zeigt die Aktionen."
+    return "\n".join(zeilen)
+
+
+# --------------------------------------------------------------------------
+# Zeit
+# --------------------------------------------------------------------------
+#
+# Warum das nicht der Agent selbst macht: Ein Übergang ist eine Bewegung über
+# Takte, keine Folge von Reglerstellungen. Wer ihn von außen nachbaut, müsste
+# `musik_set` in einer engen Schleife rufen und dazwischen schlafen — über eine
+# Werkzeugschnittstelle, deren Timing bei jedem Aufruf eine Modellantwort weit
+# entfernt ist. Das eiert hörbar, und der Agent kann in der Zeit nichts anderes
+# tun. Hier sagt er einmal, was passieren soll, und ist wieder frei.
+
+SCHREIBT = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": False,
+}
+
+
+@mcp.tool(
+    name="musik_ramp",
+    annotations={"title": "Einen Regler über Beats bewegen", **SCHREIBT},
+)
+async def musik_ramp(params: RampeEingabe) -> str:
+    """Fährt einen Regler über mehrere Beats auf einen Wert — eine Blende.
+
+    Gerechnet wird in **Beats, nicht in Sekunden**: Dreht jemand am Tempo,
+    bleibt die Blende musikalisch richtig. Steht das Deck, wartet sie.
+
+    Der Aufruf kommt sofort zurück; die Bewegung läuft in der Anwendung weiter.
+    Wie weit sie ist, steht im Feld `plan` von `musik_status`.
+
+    **Sie gibt auf, sobald jemand anders denselben Regler anfasst** — ein
+    Mensch an der Oberfläche wie ein zweiter Agent. Wer also mitten in eine
+    fremde Blende `musik_set` ruft, gewinnt und beendet sie damit.
+
+    Args:
+        params (RampeEingabe):
+            - control (str): der Regler, etwa 'channel1.eq_low'. Muss eine Zahl
+              sein — ein Schalter lässt sich nicht blenden.
+            - ziel (float): der Wert am Ende
+            - ueber_beats (float): Länge der Bewegung
+            - in_beats (float|None): erst so lange warten
+            - taktgeber_deck ('deck1'|'deck2'|None): wessen Beats gezählt werden
+
+    Returns:
+        str: 'ok plan <nr> …' mit der Nummer, unter der der Auftrag im Plan
+        steht — die braucht `musik_cancel`. Sonst 'Fehler: <Grund>'.
+
+    Beispiele:
+        - „Blende den Bass von Deck 1 über 8 Beats raus" →
+          control='channel1.eq_low', ziel=0, ueber_beats=8
+        - „Nach 16 Beats den Crossfader über 32 rüberziehen" →
+          control='master.crossfader', ziel=1, ueber_beats=32, in_beats=16
+        - Nicht dafür: einen Wert sofort setzen → `musik_set`.
+    """
+    befehl = (
+        f"ramp {params.control} {_zahl_als_text(params.ziel)} "
+        f"{_zahl_als_text(params.ueber_beats)}"
+    )
+    if params.taktgeber_deck:
+        befehl += f" {params.taktgeber_deck.value}"
+    if params.in_beats is not None:
+        befehl = f"in {_zahl_als_text(params.in_beats)} {befehl}"
+
+    try:
+        zeilen = await eine_antwort(befehl)
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
+
+    if fehler := _fehlerzeile(zeilen):
+        return f"Fehler: {fehler}"
+    return "\n".join(zeilen)
+
+
+@mcp.tool(
+    name="musik_schedule",
+    annotations={"title": "Etwas auf einen Beat legen", **SCHREIBT},
+)
+async def musik_schedule(params: VormerkEingabe) -> str:
+    """Merkt eine Aktion oder einen Wert für einen späteren Beat vor.
+
+    Für alles, was auf den Takt gehört statt auf die Uhr: einen zweiten Track
+    auf der 33 starten, nach 64 Beats den Kanal aufziehen, am Ende der Phrase
+    syncen.
+
+    Args:
+        params (VormerkEingabe):
+            - beats (float): in wie vielen Beats
+            - **entweder** aktion (str) + argument (str|None)
+            - **oder** control (str) + wert (str)
+
+    Returns:
+        str: 'ok plan <nr> …' mit der Nummer für `musik_cancel`, sonst
+        'Fehler: <Grund>'. Was der Befehl dann geantwortet hat, sieht ein
+        Abonnent auf dem Socket; über MCP zeigt es sich am Zustand.
+
+    Beispiele:
+        - „Starte Deck 2 in 16 Beats" → beats=16, control='deck2.play', wert='1'
+        - „Sync in einer Phrase" → beats=32, aktion='deck2.sync'
+        - Nicht dafür: eine Blende → `musik_ramp` (auch verzögert, mit
+          in_beats).
+    """
+    try:
+        zeilen = await eine_antwort(
+            f"in {_zahl_als_text(params.beats)} {params.befehl()}"
+        )
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
+
+    if fehler := _fehlerzeile(zeilen):
+        return f"Fehler: {fehler}. `musik_list_controls` zeigt, was es gibt."
+    return "\n".join(zeilen)
+
+
+@mcp.tool(
+    name="musik_cancel",
+    annotations={
+        "title": "Vorgemerktes zurücknehmen",
+        "readOnlyHint": False,
+        # Was gestrichen ist, ist weg — und kann von jemand anderem stammen.
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def musik_cancel(params: StreichEingabe) -> str:
+    """Nimmt einen vorgemerkten Auftrag zurück.
+
+    Die Nummern stehen im Feld `plan` von `musik_status`. **Der Plan ist
+    gemeinsam** — was dort steht, kann ein anderer Agent oder der Mensch an der
+    Oberfläche vorgemerkt haben. Deshalb streicht dieses Werkzeug ohne
+    ausdrückliches `alle=true` nur den einen genannten Auftrag.
+
+    Eine laufende Blende bleibt stehen, wo sie gerade ist; sie fährt nicht
+    zurück. Wer den Ausgangswert zurückhaben will, setzt ihn selbst.
+
+    Args:
+        params (StreichEingabe): plan_id (int|None), alle (bool).
+
+    Returns:
+        str: 'ok <n> gestrichen' oder 'Fehler: <Grund>'.
+
+    Beispiele:
+        - „Nimm die Blende zurück" → erst `musik_status`, dann plan_id=<nr>
+        - „Alles abbrechen" → alle=true
+    """
+    befehl = "cancel" if params.alle else f"cancel {params.plan_id}"
+    try:
+        zeilen = await eine_antwort(befehl)
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
+
+    if fehler := _fehlerzeile(zeilen):
+        return f"Fehler: {fehler}"
     return "\n".join(zeilen)
 
 
