@@ -290,6 +290,66 @@ mitgab — es stand im Katalog, verließ aber den Prozess nie. Jetzt steht es in
 der Bereichsspalte, und `deck1.load` sagt von sich aus, dass es einen Pfad
 will.
 
+## Zeit: Übergänge statt Reglerstellungen
+
+Der Teil, der aus dem Steuerraum ein Werkzeug für ein **Team von Agenten**
+macht. Ein Übergang ist keine Folge von Reglerstellungen, sondern eine Bewegung
+über Takte. Wer das von außen nachbaut, müsste in einer engen Schleife
+`beat_phase` pollen und dazwischen schlafen — über eine Leitung, deren Timing
+dem Scheduler des Betriebssystems ausgeliefert ist. Das eiert hörbar, und der
+Agent ist die ganze Zeit blockiert.
+
+```text
+set channel2.fader 0.0
+ramp channel1.eq_low 0.0 8            # Bass raus über 8 Beats
+in 8 ramp channel2.fader 0.9 16       # danach Deck B rein über 16
+in 8 ramp master.crossfader 1.0 16
+plan                                  # was vorgemerkt ist
+cancel 2                              # einen Auftrag zurücknehmen
+```
+
+Drei Zeilen, dann kann der Agent auflegen. Gelaufen ist es so:
+
+| nach | `channel1.eq_low` | `channel2.fader` | `master.crossfader` |
+| --- | --- | --- | --- |
+| 2 s | 0,47 | 0 | 0 |
+| 5 s | 0 | 0,13 | 0,15 |
+| 9 s | 0 | 0,90 | 1,00 |
+
+**Gerechnet wird in Beats, nicht in Sekunden.** Ein Plan in Sekunden geht
+schief, sobald jemand am Tempo dreht; einer in Beats bleibt musikalisch
+richtig. Steht das Deck, steht auch der Plan — was gestoppt ist, hat keine
+Takte. Welches Deck den Takt vorgibt, ergibt sich von selbst: Ein Kanalzug erbt
+ihn von dem Deck, das auf ihm liegt, ein Deck ist sein eigener Taktgeber, und
+die Summe nimmt das erste Deck mit Grid. Mit einem vierten Wort lässt sich das
+überschreiben (`ramp master.crossfader 1.0 16 deck2`).
+
+### Der Mensch gewinnt
+
+**Eine Rampe gibt auf, sobald jemand anders denselben Regler anfasst.**
+
+```text
+> ramp channel1.fader 0.0 64
+< ok plan 5 ramp channel1.fader nach 0 über 64 Beats
+  … nach 3 s steht der Fader bei 0.909699 und wandert
+> set channel1.fader 0.75
+  … nach 3 s steht er immer noch bei 0.75, und der Plan ist leer
+```
+
+Ohne das wäre die Automatik stärker als der Griff daneben: Man zieht den Fader
+zu, und einen Wimpernschlag später steht er wieder offen. Geprüft wird nicht
+über eine Kennung, sondern über den Wert selbst — steht dort etwas anderes, als
+die Rampe zuletzt geschrieben hat, war jemand anders am Werk. Das gilt für
+einen Menschen an der Oberfläche genauso wie für einen zweiten Agenten.
+
+Damit ist `plan` zugleich das **gemeinsame Blatt**: Wer mitliest, sieht, was die
+anderen vorhaben, statt es aus Reglerbewegungen zu erraten.
+
+Der Takt liegt bei 5 ms — bei 128 BPM etwa ein Prozent eines Beats. Für eine
+Blende unhörbar, für einen harten Schnitt auf die Eins gerade noch vertretbar.
+**Sample-genau ist das ausdrücklich nicht**; dafür müssten die Befehle im
+Audio-Callback liegen, und dorthin gehört keine Reglerlogik.
+
 ## Was am Deck eingestellt wird, bleibt
 
 Hot Cues liegen zur Laufzeit in den Atomics des Decks — dort sind sie richtig

@@ -124,10 +124,16 @@ impl Engine {
             let hoerbar = cross > 0.0 && (channel.fader() > 0.0 || channel.klingt_nach());
 
             if !hoerbar && !cued {
-                // Still und nicht im Kopfhörer — die Kette trotzdem laufen
-                // lassen wäre Rechenzeit ohne Wirkung. Der Filterzustand
-                // altert dabei, was beim Aufziehen einen Einschwinger kostet;
-                // das ist der Preis und er ist kurz.
+                // Still und nicht im Kopfhörer: EQ, Filter und Effekte bleiben
+                // aus — das ist das Teure und wirkt gerade ohnehin nicht.
+                //
+                // Die **Quelle läuft trotzdem weiter**. Ein Deck, das mit
+                // zugezogenem Fader stehenbleibt, wäre kein Deck: Der Track,
+                // den man zum Einsatz bringen will, käme nicht von der Stelle,
+                // ein weggeblendetes Deck liefe aus der Phase, und
+                // `finished` käme nie — womit Sync und jeder wartende Agent
+                // ins Leere liefen.
+                channel.quelle_weiterziehen(frames);
                 continue;
             }
 
@@ -222,6 +228,46 @@ mod tests {
         let mut out = vec![0.0; FRAMES * out_channels];
         engine.render(&mut out, out_channels);
         out
+    }
+
+    /// Ein Deck mit zugezogenem Fader muss weiterlaufen.
+    ///
+    /// Die erste Fassung sprang über stille Kanäle hinweg, um EQ und Filter zu
+    /// sparen — und übersprang dabei auch die Quelle. Damit stand jedes Deck,
+    /// das nicht zu hören war: Der Track, den man einsetzen wollte, kam nicht
+    /// von der Stelle, zwei gesyncte Decks liefen auseinander, sobald eines
+    /// weggeblendet war, und `finished` kam nie. Beatmatching wäre damit
+    /// wirkungslos gewesen.
+    ///
+    /// Geprüft wird an einer Quelle, die zählt, wie viele Frames sie abgeben
+    /// musste — der Fortschritt selbst, nicht sein Klang.
+    #[test]
+    fn ein_stummer_kanal_laeuft_trotzdem_weiter() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct Zaehler(Arc<AtomicUsize>);
+        impl Source for Zaehler {
+            fn render(&mut self, buffer: &mut [f32]) {
+                self.0.fetch_add(buffer.len() / 2, Ordering::Relaxed);
+                buffer.fill(0.0);
+            }
+        }
+
+        let mut engine = Engine::new(RATE);
+        let gezogen = Arc::new(AtomicUsize::new(0));
+        let kanal = engine.add_channel("STUMM", Box::new(Zaehler(Arc::clone(&gezogen))));
+
+        // Fader zu, kein Kopfhörer — der Kanal ist nirgends zu hören.
+        engine.channel(kanal).set_fader(0.0);
+        engine.channel(kanal).set_cue(false);
+        rendern(&mut engine, 2);
+
+        assert_eq!(
+            gezogen.load(Ordering::Relaxed),
+            FRAMES,
+            "die Quelle wurde nicht weitergezogen — das Deck steht"
+        );
     }
 
     fn master_rms(out: &[f32], channels: usize) -> f32 {

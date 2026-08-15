@@ -137,6 +137,24 @@ impl Channel {
     ///
     /// Fader und Crossfader liegen bewusst *nicht* darin; die legt der Mixer
     /// beim Summieren an.
+    /// Zieht die Quelle weiter, ohne etwas zu rechnen.
+    ///
+    /// Für Kanäle, die gerade nicht zu hören sind. **Ein Deck muss auch dann
+    /// laufen, wenn sein Fader unten ist** — sonst steht der Track, den man
+    /// zum Einsatz bringen will, und zwei gesyncte Decks liefen auseinander,
+    /// sobald eines weggeblendet ist. Das ist der ganze Sinn von Beatmatching.
+    ///
+    /// Gespart wird trotzdem: EQ und Filter sind das Teure, und die bleiben
+    /// aus. Ihr Zustand altert dabei, was beim Aufziehen einen kurzen
+    /// Einschwinger kostet.
+    pub fn quelle_weiterziehen(&mut self, frames: usize) {
+        let len = frames * 2;
+        if self.buffer.len() < len {
+            self.buffer.resize(len, 0.0);
+        }
+        self.source.render(&mut self.buffer[..len]);
+    }
+
     pub fn render_pre_fader(&mut self, frames: usize) -> &[f32] {
         let len = frames * 2;
         if self.buffer.len() < len {

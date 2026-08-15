@@ -219,6 +219,8 @@ impl Default for MasterSpiegel {
 }
 
 pub struct Steuerpult {
+    /// Was später geschehen soll — siehe [`crate::zeitplan`].
+    pub plan: crate::zeitplan::Zeitplan,
     decks: Vec<DeckEintrag>,
     kanaele: Vec<KanalSpiegel>,
     master: MasterSpiegel,
@@ -230,6 +232,7 @@ pub struct Steuerpult {
 impl Steuerpult {
     pub fn neu(handle: EngineHandle) -> Steuerpult {
         Steuerpult {
+            plan: crate::zeitplan::Zeitplan::neu(),
             decks: Vec::new(),
             kanaele: Vec::new(),
             master: MasterSpiegel::default(),

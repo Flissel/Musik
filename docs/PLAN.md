@@ -231,7 +231,7 @@ Tracks bei 0,05 bis 0,46 und damit durchweg im unteren Bereich.
 | `analysis` | Tempo, Beatgrid, Tonart, Wellenform-Spitzen, Sidecar-Cache |
 | `library` | SQLite-Sammlung, Suche nach Text, Tempo und Tonart, Playlists, Hot Cues, Traktor-Import |
 | `musik-cli` | Deck fahren, analysieren, Mix rendern, Sammlung verwalten |
-| `control` | Steuerraum: benannte Controls, Katalog, Zeilenprotokoll, Socket |
+| `control` | Steuerraum: benannte Controls, Katalog, Zeilenprotokoll, Socket, Zeitplan auf dem Beatgrid |
 | `musik-app` | Oberfläche: zwei Decks, Mixer mit AUX, Plattenkiste |
 
 ## Offene Entscheidungen

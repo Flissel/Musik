@@ -19,6 +19,9 @@
 //! 3. **Er ist von außen erreichbar.** Mixxx spricht OSC nur ausgehend;
 //!    Befehle entgegenzunehmen ist dort ein seit Jahren offener Wunsch. Hier
 //!    ist es der Zweck.
+//! 4. **Er kennt Zeit.** Ein Übergang ist eine Bewegung über Takte, keine
+//!    Folge von Reglerstellungen. Wer „Bass raus über acht Beats" sagen kann,
+//!    muss nicht in einer engen Schleife pollen — siehe [`zeitplan`].
 //!
 //! Echtzeit bleibt unangetastet: Das Pult schreibt nie in den Audio-Callback,
 //! sondern schickt Kommandos in dieselbe lock-freie Schlange, die die
@@ -31,6 +34,7 @@ pub mod pult;
 pub mod schluessel;
 pub mod server;
 pub mod wert;
+pub mod zeitplan;
 
 #[cfg(test)]
 pub(crate) mod testing;
@@ -45,3 +49,4 @@ pub use pult::{
 pub use schluessel::{Gruppe, Schluessel};
 pub use server::{Server, ServerFehler};
 pub use wert::{Art, Einheit, Wert};
+pub use zeitplan::{Zeitplan, TAKT};

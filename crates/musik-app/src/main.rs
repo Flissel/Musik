@@ -191,6 +191,10 @@ fn main() -> Result<()> {
 
     let pult = Arc::new(std::sync::Mutex::new(pult));
 
+    // Der Zeitplan läuft unabhängig vom Socket: Auch die Oberfläche darf eine
+    // Rampe auslösen, und dann muss sie jemand weiterdrehen.
+    let _takt = control::zeitplan::takt_starten(Arc::clone(&pult));
+
     let (output, hinweis) = match Output::open(runner) {
         Ok(out) => {
             let cue = if out.has_cue_output() {

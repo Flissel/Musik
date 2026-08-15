@@ -91,6 +91,10 @@ pub fn behandle(pult: &mut Steuerpult, sitzung: &mut Sitzung, zeile: &str) -> St
         "do" => ausloesen(pult, erstes, zweites),
         "sub" => abonnieren(pult, sitzung, erstes, zweites),
         "unsub" => abbestellen(sitzung, erstes, zweites),
+        "ramp" => rampe(pult, erstes, zweites),
+        "in" => spaeter(pult, erstes, zweites),
+        "plan" => plan_zeigen(pult),
+        "cancel" => streichen(pult, erstes),
         "help" => HILFE.to_string(),
         andere => format!("err unbekannter Befehl: {andere} (help hilft)"),
     }
@@ -120,7 +124,108 @@ ok Befehle:
   do <control> [arg]     Aktion auslösen: sync, load, jump_cue, beatjump, search
   sub <control>...       Änderungen melden lassen, statt zu fragen
   unsub [control]...     Abbestellen; ohne Argument alles
+  ramp <control> <ziel> <beats> [deck]   Regler über Beats bewegen
+  in <beats> <befehl>    Befehl nach so vielen Beats ausführen
+  plan              was vorgemerkt ist
+  cancel [id]       Vorgemerktes zurücknehmen; ohne Argument alles
   help              diese Übersicht";
+
+/// `ramp <control> <ziel> <beats> [deck]`
+///
+/// Der Verb, der aus Reglerstellungen einen Übergang macht. Ohne ihn müsste
+/// ein Bediener die Bewegung selbst in Schritte zerlegen und dazwischen
+/// schlafen — über eine Leitung, die dafür zu ungenau ist.
+fn rampe(pult: &mut Steuerpult, control: Option<&str>, rest: Option<&str>) -> String {
+    let Some(control) = control.and_then(Schluessel::parse) else {
+        return "err ramp braucht ein Control: ramp <control> <ziel> <beats> [deck]".into();
+    };
+    let mut rest = rest.unwrap_or("");
+    let ziel = wort(&mut rest);
+    let beats = wort(&mut rest);
+    let deck = wort(&mut rest);
+
+    let (Ok(ziel), Ok(beats)) = (ziel.parse::<f64>(), beats.parse::<f64>()) else {
+        return "err ramp braucht Ziel und Länge in Beats: ramp channel1.fader 0 16".into();
+    };
+    let takt_deck = match deck {
+        "" => None,
+        name => match crate::schluessel::Gruppe::parse(name) {
+            Some(crate::schluessel::Gruppe::Deck(i)) => Some(i),
+            _ => return format!("err {name} ist kein Deck"),
+        },
+    };
+
+    let mut plan = std::mem::take(&mut pult.plan);
+    let ergebnis =
+        crate::zeitplan::rampe_planen(pult, &mut plan, control.clone(), ziel, beats, takt_deck);
+    pult.plan = plan;
+
+    match ergebnis {
+        Ok(id) => format!("ok plan {id} ramp {control} nach {ziel} über {beats} Beats"),
+        Err(e) => format!("err {e}"),
+    }
+}
+
+/// `in <beats> <befehl>`
+fn spaeter(pult: &mut Steuerpult, beats: Option<&str>, befehl: Option<&str>) -> String {
+    let Some(Ok(beats)) = beats.map(|b| b.parse::<f64>()) else {
+        return "err in braucht Beats: in 16 do deck2.sync".into();
+    };
+    let Some(befehl) = befehl.filter(|b| !b.trim().is_empty()) else {
+        return "err in braucht einen Befehl: in 16 set channel2.fader 0.9".into();
+    };
+
+    let mut plan = std::mem::take(&mut pult.plan);
+    let ergebnis =
+        crate::zeitplan::spaeter_planen(pult, &mut plan, beats, befehl.to_string(), None);
+    pult.plan = plan;
+
+    match ergebnis {
+        Ok(id) => format!("ok plan {id} in {beats} Beats: {befehl}"),
+        Err(e) => format!("err {e}"),
+    }
+}
+
+/// Was vorgemerkt ist — das gemeinsame Blatt, wenn mehrere bedienen.
+fn plan_zeigen(pult: &Steuerpult) -> String {
+    let mut zeilen = Vec::new();
+
+    for a in pult.plan.auftraege() {
+        let jetzt = crate::zeitplan::beat_jetzt(pult, a.takt_deck).unwrap_or(a.ab_beat);
+        match &a.was {
+            crate::zeitplan::Was::Rampe(r) => zeilen.push(format!(
+                "plan {} ramp {} {:.4} → {:.4} über {} Beats, {:.1} gelaufen (deck{})",
+                a.id,
+                r.control,
+                r.von,
+                r.nach,
+                r.beats,
+                (jetzt - a.ab_beat).max(0.0),
+                a.takt_deck + 1
+            )),
+            crate::zeitplan::Was::Spaeter { beim_beat, zeile } => zeilen.push(format!(
+                "plan {} in {:.1} Beats: {zeile} (deck{})",
+                a.id,
+                (beim_beat - jetzt).max(0.0),
+                a.takt_deck + 1
+            )),
+        }
+    }
+
+    zeilen.push(format!("ok {} vorgemerkt", pult.plan.auftraege().len()));
+    zeilen.join("\n")
+}
+
+fn streichen(pult: &mut Steuerpult, id: Option<&str>) -> String {
+    let gewaehlt = match id {
+        None => None,
+        Some(text) => match text.parse::<u64>() {
+            Ok(id) => Some(id),
+            Err(_) => return format!("err {text} ist keine Plan-Nummer"),
+        },
+    };
+    format!("ok {} gestrichen", pult.plan.streichen(gewaehlt))
+}
 
 fn list(pult: &Steuerpult, praefix: Option<&str>) -> String {
     let mut zeilen = Vec::new();
@@ -618,5 +723,87 @@ mod katalog_tests {
         // Eine Aktion ohne Argument steht als solche da.
         let stop = behandle(&mut pult, &mut s, "list master.record_stop");
         assert!(stop.contains("aktion -"), "{stop}");
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+
+    #[test]
+    fn eine_rampe_laesst_sich_ueber_das_protokoll_vormerken() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+
+        let antwort = behandle(&mut pult, &mut s, "ramp channel1.fader 0 16");
+        assert!(
+            antwort.starts_with("ok plan 1 ramp channel1.fader"),
+            "{antwort}"
+        );
+
+        // Und steht danach im gemeinsamen Blatt.
+        let plan = behandle(&mut pult, &mut s, "plan");
+        assert!(plan.contains("plan 1 ramp channel1.fader"), "{plan}");
+        assert!(plan.ends_with("ok 1 vorgemerkt"), "{plan}");
+    }
+
+    #[test]
+    fn ein_befehl_laesst_sich_auf_beats_legen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+
+        let antwort = behandle(&mut pult, &mut s, "in 32 do deck2.sync");
+        assert!(
+            antwort.starts_with("ok plan 1 in 32 Beats: do deck2.sync"),
+            "{antwort}"
+        );
+        assert!(behandle(&mut pult, &mut s, "plan").contains("do deck2.sync"));
+    }
+
+    #[test]
+    fn vorgemerktes_laesst_sich_zuruecknehmen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+
+        behandle(&mut pult, &mut s, "ramp channel1.fader 0 16");
+        behandle(&mut pult, &mut s, "ramp channel2.fader 1 16");
+
+        assert_eq!(behandle(&mut pult, &mut s, "cancel 1"), "ok 1 gestrichen");
+        assert_eq!(behandle(&mut pult, &mut s, "cancel"), "ok 1 gestrichen");
+        assert!(behandle(&mut pult, &mut s, "plan").ends_with("ok 0 vorgemerkt"));
+    }
+
+    #[test]
+    fn unsinnige_plaene_werden_benannt_abgewiesen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+
+        for zeile in [
+            "ramp",
+            "ramp channel1.fader",
+            "ramp channel1.fader 0",
+            "ramp channel1.fader 0 acht",
+            "ramp deck1.play 1 8",
+            "ramp channel1.fader 0 8 channel2",
+            "in",
+            "in 16",
+            "in acht do deck2.sync",
+            "cancel siebzehn",
+        ] {
+            let antwort = behandle(&mut pult, &mut s, zeile);
+            assert!(antwort.starts_with("err"), "'{zeile}' → {antwort}");
+        }
+    }
+
+    #[test]
+    fn die_hilfe_nennt_die_neuen_verben() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        let hilfe = behandle(&mut pult, &mut s, "help");
+
+        for verb in ["ramp", "in ", "plan", "cancel"] {
+            assert!(hilfe.contains(verb), "{verb} fehlt in der Hilfe");
+        }
     }
 }

@@ -35,11 +35,23 @@ pub fn pult_mit_zwei_decks() -> (Steuerpult, EngineRunner) {
 pub fn pult_mit_protokoll() -> (Steuerpult, EngineRunner, CueProtokoll, GridProtokoll) {
     let mut engine = Engine::new(RATE as f32);
 
+    // Echte Abspieler statt `SilentSource`: Nur so bewegt sich die Position,
+    // und ohne Position gibt es keine Beats — der Zeitplan wäre nicht prüfbar.
+    // Gerechnet wird trotzdem nur, wenn ein Test den Runner ausdrücklich
+    // dreht; stillstehende Tests bleiben stillstehend.
     let mut kanaele = Vec::new();
+    let mut zustaende = Vec::new();
     for (name, assign) in [("DECK A", Assign::A), ("DECK B", Assign::B)] {
-        let kanal = engine.add_channel(name, Box::new(SilentSource));
+        let state = Arc::new(DeckState::new());
+        let track = Arc::new(audio_core::Track {
+            samples: vec![0.0; RATE as usize * 60 * 2],
+            sample_rate: RATE,
+        });
+        let voice = audio_core::deck::Voice::new(track, Arc::clone(&state));
+        let kanal = engine.add_channel(name, Box::new(DeckSource::new(voice)));
         engine.channel(kanal).set_assign(assign);
         kanaele.push((name, kanal, assign));
+        zustaende.push(state);
     }
     let aux = engine.add_channel("AUX", Box::new(SilentSource));
     engine.channel(aux).set_assign(Assign::Thru);
@@ -52,9 +64,9 @@ pub fn pult_mit_protokoll() -> (Steuerpult, EngineRunner, CueProtokoll, GridProt
     let (handle, runner) = audio_engine::engine_channel(engine, 256);
     let mut pult = Steuerpult::neu(handle);
 
-    for (name, kanal, assign) in &kanaele {
+    for ((name, kanal, assign), state) in kanaele.iter().zip(zustaende) {
         pult.kanal_hinzufuegen(KanalSpiegel::neu(*name, *assign));
-        let mut eintrag = DeckEintrag::neu(Arc::new(DeckState::new()), *kanal, RATE);
+        let mut eintrag = DeckEintrag::neu(state, *kanal, RATE);
         // Eine Minute, damit Positionen und Hot Cues Platz haben.
         eintrag.frames = RATE as u64 * 60;
         eintrag.titel = format!("Testtrack {name}");
@@ -72,7 +84,6 @@ pub fn pult_mit_protokoll() -> (Steuerpult, EngineRunner, CueProtokoll, GridProt
             .set_grid(Some(audio_core::Beatgrid::new(128.0, 0, 1.0)));
     }
 
-    let _ = DeckSource::new as fn(_) -> _;
     let protokoll: CueProtokoll = Arc::new(Mutex::new(HashMap::new()));
     let grid_protokoll: GridProtokoll = Arc::new(Mutex::new(None));
     pult.sammlung_setzen(Box::new(TestSammlung {
@@ -151,5 +162,19 @@ impl Sammlung for TestSammlung {
             .unwrap()
             .insert(pfad.to_string(), cues.to_vec());
         Ok(())
+    }
+}
+
+/// Dreht den Mixer so lange, bis so viele Frames vergangen sind.
+///
+/// Die Decks laufen sonst nicht: Position und Beats bewegen sich nur, wenn
+/// jemand rendert. Im Ernstfall ist das die Soundkarte, hier der Test.
+pub fn rendern(runner: &mut EngineRunner, frames: usize) {
+    const BLOCK: usize = 256;
+    let mut puffer = vec![0.0f32; BLOCK * 4];
+    let mut getan = 0;
+    while getan < frames {
+        runner.render(&mut puffer, 4);
+        getan += BLOCK;
     }
 }
