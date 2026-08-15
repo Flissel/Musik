@@ -448,17 +448,20 @@ impl MusikApp {
                         .min_size(egui::vec2(24.0, 20.0)),
                 );
 
+                // Über das Pult, nicht am Deck vorbei: Nur dieser Weg schreibt
+                // den Cue auch in die Sammlung zurück. Ein zweiter Pfad wäre
+                // genau die Sorte Abkürzung, die später als „warum sind meine
+                // Cues weg" auffällt.
                 if knopf.clicked() {
-                    let deck = &self.decks[index];
                     if gesetzt {
-                        deck.state.jump_to_cue(i);
+                        self.deck_aktion(index, "jump_cue", Some(&format!("{}", i + 1)));
                     } else {
-                        let pos = deck.state.position_frames();
-                        deck.state.set_cue(i, Some(pos));
+                        let sekunden = self.decks[index].position_secs();
+                        self.deck_schreiben(index, &cue_name(i), Wert::Zahl(sekunden));
                     }
                 }
                 if knopf.secondary_clicked() {
-                    self.decks[index].state.set_cue(i, None);
+                    self.deck_schreiben(index, &cue_name(i), Wert::Leer);
                 }
             }
 
@@ -474,6 +477,36 @@ impl MusikApp {
                     }
                 });
             self.decks[index].loop_beats = beats;
+
+            ui.separator();
+
+            // Grid-Korrektur. Der Detektor liegt bei sperrigem Material daneben,
+            // und ohne diese drei Knöpfe wäre so ein Track unbrauchbar statt in
+            // zehn Sekunden gerade gezogen.
+            ui.label(RichText::new("GRID").color(theme::TEXT_LEISE).size(10.0));
+            if ui
+                .small_button("÷2")
+                .on_hover_text("Grid-Tempo halbieren — der übliche Oktavfehler")
+                .clicked()
+            {
+                self.deck_aktion(index, "grid_scale", Some("0.5"));
+            }
+            if ui
+                .small_button("×2")
+                .on_hover_text("Grid-Tempo verdoppeln")
+                .clicked()
+            {
+                self.deck_aktion(index, "grid_scale", Some("2"));
+            }
+            if ui
+                .small_button("HIER")
+                .on_hover_text("Die Eins liegt an der Abspielposition")
+                .clicked()
+            {
+                self.deck_aktion(index, "grid_here", None);
+            }
+
+            ui.separator();
 
             let laeuft = self.decks[index].state.is_looping();
             let text = if laeuft { "LOOP AUS" } else { "LOOP" };
@@ -656,6 +689,39 @@ impl MusikApp {
             });
     }
 
+    /// Schreibt ein Deck-Control über das Pult.
+    ///
+    /// Fehler landen in der Statuszeile statt im Nichts — was hier scheitert,
+    /// scheitert auch für einen Agenten, und dann will man es sehen.
+    fn deck_schreiben(&mut self, deck: usize, element: &str, wert: Wert) {
+        let ergebnis = {
+            let Ok(mut pult) = self.pult.lock() else {
+                return;
+            };
+            pult.schreibe(&Schluessel::neu(Gruppe::Deck(deck), element), wert)
+        };
+        if let Err(e) = ergebnis {
+            self.status = e.to_string();
+        }
+    }
+
+    fn deck_aktion(&mut self, deck: usize, element: &str, argument: Option<&str>) {
+        let ergebnis = {
+            let Ok(mut pult) = self.pult.lock() else {
+                return;
+            };
+            pult.ausloesen(&Schluessel::neu(Gruppe::Deck(deck), element), argument)
+        };
+        match ergebnis {
+            Ok(zeilen) => {
+                if let Some(erste) = zeilen.first() {
+                    self.status = erste.clone();
+                }
+            }
+            Err(e) => self.status = e.to_string(),
+        }
+    }
+
     fn playliste_zeigen(&mut self) {
         let Ok(pult) = self.pult.lock() else {
             return;
@@ -798,6 +864,11 @@ pub fn assign_fuer(index: usize) -> Assign {
 }
 
 /// Zahl ohne überflüssige Nachkommastellen — "4" statt "4.00".
+/// `cue1` bis `cue8` — die Namen, unter denen das Pult sie kennt.
+fn cue_name(index: usize) -> String {
+    format!("cue{}", index + 1)
+}
+
 fn kurz(wert: f64) -> String {
     if wert.fract().abs() < 1e-9 {
         format!("{}", wert.round() as i64)

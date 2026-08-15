@@ -22,14 +22,17 @@ pub const RATE: u32 = 48_000;
 /// Cue wirklich zurückgeschrieben wurde.
 pub type CueProtokoll = Arc<Mutex<HashMap<String, Vec<(usize, f64)>>>>;
 
+/// Das zuletzt zurückgeschriebene Beatgrid: Pfad, Tempo, Anker in Sekunden.
+pub type GridProtokoll = Arc<Mutex<Option<(String, f32, f64)>>>;
+
 /// Zwei Decks auf Kanal 1 und 2, dazu ein AUX-Kanal auf Thru.
 pub fn pult_mit_zwei_decks() -> (Steuerpult, EngineRunner) {
-    let (pult, runner, _) = pult_mit_protokoll();
+    let (pult, runner, _, _) = pult_mit_protokoll();
     (pult, runner)
 }
 
 /// Dasselbe Pult, aber mit einem Blick auf das, was zurückgeschrieben wird.
-pub fn pult_mit_protokoll() -> (Steuerpult, EngineRunner, CueProtokoll) {
+pub fn pult_mit_protokoll() -> (Steuerpult, EngineRunner, CueProtokoll, GridProtokoll) {
     let mut engine = Engine::new(RATE as f32);
 
     let mut kanaele = Vec::new();
@@ -71,12 +74,14 @@ pub fn pult_mit_protokoll() -> (Steuerpult, EngineRunner, CueProtokoll) {
 
     let _ = DeckSource::new as fn(_) -> _;
     let protokoll: CueProtokoll = Arc::new(Mutex::new(HashMap::new()));
+    let grid_protokoll: GridProtokoll = Arc::new(Mutex::new(None));
     pult.sammlung_setzen(Box::new(TestSammlung {
         gesicherte_cues: Arc::clone(&protokoll),
+        gesichertes_grid: Arc::clone(&grid_protokoll),
     }));
 
     pult.aufnahme_setzen(aufnahme);
-    (pult, runner, protokoll)
+    (pult, runner, protokoll, grid_protokoll)
 }
 
 /// Eine Sammlung, die nichts liest und nichts dekodiert.
@@ -86,6 +91,7 @@ pub fn pult_mit_protokoll() -> (Steuerpult, EngineRunner, CueProtokoll) {
 pub struct TestSammlung {
     /// Was zurückgeschrieben wurde — damit ein Test das nachsehen kann.
     pub gesicherte_cues: CueProtokoll,
+    pub gesichertes_grid: GridProtokoll,
 }
 
 impl Sammlung for TestSammlung {
@@ -125,6 +131,14 @@ impl Sammlung for TestSammlung {
         if pfad.ends_with(".txt") {
             return Err("keine Audiodatei".into());
         }
+        Ok(())
+    }
+
+    fn grid_speichern(&self, pfad: &str, bpm: f32, anker_sekunden: f64) -> Result<(), String> {
+        if pfad.ends_with(".schreibgeschuetzt") {
+            return Err("nicht beschreibbar".into());
+        }
+        *self.gesichertes_grid.lock().unwrap() = Some((pfad.to_string(), bpm, anker_sekunden));
         Ok(())
     }
 

@@ -152,6 +152,10 @@ Bereich echter Musik synthetisch nicht herstellen lässt.
 gelöst und bei allem anderen mühsam. Traktor löst das über manuelle
 Grid-Korrektur — die brauchen wir auch, egal wie gut der Detektor ist.
 
+Inzwischen gebaut: `deckN.bpm_grid` und `deckN.grid_anchor` sind schreibbar,
+dazu `grid_scale` für Oktavfehler und `grid_here` für die Lage der Eins. Jede
+Korrektur geht in die Sammlung und überlebt den Trackwechsel.
+
 ## Stem-Separation
 
 Vortrainierte Modelle:

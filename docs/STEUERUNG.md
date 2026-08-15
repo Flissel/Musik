@@ -312,6 +312,35 @@ Grid-Anker aus dem Traktor-Import und Fade-Marker; ein Deck kennt die nicht und
 darf sie deshalb nicht mit ersetzen (`Library::replace_hot_cues` statt
 `replace_cues`).
 
+### Das Beatgrid von Hand
+
+Der Detektor liegt bei sperrigem Material daneben — bei einem Testtrack kam
+180 BPM heraus, mit einer Konfidenz von 0,05. Ohne Korrektur wäre so ein Track
+unbrauchbar:
+
+```text
+do deck1.grid_scale 0.5   → grid deck1 128.02 → 64.01 BPM
+set deck1.position 2.5
+do deck1.grid_here        → grid deck1 Anker auf 2.500 s
+set deck1.bpm_grid 90     (geht auch direkt)
+set deck1.grid_anchor 4.2
+```
+
+**`grid_scale` ist für den Oktavfehler da**, den mit Abstand häufigsten Fall;
+der Anker bleibt dabei stehen, denn bei einer Halbierung lag jede zweite Eins
+ohnehin richtig. **`grid_here` legt den Anker auf die Abspielposition** — der
+klassische Handgriff, wenn man hört, wo die Eins liegt.
+
+Genauer: auf die *Ziel*-Position. Ein `set position` setzt nur einen Wunsch,
+den der Audio-Thread im nächsten Block ausführt; wer springt und sofort „hier"
+sagt, meint die Stelle, auf die er gesprungen ist, nicht die, an der die
+Anzeige noch steht.
+
+Jede Korrektur landet sofort in der Sammlung, genau wie ein Cue. Ohne Grid
+lässt sich kein Anker setzen und nichts skalieren — das wird gemeldet statt
+geraten. Nur `bpm_grid` nimmt auch aus dem Nichts einen Wert an, sonst käme man
+aus einem fehlenden Grid nie wieder heraus.
+
 Beim Laden geht es rückwärts: Die gespeicherten Cues kommen aufs Deck, und ein
 **Beatgrid aus der Sammlung schlägt die frische Analyse**. Was dort steht, kann
 aus Traktor stammen oder von Hand korrigiert sein, und beides weiß mehr als ein
@@ -355,7 +384,9 @@ mehr kosten als ein fehlender.
 Nicht nur die Regler: Suchen und Laden nehmen inzwischen denselben Weg. Ein
 Klick auf „A" in der Plattenkiste löst `deck1.load` aus, das Suchfeld ruft
 `master.search`, und „Harmonisch zu A" ruft `master.search_harmonic` mit der
-Tonart von Deck 1.
+Tonart von Deck 1. Auch die Cue-Knöpfe und die Grid-Korrektur gehen diesen Weg
+— sie schrieben vorher direkt ins Deck, und genau dort wären sie an der
+Sammlung vorbeigelaufen.
 
 Das ist kein Selbstzweck. Vorher hatte die Oberfläche einen eigenen Ladepfad —
 zwei Wege zum selben Ziel heißt zwei Stellen, an denen es schiefgehen kann, und

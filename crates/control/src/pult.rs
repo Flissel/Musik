@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use audio_core::deck::DeckState;
+use audio_core::Beatgrid;
 use audio_core::Tonart;
 use audio_engine::{Assign, Aufnahme, Command, Effekt, EngineHandle};
 
@@ -65,6 +66,9 @@ pub trait Sammlung: Send {
     /// es sofort geschehen — ein Cue, der erst beim Beenden gespeichert wird,
     /// ist bei einem Absturz weg, und abgestürzt wird beim Auflegen.
     fn hot_cues_speichern(&self, pfad: &str, cues: &[(usize, f64)]) -> Result<(), String>;
+
+    /// Schreibt ein korrigiertes Beatgrid zurück — Tempo und Anker in Sekunden.
+    fn grid_speichern(&self, pfad: &str, bpm: f32, anker_sekunden: f64) -> Result<(), String>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -372,6 +376,10 @@ impl Steuerpult {
                 Some(g) => Wert::Zahl(g.bpm as f64),
                 None => Wert::Leer,
             },
+            "grid_anchor" => match d.state.grid() {
+                Some(g) => sek(g.anchor_frames),
+                None => Wert::Leer,
+            },
             "tempo" => Wert::Zahl(d.state.tempo() as f64),
             "keylock" => Wert::Schalter(d.state.keylock()),
             "beat_phase" => match d.state.beat_phase(d.sample_rate) {
@@ -504,6 +512,11 @@ impl Steuerpult {
             (Gruppe::Deck(i), "beatjump") => {
                 let beats: f64 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
                 self.beatjump(i, beats)
+            }
+            (Gruppe::Deck(i), "grid_here") => self.grid_hierher(i),
+            (Gruppe::Deck(i), "grid_scale") => {
+                let faktor: f64 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
+                self.grid_skalieren(i, faktor)
             }
             (Gruppe::Kanal(i), "fx_sync") => {
                 let beats: f64 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
@@ -856,6 +869,26 @@ impl Steuerpult {
                     d.state.set_loop_active(true);
                 }
             }
+            "bpm_grid" => {
+                let bpm = Self::zahl(b, k, &wert)? as f32;
+                // Der Anker bleibt stehen: Wer das Tempo korrigiert, meint fast
+                // immer den Oktavfehler, nicht die Lage der Eins.
+                let anker = d.state.grid().map(|g| g.anchor_frames).unwrap_or(0);
+                d.state.set_grid(Some(Beatgrid::new(bpm, anker, 1.0)));
+                self.grid_sichern(i);
+            }
+            "grid_anchor" => {
+                let sekunden = Self::zahl(b, k, &wert)?;
+                let Some(vorher) = d.state.grid() else {
+                    return Err(Fehler::Gescheitert(
+                        "ohne Tempo kein Anker — erst bpm_grid setzen".into(),
+                    ));
+                };
+                let frames = (sekunden * rate).max(0.0) as u64;
+                d.state
+                    .set_grid(Some(Beatgrid::new(vorher.bpm, frames, 1.0)));
+                self.grid_sichern(i);
+            }
             _ => {
                 let Some(c) = self.hot_cue_index(&k.element) else {
                     return Err(Fehler::UnbekanntesControl(k.to_string()));
@@ -876,6 +909,90 @@ impl Steuerpult {
         }
 
         Ok(())
+    }
+
+    /// Legt den Anker auf die aktuelle Abspielposition.
+    ///
+    /// Der klassische Handgriff: Man hört, wo die Eins liegt, und sagt es dem
+    /// Raster. Das Tempo bleibt, wie es war — verschoben wird nur die Phase.
+    fn grid_hierher(&mut self, deck: usize) -> Result<Vec<String>, Fehler> {
+        let Some(d) = self.decks.get(deck) else {
+            return Err(Fehler::UnbekanntesControl(format!("deck{}", deck + 1)));
+        };
+        let Some(grid) = d.state.grid() else {
+            return Err(Fehler::Gescheitert(
+                "ohne Tempo kein Anker — erst bpm_grid setzen".into(),
+            ));
+        };
+
+        // Das Ziel, nicht die Anzeige: Wer eben gesprungen ist und dann sagt
+        // „hier ist die Eins", meint die Stelle, auf die er gesprungen ist.
+        let position = d.state.ziel_position();
+        let sekunden = position as f64 / d.sample_rate as f64;
+        d.state
+            .set_grid(Some(Beatgrid::new(grid.bpm, position, 1.0)));
+        self.grid_sichern(deck);
+
+        Ok(vec![format!(
+            "grid deck{} Anker auf {sekunden:.3} s",
+            deck + 1
+        )])
+    }
+
+    /// Multipliziert das Grid-Tempo — 0.5 und 2 räumen Oktavfehler auf.
+    ///
+    /// Der Anker bleibt: Bei einer Halbierung liegt jede zweite Eins weiterhin
+    /// richtig, und beim Verdoppeln erst recht.
+    fn grid_skalieren(&mut self, deck: usize, faktor: f64) -> Result<Vec<String>, Fehler> {
+        if faktor <= 0.0 {
+            return Err(Fehler::Argument {
+                control: format!("deck{}.grid_scale", deck + 1),
+                erwartet: "eine positive Zahl, meist 0.5 oder 2".into(),
+            });
+        }
+        let Some(d) = self.decks.get(deck) else {
+            return Err(Fehler::UnbekanntesControl(format!("deck{}", deck + 1)));
+        };
+        let Some(grid) = d.state.grid() else {
+            return Err(Fehler::Gescheitert(
+                "kein Grid zum Skalieren — erst bpm_grid setzen".into(),
+            ));
+        };
+
+        let neu = grid.bpm as f64 * faktor;
+        let begrenzt = neu.clamp(0.0, 400.0) as f32;
+        d.state
+            .set_grid(Some(Beatgrid::new(begrenzt, grid.anchor_frames, 1.0)));
+        self.grid_sichern(deck);
+
+        Ok(vec![format!(
+            "grid deck{} {:.2} → {:.2} BPM",
+            deck + 1,
+            grid.bpm,
+            begrenzt
+        )])
+    }
+
+    /// Schreibt ein korrigiertes Beatgrid in die Sammlung zurück.
+    ///
+    /// Still, aus demselben Grund wie bei den Cues: Wer das Grid gerade zieht,
+    /// hat das Grid gemeint. Was schiefging, steht in `load_status`.
+    fn grid_sichern(&mut self, deck: usize) {
+        let Some(d) = self.decks.get(deck) else {
+            return;
+        };
+        if d.pfad.is_empty() {
+            return;
+        }
+        let Some(grid) = d.state.grid() else { return };
+        let Some(sammlung) = self.sammlung.as_ref() else {
+            return;
+        };
+
+        let anker = grid.anchor_frames as f64 / d.sample_rate as f64;
+        if let Err(e) = sammlung.grid_speichern(&d.pfad, grid.bpm, anker) {
+            self.decks[deck].lade_status = format!("grid nicht gespeichert: {e}");
+        }
     }
 
     /// Schreibt die Hot Cues eines Decks in die Sammlung zurück.
@@ -1230,7 +1347,7 @@ mod tests {
     /// geladen, weg. Und die Sammlung hatte die Tabelle die ganze Zeit.
     #[test]
     fn ein_gesetzter_cue_landet_in_der_sammlung() {
-        let (mut pult, _runner, protokoll) = crate::testing::pult_mit_protokoll();
+        let (mut pult, _runner, protokoll, _) = crate::testing::pult_mit_protokoll();
         pult.deck_mut(0).unwrap().pfad = "/musik/a.wav".into();
 
         pult.schreibe(&k("deck1.cue2"), Wert::Zahl(10.0)).unwrap();
@@ -1252,7 +1369,7 @@ mod tests {
     /// Ohne geladenen Track gibt es nichts zurückzuschreiben.
     #[test]
     fn ein_leeres_deck_schreibt_keine_cues() {
-        let (mut pult, _runner, protokoll) = crate::testing::pult_mit_protokoll();
+        let (mut pult, _runner, protokoll, _) = crate::testing::pult_mit_protokoll();
         pult.schreibe(&k("deck1.cue1"), Wert::Zahl(5.0)).unwrap();
         assert!(protokoll.lock().unwrap().is_empty());
     }
@@ -1352,6 +1469,7 @@ mod tests {
                 "search" => Some("test"),
                 "search_mixable" => Some("128"),
                 "search_harmonic" => Some("Am"),
+                "grid_scale" => Some("2"),
                 "playlist" => Some("Freitag"),
                 "fx_sync" => Some("1"),
                 "record" => Some("/tmp/musik-katalogtest.wav"),
@@ -1437,6 +1555,83 @@ mod aktions_tests {
             matches!(daneben, Err(Fehler::Argument { .. })),
             "{daneben:?}"
         );
+    }
+
+    /// Der häufigste Fall: ein Oktavfehler des Detektors.
+    ///
+    /// 180 statt 90 ist kein Randfall — bei einem der fünf Testtracks lag die
+    /// Tempo-Konfidenz bei 0,05, und ohne Korrekturmöglichkeit wäre er
+    /// unbrauchbar.
+    #[test]
+    fn ein_oktavfehler_laesst_sich_halbieren() {
+        let (mut pult, _runner, _, grid) = crate::testing::pult_mit_protokoll();
+        pult.deck_mut(0).unwrap().pfad = "/musik/a.wav".into();
+        pult.decks()[0]
+            .state
+            .set_grid(Some(audio_core::Beatgrid::new(180.0, 4_800, 1.0)));
+
+        let zeilen = pult.ausloesen(&k("deck1.grid_scale"), Some("0.5")).unwrap();
+        assert!(zeilen[0].contains("180.00 → 90.00"), "{zeilen:?}");
+        assert_eq!(pult.lies(&k("deck1.bpm_grid")).unwrap(), Wert::Zahl(90.0));
+
+        // Der Anker bleibt stehen — jede zweite Eins lag ja richtig.
+        let Wert::Zahl(anker) = pult.lies(&k("deck1.grid_anchor")).unwrap() else {
+            panic!("kein Anker");
+        };
+        assert!((anker - 0.1).abs() < 1e-6, "Anker {anker}");
+
+        // Und die Korrektur überlebt den Trackwechsel.
+        let (pfad, bpm, sekunden) = grid.lock().unwrap().clone().expect("nichts gespeichert");
+        assert_eq!(pfad, "/musik/a.wav");
+        assert_eq!(bpm, 90.0);
+        assert!((sekunden - 0.1).abs() < 1e-6, "{sekunden}");
+    }
+
+    /// „Der Beat ist hier" — der Handgriff, wenn die Eins verschoben liegt.
+    #[test]
+    fn der_anker_laesst_sich_auf_die_position_legen() {
+        let (mut pult, _runner, _, grid) = crate::testing::pult_mit_protokoll();
+        pult.deck_mut(0).unwrap().pfad = "/musik/a.wav".into();
+        pult.schreibe(&k("deck1.position"), Wert::Zahl(12.5))
+            .unwrap();
+
+        let zeilen = pult.ausloesen(&k("deck1.grid_here"), None).unwrap();
+        assert!(zeilen[0].contains("12.500 s"), "{zeilen:?}");
+
+        let Wert::Zahl(anker) = pult.lies(&k("deck1.grid_anchor")).unwrap() else {
+            panic!("kein Anker");
+        };
+        assert!((anker - 12.5).abs() < 1e-3, "Anker {anker}");
+
+        // Das Tempo hat sich dabei nicht verändert — verschoben wurde die Phase.
+        assert_eq!(pult.lies(&k("deck1.bpm_grid")).unwrap(), Wert::Zahl(128.0));
+        let (_, bpm, sekunden) = grid.lock().unwrap().clone().expect("nichts gespeichert");
+        assert_eq!(bpm, 128.0);
+        assert!((sekunden - 12.5).abs() < 1e-3);
+    }
+
+    /// Ohne Grid gibt es nichts zu korrigieren — und nichts zu raten.
+    #[test]
+    fn ohne_grid_wird_keine_korrektur_erfunden() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.decks()[0].state.set_grid(None);
+
+        for (control, argument) in [("deck1.grid_here", None), ("deck1.grid_scale", Some("2"))] {
+            let fehler = pult.ausloesen(&k(control), argument);
+            assert!(
+                matches!(fehler, Err(Fehler::Gescheitert(_))),
+                "{control}: {fehler:?}"
+            );
+        }
+
+        let anker = pult.schreibe(&k("deck1.grid_anchor"), Wert::Zahl(5.0));
+        assert!(matches!(anker, Err(Fehler::Gescheitert(_))), "{anker:?}");
+
+        // Das Tempo dagegen lässt sich auch aus dem Nichts setzen — sonst käme
+        // man aus einem fehlenden Grid nie wieder heraus.
+        pult.schreibe(&k("deck1.bpm_grid"), Wert::Zahl(174.0))
+            .unwrap();
+        assert_eq!(pult.lies(&k("deck1.bpm_grid")).unwrap(), Wert::Zahl(174.0));
     }
 
     #[test]

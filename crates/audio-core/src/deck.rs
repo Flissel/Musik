@@ -211,6 +211,21 @@ impl DeckState {
         self.seek_to.store(frame as i64, Ordering::Relaxed);
     }
 
+    /// Wo das Deck gleich stehen wird: ein angefragter Sprung, sonst die
+    /// aktuelle Position.
+    ///
+    /// [`DeckState::seek_frames`] setzt nur einen Wunsch — ausgeführt wird er
+    /// vom Audio-Thread im nächsten Block. Wer unmittelbar nach einem Sprung
+    /// fragt, wo das Deck steht, bekäme sonst die alte Stelle. Für alles, was
+    /// *auf* die Position zeigt statt sie anzuzeigen — einen Grid-Anker etwa —
+    /// ist das die falsche Antwort.
+    pub fn ziel_position(&self) -> u64 {
+        match self.seek_to.load(Ordering::Relaxed) {
+            wunsch if wunsch >= 0 => wunsch as u64,
+            _ => self.position_frames(),
+        }
+    }
+
     /// Track ist bis zum Ende gelaufen.
     pub fn is_finished(&self) -> bool {
         self.finished.load(Ordering::Relaxed)

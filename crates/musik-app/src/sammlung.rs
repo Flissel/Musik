@@ -241,6 +241,22 @@ impl Sammlung for AppSammlung {
         // derselben Tabelle und geht das Deck nichts an.
         lib.replace_hot_cues(id, &zeilen).map_err(|e| e.to_string())
     }
+
+    fn grid_speichern(&self, pfad: &str, bpm: f32, anker_sekunden: f64) -> Result<(), String> {
+        let Some(lib) = self.library.as_ref() else {
+            return Err("keine Sammlung geöffnet — mit --db starten".into());
+        };
+        let mut eintrag = lib
+            .track_by_path(pfad)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("{pfad} steht nicht in der Sammlung"))?;
+
+        eintrag.bpm = Some(bpm);
+        eintrag.beat_anchor_ms = Some(anker_sekunden * 1_000.0);
+        lib.upsert_track(&eintrag)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Was in der Liste als Titel steht.

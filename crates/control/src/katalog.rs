@@ -179,8 +179,17 @@ pub static DECK: &[Beschreibung] = &[
         0.0,
         400.0,
         Einheit::Bpm,
-        false,
-        "Tempo des Beatgrids, ohne Regler",
+        true,
+        "Tempo des Beatgrids, ohne Regler; schreiben korrigiert es und merkt es sich",
+    ),
+    zahl(
+        "grid_anchor",
+        "ANKER",
+        0.0,
+        f64::MAX,
+        Einheit::Sekunden,
+        true,
+        "Wo der erste Beat liegt; schreiben verschiebt das ganze Raster",
     ),
     zahl(
         "tempo",
@@ -248,6 +257,16 @@ pub static DECK: &[Beschreibung] = &[
         "beatjump",
         "<beats>",
         "Um so viele Beats springen, negativ zurück",
+    ),
+    aktion(
+        "grid_here",
+        "",
+        "Den Anker auf die aktuelle Position legen — der Beat ist hier",
+    ),
+    aktion(
+        "grid_scale",
+        "<faktor>",
+        "Grid-Tempo mit diesem Faktor multiplizieren; 0.5 und 2 räumen Oktavfehler auf",
     ),
 ];
 
