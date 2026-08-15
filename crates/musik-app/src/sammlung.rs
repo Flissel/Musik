@@ -19,7 +19,7 @@ use analysis::Store;
 use audio_core::deck::{DeckState, Voice};
 use audio_core::{Beatgrid, Tonart, Track};
 use control::{Sammlung, Treffer};
-use library::{Library, Query, TrackRecord};
+use library::{CueKind, CueRecord, Library, Query, TrackRecord};
 
 /// Ein angenommener Auftrag auf dem Weg zum Arbeiter.
 pub struct Auftrag {
@@ -27,6 +27,14 @@ pub struct Auftrag {
     pub pfad: String,
     pub state: Arc<DeckState>,
     pub sample_rate: u32,
+    /// Hot Cues aus der Sammlung, als (Nummer ab 0, Frames).
+    ///
+    /// Gelesen wird beim Annehmen des Auftrags, nicht im Arbeiter: Dort liegt
+    /// die Sammlung, und acht Zeilen SQLite kosten nichts.
+    pub cues: Vec<(usize, u64)>,
+    /// Beatgrid aus der Sammlung. Schlägt das der Analyse — was hier steht,
+    /// kann aus Traktor stammen oder von Hand korrigiert sein.
+    pub grid: Option<Beatgrid>,
 }
 
 /// Was der Arbeiter zurückgibt.
@@ -54,6 +62,33 @@ pub struct AppSammlung {
 }
 
 impl AppSammlung {
+    /// Was die Sammlung über einen Track weiß, das ein Deck braucht.
+    ///
+    /// Leer, wenn keine Sammlung offen ist oder der Track nicht darin steht —
+    /// dann trägt allein die Analyse, und das ist kein Fehler.
+    fn gespeichertes(&self, pfad: &str, rate: u32) -> (Vec<(usize, u64)>, Option<Beatgrid>) {
+        let Some(lib) = self.library.as_ref() else {
+            return (Vec::new(), None);
+        };
+        let Ok(Some(eintrag)) = lib.track_by_path(pfad) else {
+            return (Vec::new(), None);
+        };
+
+        let grid = eintrag.beatgrid(rate);
+        let cues = match eintrag.id.map(|id| lib.cues(id)) {
+            Some(Ok(zeilen)) => zeilen
+                .iter()
+                .filter_map(|c| {
+                    let nummer = c.hotcue? as usize;
+                    (nummer < audio_core::deck::HOT_CUES).then(|| (nummer, c.frame(rate)))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        (cues, grid)
+    }
+
     pub fn neu(
         library: Option<Library>,
         decks: Vec<(Arc<DeckState>, u32)>,
@@ -167,14 +202,44 @@ impl Sammlung for AppSammlung {
             return Err(format!("{pfad} gibt es nicht"));
         }
 
+        let (cues, grid) = self.gespeichertes(pfad, *sample_rate);
+
         self.auftraege
             .send(Auftrag {
                 deck,
                 pfad: pfad.to_string(),
                 state: Arc::clone(state),
                 sample_rate: *sample_rate,
+                cues,
+                grid,
             })
             .map_err(|_| "der Lader läuft nicht mehr".to_string())
+    }
+
+    fn hot_cues_speichern(&self, pfad: &str, cues: &[(usize, f64)]) -> Result<(), String> {
+        let Some(lib) = self.library.as_ref() else {
+            return Err("keine Sammlung geöffnet — mit --db starten".into());
+        };
+        let id = lib
+            .track_id_by_path(pfad)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("{pfad} steht nicht in der Sammlung"))?;
+
+        let zeilen: Vec<CueRecord> = cues
+            .iter()
+            .map(|(nummer, sekunden)| CueRecord {
+                id: None,
+                track_id: id,
+                hotcue: Some(*nummer as u8),
+                position_ms: sekunden * 1_000.0,
+                name: None,
+                kind: CueKind::Cue,
+            })
+            .collect();
+
+        // Nur die Hot Cues — der Grid-Marker aus dem Traktor-Import liegt in
+        // derselben Tabelle und geht das Deck nichts an.
+        lib.replace_hot_cues(id, &zeilen).map_err(|e| e.to_string())
     }
 }
 
@@ -253,14 +318,25 @@ fn fertigen(auftrag: &Auftrag, store: &Store) -> Result<Fertig, String> {
     auftrag.state.set_playing(false);
     auftrag.state.seek_frames(0);
     auftrag.state.set_loop_active(false);
+
+    // Erst alles leeren, dann das Gespeicherte einsetzen. Ohne das Leeren
+    // stünden die Cues des vorigen Tracks noch da, wo der neue keine hat.
     for i in 0..audio_core::deck::HOT_CUES {
         auftrag.state.set_cue(i, None);
     }
-    auftrag.state.set_grid(
+    for (nummer, frame) in &auftrag.cues {
+        auftrag.state.set_cue(*nummer, Some(*frame));
+    }
+
+    // Was in der Sammlung steht, schlägt die frische Analyse: Es kann aus
+    // Traktor stammen oder von Hand korrigiert sein, und beides weiß mehr als
+    // ein Detektor.
+    let grid = auftrag.grid.or_else(|| {
         analyse
             .bpm
-            .map(|bpm| Beatgrid::new(bpm, analyse.beat_anchor_frames.unwrap_or(0), 1.0)),
-    );
+            .map(|bpm| Beatgrid::new(bpm, analyse.beat_anchor_frames.unwrap_or(0), 1.0))
+    });
+    auftrag.state.set_grid(grid);
 
     Ok(Fertig {
         voice: Voice::new(Arc::new(track), Arc::clone(&auftrag.state)),

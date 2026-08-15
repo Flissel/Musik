@@ -57,6 +57,14 @@ pub trait Sammlung: Send {
     /// Die Tracks einer Playlist, in ihrer Reihenfolge.
     fn playlist(&self, name: &str, grenze: usize) -> Vec<Treffer>;
     fn laden(&self, deck: usize, pfad: &str) -> Result<(), String>;
+
+    /// Schreibt die Hot Cues eines Tracks zurück.
+    ///
+    /// Anders als [`Sammlung::laden`] **darf** das blockieren: Es sind acht
+    /// Zeilen in einer SQLite-Datei, keine Sekunden Dekodierarbeit. Dafür muss
+    /// es sofort geschehen — ein Cue, der erst beim Beenden gespeichert wird,
+    /// ist bei einem Absturz weg, und abgestürzt wird beim Auflegen.
+    fn hot_cues_speichern(&self, pfad: &str, cues: &[(usize, f64)]) -> Result<(), String>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -120,6 +128,12 @@ pub struct DeckEintrag {
     /// Sie liegt hier und nicht im `DeckState`: Der ist der Echtzeitteil und
     /// kennt nur Atomics; eine Tonart wird nie pro Sample gebraucht.
     pub tonart: Option<Tonart>,
+    /// Woher der geladene Track kommt — leer, solange keiner liegt.
+    ///
+    /// Ohne den Pfad ließe sich nichts zurückschreiben: Die Sammlung kennt
+    /// Tracks über ihn, und das Deck ist die einzige Stelle, die weiß, was
+    /// gerade darauf liegt.
+    pub pfad: String,
     /// Was der letzte Ladeauftrag macht: `bereit`, `laedt` oder ein Fehler.
     pub lade_status: String,
 }
@@ -134,6 +148,7 @@ impl DeckEintrag {
             titel: String::new(),
             artist: String::new(),
             tonart: None,
+            pfad: String::new(),
             lade_status: "bereit".into(),
         }
     }
@@ -853,10 +868,41 @@ impl Steuerpult {
                         d.state.set_cue(c, Some((sek * rate).max(0.0) as u64));
                     }
                 }
+                // Sofort zurückschreiben, nicht beim Beenden: Ein Cue, der nur
+                // im Speicher steht, ist nach einem Absturz weg — und abgestürzt
+                // wird beim Auflegen.
+                self.cues_sichern(i);
             }
         }
 
         Ok(())
+    }
+
+    /// Schreibt die Hot Cues eines Decks in die Sammlung zurück.
+    ///
+    /// Still: Wer einen Cue setzt, hat den Cue gemeint, nicht einen
+    /// Datenbankvorgang. Scheitert das Schreiben, steht der Cue trotzdem am
+    /// Deck und die laufende Nummer geht weiter — sichtbar wird es beim
+    /// nächsten Laden, und dort ist es auch zu reparieren.
+    fn cues_sichern(&mut self, deck: usize) {
+        let Some(d) = self.decks.get(deck) else {
+            return;
+        };
+        if d.pfad.is_empty() {
+            return;
+        }
+        let Some(sammlung) = self.sammlung.as_ref() else {
+            return;
+        };
+
+        let rate = d.sample_rate as f64;
+        let cues: Vec<(usize, f64)> = (0..katalog::HOT_CUES)
+            .filter_map(|c| d.state.cue(c).map(|f| (c, f as f64 / rate)))
+            .collect();
+
+        if let Err(e) = sammlung.hot_cues_speichern(&d.pfad, &cues) {
+            self.decks[deck].lade_status = format!("cues nicht gespeichert: {e}");
+        }
     }
 
     fn schreibe_kanal(
@@ -1176,6 +1222,57 @@ mod tests {
         assert_eq!(pult.lies(&k("deck1.play")).unwrap(), Wert::Schalter(true));
         pult.schreibe_normiert(&k("deck1.play"), 0.0).unwrap();
         assert_eq!(pult.lies(&k("deck1.play")).unwrap(), Wert::Schalter(false));
+    }
+
+    /// Ein gesetzter Cue muss den Trackwechsel überleben.
+    ///
+    /// Vorher lag er nur in den Atomics des Decks: acht Cues gesetzt, Track neu
+    /// geladen, weg. Und die Sammlung hatte die Tabelle die ganze Zeit.
+    #[test]
+    fn ein_gesetzter_cue_landet_in_der_sammlung() {
+        let (mut pult, _runner, protokoll) = crate::testing::pult_mit_protokoll();
+        pult.deck_mut(0).unwrap().pfad = "/musik/a.wav".into();
+
+        pult.schreibe(&k("deck1.cue2"), Wert::Zahl(10.0)).unwrap();
+        pult.schreibe(&k("deck1.cue5"), Wert::Zahl(30.5)).unwrap();
+
+        let gesichert = protokoll.lock().unwrap()["/musik/a.wav"].clone();
+        assert_eq!(gesichert, vec![(1, 10.0), (4, 30.5)], "{gesichert:?}");
+
+        // Löschen wird genauso weitergereicht, sonst käme ein gelöschter Cue
+        // beim nächsten Laden wieder.
+        pult.schreibe(&k("deck1.cue2"), Wert::Leer).unwrap();
+        assert_eq!(
+            protokoll.lock().unwrap()["/musik/a.wav"],
+            vec![(4, 30.5)],
+            "ein gelöschter Cue käme sonst beim nächsten Laden wieder"
+        );
+    }
+
+    /// Ohne geladenen Track gibt es nichts zurückzuschreiben.
+    #[test]
+    fn ein_leeres_deck_schreibt_keine_cues() {
+        let (mut pult, _runner, protokoll) = crate::testing::pult_mit_protokoll();
+        pult.schreibe(&k("deck1.cue1"), Wert::Zahl(5.0)).unwrap();
+        assert!(protokoll.lock().unwrap().is_empty());
+    }
+
+    /// Ein fehlgeschlagenes Speichern darf den Cue nicht verschlucken — und
+    /// nicht stillschweigend durchgehen.
+    #[test]
+    fn ein_gescheitertes_speichern_steht_im_status() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.deck_mut(0).unwrap().pfad = "/musik/a.schreibgeschuetzt".into();
+
+        pult.schreibe(&k("deck1.cue1"), Wert::Zahl(5.0)).unwrap();
+
+        // Der Cue steht am Deck …
+        assert_eq!(pult.lies(&k("deck1.cue1")).unwrap(), Wert::Zahl(5.0));
+        // … und dass er nicht in der Sammlung ankam, ist ablesbar.
+        let Wert::Text(status) = pult.lies(&k("deck1.load_status")).unwrap() else {
+            panic!("load_status ist kein Text");
+        };
+        assert!(status.contains("cues nicht gespeichert"), "{status}");
     }
 
     #[test]

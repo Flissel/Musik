@@ -280,11 +280,47 @@ impl Library {
     }
 
     /// Ersetzt alle Marker eines Tracks.
+    ///
+    /// **Alle** heißt alle — auch Grid-Anker und Fade-Marker. Wer nur die Hot
+    /// Cues eines Decks zurückschreiben will, nimmt [`Library::replace_hot_cues`],
+    /// sonst ist der importierte Grid-Marker weg.
     pub fn replace_cues(&self, track_id: i64, cues: &[CueRecord]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("DELETE FROM cues WHERE track_id = ?1", params![track_id])?;
 
         for cue in cues {
+            tx.execute(
+                "INSERT INTO cues (track_id, hotcue, position_ms, name, kind) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    track_id,
+                    cue.hotcue.map(|h| h as i64),
+                    cue.position_ms,
+                    cue.name,
+                    cue.kind.as_str(),
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Ersetzt nur die Hot Cues eines Tracks und lässt alles andere stehen.
+    ///
+    /// Das ist der Weg, den ein Deck nimmt, wenn jemand einen Cue setzt oder
+    /// löscht. Ein Deck kennt acht Tasten und sonst nichts — es weiß nichts vom
+    /// Grid-Anker, den der Traktor-Import in dieselbe Tabelle legt, und von
+    /// Fade-Markern erst recht nicht. Würde es `replace_cues` benutzen, wäre
+    /// beides beim ersten gesetzten Cue verloren.
+    pub fn replace_hot_cues(&self, track_id: i64, hot: &[CueRecord]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM cues WHERE track_id = ?1 AND hotcue IS NOT NULL",
+            params![track_id],
+        )?;
+
+        for cue in hot {
             tx.execute(
                 "INSERT INTO cues (track_id, hotcue, position_ms, name, kind) \
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -585,6 +621,53 @@ mod tests {
         assert_eq!(cues.len(), 1, "alte Cues blieben stehen");
         assert_eq!(cues[0].position_ms, 500.0);
         assert_eq!(cues[0].frame(48_000), 24_000);
+    }
+
+    /// Ein Deck darf beim Cue-Setzen nicht den Grid-Anker mitnehmen.
+    ///
+    /// Beide liegen in derselben Tabelle, und ein Deck kennt nur seine acht
+    /// Tasten. Mit `replace_cues` wäre der importierte Anker beim ersten
+    /// gesetzten Cue weg — und damit die Arbeit, die der Traktor-Import
+    /// gemacht hat.
+    #[test]
+    fn hot_cues_zurueckschreiben_laesst_den_grid_marker_stehen() {
+        let lib = Library::open_in_memory().unwrap();
+        let id = lib
+            .upsert_track(&track("/a.mp3", "A", "X", Some(128.0)))
+            .unwrap();
+
+        let marker = CueRecord {
+            id: None,
+            track_id: id,
+            hotcue: None,
+            position_ms: 42.0,
+            name: Some("Grid".into()),
+            kind: CueKind::Grid,
+        };
+        let hot = |nummer: u8, ms: f64| CueRecord {
+            id: None,
+            track_id: id,
+            hotcue: Some(nummer),
+            position_ms: ms,
+            name: None,
+            kind: CueKind::Cue,
+        };
+
+        lib.replace_cues(id, &[marker.clone(), hot(0, 1_000.0)])
+            .unwrap();
+
+        // Das Deck schreibt seine acht Tasten zurück — mehr kennt es nicht.
+        lib.replace_hot_cues(id, &[hot(0, 500.0), hot(3, 9_000.0)])
+            .unwrap();
+
+        let cues = lib.cues(id).unwrap();
+        let grid: Vec<_> = cues.iter().filter(|c| c.kind == CueKind::Grid).collect();
+        assert_eq!(grid.len(), 1, "der Grid-Marker ist weg: {cues:?}");
+        assert_eq!(grid[0].position_ms, 42.0);
+
+        let mut nummern: Vec<_> = cues.iter().filter_map(|c| c.hotcue).collect();
+        nummern.sort_unstable();
+        assert_eq!(nummern, vec![0, 3]);
     }
 
     #[test]

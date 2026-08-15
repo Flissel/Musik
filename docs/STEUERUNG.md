@@ -290,6 +290,34 @@ mitgab — es stand im Katalog, verließ aber den Prozess nie. Jetzt steht es in
 der Bereichsspalte, und `deck1.load` sagt von sich aus, dass es einen Pfad
 will.
 
+## Was am Deck eingestellt wird, bleibt
+
+Hot Cues liegen zur Laufzeit in den Atomics des Decks — dort sind sie richtig
+aufgehoben, denn der Audio-Thread liest sie pro Block. Nur endete es dort auch:
+Acht Cues gesetzt, Track neu geladen, weg. Und die Sammlung hatte die Tabelle
+die ganze Zeit; der Traktor-Import füllte sie sogar, aber nichts las sie je.
+
+```text
+set deck1.cue1 4.5     → ok deck1.cue1 4.500000     (steht sofort in der Sammlung)
+set deck1.cue1 -       → ok deck1.cue1 -            (Löschen wird genauso gespeichert)
+```
+
+**Sofort, nicht beim Beenden.** Ein Cue, der nur im Speicher steht, ist nach
+einem Absturz weg, und abgestürzt wird beim Auflegen. Es sind acht Zeilen in
+einer SQLite-Datei — das darf den Aufrufer kurz aufhalten, anders als das
+Dekodieren beim Laden.
+
+**Geschrieben werden nur die acht Tasten.** In derselben Tabelle liegen der
+Grid-Anker aus dem Traktor-Import und Fade-Marker; ein Deck kennt die nicht und
+darf sie deshalb nicht mit ersetzen (`Library::replace_hot_cues` statt
+`replace_cues`).
+
+Beim Laden geht es rückwärts: Die gespeicherten Cues kommen aufs Deck, und ein
+**Beatgrid aus der Sammlung schlägt die frische Analyse**. Was dort steht, kann
+aus Traktor stammen oder von Hand korrigiert sein, und beides weiß mehr als ein
+Detektor. Scheitert das Speichern — keine Sammlung geöffnet, Track nicht darin
+—, steht der Cue trotzdem am Deck und der Grund in `deckN.load_status`.
+
 ## Harmonisch mischen
 
 Tempo ist die halbe Trackauswahl. Zwei Stücke im gleichen Takt können trotzdem

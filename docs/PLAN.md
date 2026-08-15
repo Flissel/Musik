@@ -174,7 +174,7 @@ Ordner liegen. Siehe [APIS.md](APIS.md#samples-und-audiomaterial).
 | ~~2~~ | ~~Analyse-Pipeline~~ ✅ | BPM, Grid und Tonart reproduzierbar als Sidecar, Peaks vorhanden | M | — |
 | ~~3~~ | ~~UI-Grundgerüst~~ ✅ | Zwei Decks mit Wellenform und Grid, Mixer bedienbar, Sammlung durchsuchbar · Offen: Bildrate auf echter Hardware messen | L | 1, 2 |
 | ~~4~~ | ~~Sync und Beatmatching~~ ✅ | Zwei Tracks bleiben über 5 Minuten im Takt — als Test abgesichert | M | 2 |
-| ~~5~~ | ~~Hot Cues und Loops~~ ✅ | 8 Cues pro Deck, Loop beat-quantisiert, in der Oberfläche bedienbar | M | 4 |
+| ~~5~~ | ~~Hot Cues und Loops~~ ✅ | 8 Cues pro Deck, Loop beat-quantisiert, in der Oberfläche bedienbar, überleben den Trackwechsel | M | 4 |
 | ~~6~~ | ~~Library~~ ✅ | Import, Suche nach Text, Tempo und Tonart, Playlists, Traktor-`collection.nml` | L | 2 |
 | ~~7~~ | ~~Effekte~~ ✅ | Vier Effekte post-fader, tempo-synchron · Offen: Reverb, und ob vier reichen | M | 1 |
 | 8 | Stems | Beim Import vorberechnet, Stem-Deck-Modus | L | 6 |
@@ -229,7 +229,7 @@ Tracks bei 0,05 bis 0,46 und damit durchweg im unteren Bereich.
 | `audio-core` | Deck: Dekodierung, WSOLA, Beatgrid, Hot Cues, Loops |
 | `audio-engine` | Mixer: Kanalzüge, EQ, Filter, Effekte, Crossfader, Cue-Bus, Begrenzer, AUX, Sync, Mitschnitt, Kommandoschlange, Geräteausgabe |
 | `analysis` | Tempo, Beatgrid, Tonart, Wellenform-Spitzen, Sidecar-Cache |
-| `library` | SQLite-Sammlung, Suche nach Text, Tempo und Tonart, Playlists, Traktor-Import |
+| `library` | SQLite-Sammlung, Suche nach Text, Tempo und Tonart, Playlists, Hot Cues, Traktor-Import |
 | `musik-cli` | Deck fahren, analysieren, Mix rendern, Sammlung verwalten |
 | `control` | Steuerraum: benannte Controls, Katalog, Zeilenprotokoll, Socket |
 | `musik-app` | Oberfläche: zwei Decks, Mixer mit AUX, Plattenkiste |

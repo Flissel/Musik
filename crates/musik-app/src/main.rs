@@ -61,6 +61,11 @@ fn main() -> Result<()> {
     let mut decks = Vec::new();
     let mut eintraege = Vec::new();
 
+    // Vor der Deck-Schleife: Ein mit --a geladener Track soll seine Cues von
+    // Anfang an haben. Sonst stünde das Deck leer da, und der erste gesetzte
+    // Cue überschriebe stillschweigend die gespeicherten.
+    let mut library = args.db.as_ref().and_then(|p| Library::open(p).ok());
+
     for (index, (name, pfad)) in [("DECK A", &args.a), ("DECK B", &args.b)]
         .into_iter()
         .enumerate()
@@ -93,11 +98,21 @@ fn main() -> Result<()> {
 
         let state = Arc::new(DeckState::new());
         state.set_keylock(true);
-        state.set_grid(
+        // Was in der Sammlung steht, schlägt die frische Analyse — dieselbe
+        // Regel wie beim Laden zur Laufzeit, siehe `sammlung::fertigen`.
+        let gespeichert = pfad
+            .as_ref()
+            .and_then(|p| gespeichertes(library.as_ref(), &p.to_string_lossy(), RATE));
+        let (gespeicherte_cues, gespeichertes_grid) = gespeichert.unwrap_or_default();
+
+        for (nummer, frame) in &gespeicherte_cues {
+            state.set_cue(*nummer, Some(*frame));
+        }
+        state.set_grid(gespeichertes_grid.or_else(|| {
             analyse
                 .bpm
-                .map(|bpm| Beatgrid::new(bpm, analyse.beat_anchor_frames.unwrap_or(0), 1.0)),
-        );
+                .map(|bpm| Beatgrid::new(bpm, analyse.beat_anchor_frames.unwrap_or(0), 1.0))
+        }));
 
         let frames = track.frames() as u64;
         let voice = Voice::new(Arc::new(track), Arc::clone(&state));
@@ -116,6 +131,11 @@ fn main() -> Result<()> {
         eintrag.titel = titel;
         eintrag.artist = artist;
         eintrag.tonart = analyse.tonart();
+        // Nur bei echten Dateien: Ein Demo-Track steht in keiner Sammlung, und
+        // ein Cue darauf hat nichts, wohin er gespeichert werden könnte.
+        if let Some(p) = pfad {
+            eintrag.pfad = p.to_string_lossy().into_owned();
+        }
         eintraege.push((eintrag, fader, name));
 
         decks.push(DeckUi {
@@ -152,8 +172,6 @@ fn main() -> Result<()> {
         pult.deck_hinzufuegen(eintrag);
     }
     pult.kanal_hinzufuegen(KanalSpiegel::neu("AUX", assign_fuer(2)));
-
-    let mut library = args.db.as_ref().and_then(|p| Library::open(p).ok());
 
     // Suchen und Laden hängen das Pult an die Sammlung und an den Dekodierer.
     // Ohne das antworten `search` und `load` mit einem Fehler, statt
@@ -291,6 +309,37 @@ fn parse_args() -> Result<Args> {
     }
 
     Ok(args)
+}
+
+/// Was die Sammlung einem Deck mitgibt: Hot Cues als (Nummer, Frame) und ein
+/// Beatgrid.
+type Gespeichertes = (Vec<(usize, u64)>, Option<Beatgrid>);
+
+/// Hot Cues und Beatgrid, die für diesen Pfad in der Sammlung stehen.
+///
+/// Dasselbe, was `sammlung::AppSammlung` beim Laden zur Laufzeit tut — hier
+/// noch einmal, weil die Decks beim Start an der Sammlung vorbei geladen
+/// werden.
+fn gespeichertes(library: Option<&Library>, pfad: &str, rate: u32) -> Option<Gespeichertes> {
+    let lib = library?;
+    let eintrag = lib.track_by_path(pfad).ok().flatten()?;
+    let grid = eintrag.beatgrid(rate);
+
+    let cues = eintrag
+        .id
+        .and_then(|id| lib.cues(id).ok())
+        .map(|zeilen| {
+            zeilen
+                .iter()
+                .filter_map(|c| {
+                    let nummer = c.hotcue? as usize;
+                    (nummer < audio_core::deck::HOT_CUES).then(|| (nummer, c.frame(rate)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Some((cues, grid))
 }
 
 /// Rendert den Mixer im Leerlauf, wenn kein Audiogerät da ist.

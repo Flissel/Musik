@@ -5,7 +5,8 @@
 //! Schlange, und jedes gesendete Kommando liefe ins Nichts — die Tests würden
 //! grün, obwohl nichts ankommt.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use audio_core::deck::DeckState;
 use audio_engine::{Assign, DeckSource, Engine, EngineRunner, SilentSource};
@@ -14,8 +15,21 @@ use crate::pult::{DeckEintrag, KanalSpiegel, Sammlung, Steuerpult, Treffer};
 
 pub const RATE: u32 = 48_000;
 
+/// Was die Sammlung an Hot Cues zu sehen bekommen hat, je Pfad.
+///
+/// Geteilt, weil die Sammlung im Pult unter einem `Box<dyn Sammlung>`
+/// verschwindet — ohne einen Griff von außen ließe sich nicht prüfen, ob ein
+/// Cue wirklich zurückgeschrieben wurde.
+pub type CueProtokoll = Arc<Mutex<HashMap<String, Vec<(usize, f64)>>>>;
+
 /// Zwei Decks auf Kanal 1 und 2, dazu ein AUX-Kanal auf Thru.
 pub fn pult_mit_zwei_decks() -> (Steuerpult, EngineRunner) {
+    let (pult, runner, _) = pult_mit_protokoll();
+    (pult, runner)
+}
+
+/// Dasselbe Pult, aber mit einem Blick auf das, was zurückgeschrieben wird.
+pub fn pult_mit_protokoll() -> (Steuerpult, EngineRunner, CueProtokoll) {
     let mut engine = Engine::new(RATE as f32);
 
     let mut kanaele = Vec::new();
@@ -56,17 +70,23 @@ pub fn pult_mit_zwei_decks() -> (Steuerpult, EngineRunner) {
     }
 
     let _ = DeckSource::new as fn(_) -> _;
-    pult.sammlung_setzen(Box::new(TestSammlung));
+    let protokoll: CueProtokoll = Arc::new(Mutex::new(HashMap::new()));
+    pult.sammlung_setzen(Box::new(TestSammlung {
+        gesicherte_cues: Arc::clone(&protokoll),
+    }));
 
     pult.aufnahme_setzen(aufnahme);
-    (pult, runner)
+    (pult, runner, protokoll)
 }
 
 /// Eine Sammlung, die nichts liest und nichts dekodiert.
 ///
 /// Sie hält fest, dass ein Ladeauftrag *angenommen* wurde — mehr verspricht
 /// die Schnittstelle nicht, und mehr soll ein Test hier auch nicht prüfen.
-pub struct TestSammlung;
+pub struct TestSammlung {
+    /// Was zurückgeschrieben wurde — damit ein Test das nachsehen kann.
+    pub gesicherte_cues: CueProtokoll,
+}
 
 impl Sammlung for TestSammlung {
     fn suchen(&self, text: &str, grenze: usize) -> Vec<Treffer> {
@@ -105,6 +125,17 @@ impl Sammlung for TestSammlung {
         if pfad.ends_with(".txt") {
             return Err("keine Audiodatei".into());
         }
+        Ok(())
+    }
+
+    fn hot_cues_speichern(&self, pfad: &str, cues: &[(usize, f64)]) -> Result<(), String> {
+        if pfad.ends_with(".schreibgeschuetzt") {
+            return Err("nicht beschreibbar".into());
+        }
+        self.gesicherte_cues
+            .lock()
+            .unwrap()
+            .insert(pfad.to_string(), cues.to_vec());
         Ok(())
     }
 }
