@@ -52,8 +52,11 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
 | `musik_ramp` | Einen Regler über Beats bewegen — eine Blende |
 | `musik_schedule` | Eine Aktion oder einen Wert auf einen späteren Beat legen |
 | `musik_cancel` | Vorgemerktes zurücknehmen |
+| `musik_queue` | Was als Nächstes kommt — mit Notiz, warum |
+| `musik_queue_add` | Einen Track vormerken |
+| `musik_queue_next` | Den vordersten auflegen |
 
-Neun statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
+Zwölf statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
 Übersetzung und die schlechtere: Der Steuerraum hat über zweihundert Einträge,
 und ein Agent, der sie alle als Werkzeuge sieht, findet keins davon.
 `musik_set` und `musik_do` erreichen alles, `musik_status` und `musik_search`
@@ -119,6 +122,42 @@ die auseinanderlaufen könnten, gibt es nicht.
 Läuft die Anwendung beim Start des Servers nicht, bleibt die Beschreibung
 allgemein und verweist auf `musik_list_controls` — die Liste kommt dann zur
 Laufzeit.
+
+## Was als Nächstes kommt
+
+Sobald mehr als einer auswählt, ist „was kommt als Nächstes" eine Frage an die
+Anlage und nicht an einen Kopf. Zwei Agenten mit je eigener Liste legen
+irgendwann beide auf dasselbe Deck; einer verliert, und niemand merkt es, bis
+der falsche Track läuft.
+
+```text
+musik_queue_add(pfad='…/track.mp3', notiz='passt harmonisch zu 8A, mehr Druck')
+musik_queue()          → 1. …/warm.mp3 — ruhig anfangen
+                         2. …/track.mp3 — passt harmonisch zu 8A, mehr Druck
+musik_queue_next()     → load deck2 angenommen
+                         queue 1 abgenommen …/warm.mp3
+                         notiz ruhig anfangen
+```
+
+**Jeder Eintrag trägt eine Notiz.** Das ist der Unterschied zu einer Playlist:
+Wer vormerkt, weiß warum — und ohne die Notiz muss der Nächste den Grund aus
+BPM und Tonart erraten. Bei einem Team von Agenten heißt „erraten": erfinden.
+
+Drei Dinge sind mit Absicht so:
+
+- **Derselbe Pfad wird nicht zweimal angenommen.** Die Antwort nennt die
+  Nummer, unter der er schon steht. Zwei, die unabhängig nach 128 BPM in 8A
+  suchen, finden denselben Track — ihn stillschweigend zweimal aufzunehmen
+  hieße, ihn zweimal zu spielen.
+- **`musik_queue_next` legt ohne Deckangabe nur auf ein Deck, das nicht
+  läuft.** Laufen alle, kommt ein Fehler statt einer Vermutung. Ein Track über
+  einen laufenden gelegt reißt den Mix ab.
+- **Scheitert das Laden, bleibt der Eintrag stehen.** Sonst wäre er weg, ohne
+  gespielt worden zu sein, und das fällt erst auf, wenn er fehlt.
+
+Ändern und Streichen brauchen kein eigenes Werkzeug — `master.queue_drop`,
+`queue_bump`, `queue_note` und `queue_clear` nehmen genau ein Argument und
+stehen mit ihrer Erklärung schon in der Beschreibung von `musik_do`.
 
 ## Sicherheit
 

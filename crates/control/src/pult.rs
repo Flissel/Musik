@@ -221,6 +221,8 @@ impl Default for MasterSpiegel {
 pub struct Steuerpult {
     /// Was später geschehen soll — siehe [`crate::zeitplan`].
     pub plan: crate::zeitplan::Zeitplan,
+    /// Was als Nächstes gespielt werden soll — siehe [`crate::warteschlange`].
+    pub liste: crate::warteschlange::Warteschlange,
     decks: Vec<DeckEintrag>,
     kanaele: Vec<KanalSpiegel>,
     master: MasterSpiegel,
@@ -233,6 +235,7 @@ impl Steuerpult {
     pub fn neu(handle: EngineHandle) -> Steuerpult {
         Steuerpult {
             plan: crate::zeitplan::Zeitplan::neu(),
+            liste: crate::warteschlange::Warteschlange::neu(),
             decks: Vec::new(),
             kanaele: Vec::new(),
             master: MasterSpiegel::default(),
@@ -568,6 +571,44 @@ impl Steuerpult {
                 let treffer = self.suche_harmonisch(tonart);
                 Ok(treffer_zeilen(&treffer))
             }
+            (Gruppe::Master, "queue") => Ok(self.listen_zeilen()),
+            (Gruppe::Master, "queue_add") => {
+                let pfad = argument.ok_or_else(fehlt)?;
+                self.liste_anhaengen(pfad)
+            }
+            (Gruppe::Master, "queue_note") => {
+                let roh = argument.ok_or_else(fehlt)?;
+                let (nr, text) = roh.split_once(char::is_whitespace).ok_or_else(fehlt)?;
+                let nr = Self::listen_nummer(k, nr)?;
+                if !self.liste.notieren(nr, text.trim().to_string()) {
+                    return Err(Fehler::Gescheitert(format!(
+                        "Nummer {nr} steht nicht in der Liste"
+                    )));
+                }
+                Ok(vec![format!("queue {nr} notiert")])
+            }
+            (Gruppe::Master, "queue_bump") => {
+                let nr = Self::listen_nummer(k, argument.ok_or_else(fehlt)?)?;
+                if !self.liste.vorziehen(nr) {
+                    return Err(Fehler::Gescheitert(format!(
+                        "Nummer {nr} steht nicht in der Liste"
+                    )));
+                }
+                Ok(vec![format!("queue {nr} ist jetzt der Naechste")])
+            }
+            (Gruppe::Master, "queue_drop") => {
+                let nr = Self::listen_nummer(k, argument.ok_or_else(fehlt)?)?;
+                match self.liste.streichen(nr) {
+                    Some(e) => Ok(vec![format!("queue {nr} gestrichen {}", e.pfad)]),
+                    None => Err(Fehler::Gescheitert(format!(
+                        "Nummer {nr} steht nicht in der Liste"
+                    ))),
+                }
+            }
+            (Gruppe::Master, "queue_clear") => {
+                Ok(vec![format!("ok {} gestrichen", self.liste.leeren())])
+            }
+            (Gruppe::Master, "queue_next") => self.liste_auflegen(k, argument),
             _ => Err(Fehler::UnbekanntesControl(k.to_string())),
         }
     }
@@ -637,6 +678,100 @@ impl Steuerpult {
         // der Track liegt, fragt `load_status` oder abonniert es.
         self.decks[deck].lade_status = "laedt".into();
         Ok(vec![format!("load deck{} angenommen", deck + 1)])
+    }
+
+    /// Die Liste als Zeilen: `queue <nr> <pfad> <notiz>`.
+    ///
+    /// Pfad vor Notiz und getrennt an der Dateiendung — dieselbe Form wie bei
+    /// den Suchtreffern, damit ein Leser nur eine Regel braucht.
+    fn listen_zeilen(&self) -> Vec<String> {
+        if self.liste.ist_leer() {
+            return vec!["hinweis die Liste ist leer".into()];
+        }
+        self.liste
+            .eintraege()
+            .iter()
+            .map(|e| {
+                let notiz = if e.notiz.is_empty() { "-" } else { &e.notiz };
+                format!("queue {} {} {notiz}", e.id, e.pfad)
+            })
+            .collect()
+    }
+
+    fn listen_nummer(k: &Schluessel, roh: &str) -> Result<u64, Fehler> {
+        roh.trim().parse::<u64>().map_err(|_| Fehler::Argument {
+            control: k.to_string(),
+            erwartet: format!("eine Nummer aus der Liste — '{}' ist keine", roh.trim()),
+        })
+    }
+
+    fn liste_anhaengen(&mut self, pfad: &str) -> Result<Vec<String>, Fehler> {
+        match self.liste.anhaengen(pfad.to_string(), String::new()) {
+            Ok(nr) => Ok(vec![format!("queue {nr} angehaengt {pfad}")]),
+            Err(schon) => Err(Fehler::Gescheitert(format!(
+                "steht schon als Nummer {schon} in der Liste"
+            ))),
+        }
+    }
+
+    /// Ein Deck, auf das gefahrlos geladen werden kann.
+    ///
+    /// Zuerst ein durchgelaufenes, sonst irgendeines, das steht.
+    fn freies_deck(&self) -> Option<usize> {
+        let steht = |i: &usize| !self.decks[*i].state.is_playing();
+        (0..self.decks.len())
+            .find(|i| steht(i) && self.decks[*i].state.is_finished())
+            .or_else(|| (0..self.decks.len()).find(steht))
+    }
+
+    /// Legt den vordersten Eintrag auf.
+    ///
+    /// Ohne Deckangabe auf eines, das gerade nicht läuft. Laufen alle, wird das
+    /// gesagt statt geraten: Ein Track, der über einen laufenden gelegt wird,
+    /// reißt den Mix ab, und das ist keine Entscheidung, die eine Vorgabe
+    /// treffen darf.
+    fn liste_auflegen(
+        &mut self,
+        k: &Schluessel,
+        argument: Option<&str>,
+    ) -> Result<Vec<String>, Fehler> {
+        let deck = match argument {
+            Some(name) => match Gruppe::parse(name) {
+                Some(Gruppe::Deck(i)) if i < self.decks.len() => i,
+                _ => {
+                    return Err(Fehler::Argument {
+                        control: k.to_string(),
+                        erwartet: format!("ein Deck, etwa deck1 — '{name}' ist keins"),
+                    })
+                }
+            },
+            None => self.freies_deck().ok_or_else(|| {
+                Fehler::Gescheitert(
+                    "alle Decks laufen — Deck nennen, wenn wirklich darüber gelegt werden soll"
+                        .into(),
+                )
+            })?,
+        };
+
+        let Some(eintrag) = self.liste.abnehmen() else {
+            return Err(Fehler::Gescheitert("die Liste ist leer".into()));
+        };
+
+        // Scheitert das Laden, kommt der Eintrag zurück nach vorn. Sonst wäre
+        // er weg, ohne gespielt worden zu sein.
+        match self.laden(deck, &eintrag.pfad) {
+            Ok(mut zeilen) => {
+                zeilen.push(format!("queue {} abgenommen {}", eintrag.id, eintrag.pfad));
+                if !eintrag.notiz.is_empty() {
+                    zeilen.push(format!("notiz {}", eintrag.notiz));
+                }
+                Ok(zeilen)
+            }
+            Err(e) => {
+                self.liste.zuruecklegen(eintrag);
+                Err(e)
+            }
+        }
     }
 
     fn hot_cue_anspringen(&mut self, deck: usize, nummer: usize) -> Result<Vec<String>, Fehler> {
@@ -1476,6 +1611,9 @@ mod tests {
                 "playlist" => Some("Freitag"),
                 "fx_sync" => Some("1"),
                 "record" => Some("/tmp/musik-katalogtest.wav"),
+                "queue_add" => Some("/musik/vorgemerkt.wav"),
+                "queue_note" => Some("1 passt harmonisch"),
+                "queue_bump" | "queue_drop" => Some("1"),
                 _ => None,
             };
 

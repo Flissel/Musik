@@ -480,6 +480,48 @@ class StreichEingabe(Basis):
         return self
 
 
+class ListeEingabe(Basis):
+    limit: int = Field(default=50, description="Höchstzahl der Einträge", ge=1, le=200)
+    response_format: Format = Field(default=Format.MARKDOWN, description="Ausgabeform")
+
+
+class VormerkenEingabe(Basis):
+    pfad: str = Field(
+        ...,
+        description="Dateipfad des Tracks, so wie ihn `musik_search` liefert",
+        min_length=1,
+        max_length=4096,
+    )
+    notiz: str = Field(
+        default="",
+        description=(
+            "Warum er dort steht — 'passt harmonisch zu 8A', 'mehr Druck nach "
+            "dem Break'. Der Nächste, der die Liste liest, muss den Grund sonst "
+            "erraten."
+        ),
+        max_length=512,
+    )
+    als_naechstes: bool = Field(
+        default=False,
+        description="Direkt an den Anfang statt hinten anhängen",
+    )
+
+    @field_validator("pfad", "notiz")
+    @classmethod
+    def _einzeilig(cls, v: str) -> str:
+        return _pruefe_einzeilig(v, "Argument")
+
+
+class AuflegenEingabe(Basis):
+    deck: Optional[DeckName] = Field(
+        default=None,
+        description=(
+            "Auf welches Deck. Ohne Angabe auf eines, das gerade nicht läuft; "
+            "laufen alle, kommt ein Fehler statt eines abgerissenen Mixes."
+        ),
+    )
+
+
 # --------------------------------------------------------------------------
 # Werkzeuge
 # --------------------------------------------------------------------------
@@ -562,6 +604,24 @@ async def _werte(controls: list[str]) -> dict[str, str]:
     return aus
 
 
+def _liste_aus_zeilen(zeilen: list[str]) -> list[dict[str, Any]]:
+    """`queue 3 /musik/track.mp3 mehr Druck nach dem Break`
+
+    Pfad und Notiz werden an der Dateiendung getrennt — dieselbe Regel wie bei
+    den Suchtreffern, damit beides Leerzeichen enthalten darf.
+    """
+    aus: list[dict[str, Any]] = []
+    for zeile in zeilen:
+        if not zeile.startswith("queue "):
+            continue
+        teile = zeile.split(" ", 2)
+        if len(teile) < 3 or not teile[1].isdigit():
+            continue
+        pfad, notiz = _pfad_und_titel(teile[2])
+        aus.append({"nr": int(teile[1]), "path": pfad, "note": None if notiz == "-" else notiz})
+    return aus
+
+
 def _plan_aus_zeilen(zeilen: list[str]) -> list[dict[str, Any]]:
     """`plan 1 ramp channel1.fader 0.0000 → 1.0000 über 16 Beats, …`"""
     aus: list[dict[str, Any]] = []
@@ -613,7 +673,9 @@ async def _status(form: Format) -> str:
         + [f"master.{f}" for f in master_felder]
     )
     roh = await _werte(gefragt)
-    plan = _plan_aus_zeilen(await eine_antwort("plan"))
+    zeitplan, liste = await sprich("plan", "do master.queue")
+    plan = _plan_aus_zeilen(zeitplan)
+    warteschlange = _liste_aus_zeilen(liste)
 
     daten: dict[str, Any] = {
         "decks": [
@@ -649,6 +711,10 @@ async def _status(form: Format) -> str:
             "record_dropped": _als_zahl(roh.get("master.record_dropped", "-")) or 0.0,
         },
         "plan": plan,
+        "queue": {
+            "count": len(warteschlange),
+            "next": warteschlange[0] if warteschlange else None,
+        },
     }
 
     if form is Format.JSON:
@@ -693,6 +759,14 @@ async def _status(form: Format) -> str:
     if plan:
         zeilen.append("\n## Vorgemerkt")
         zeilen += [f"- **{a['id']}** {a['text']}" for a in plan]
+
+    if warteschlange:
+        naechster = warteschlange[0]
+        zeilen.append(
+            f"\n## Liste ({len(warteschlange)})\n"
+            f"- als Nächstes **{naechster['nr']}** `{naechster['path']}`"
+            + (f" — {naechster['note']}" if naechster["note"] else "")
+        )
 
     return "\n".join(zeilen)
 
@@ -1127,6 +1201,171 @@ async def musik_cancel(params: StreichEingabe) -> str:
     except NichtErreichbar as fehler:
         return f"Fehler: {fehler}"
 
+    if fehler := _fehlerzeile(zeilen):
+        return f"Fehler: {fehler}"
+    return "\n".join(zeilen)
+
+
+# --------------------------------------------------------------------------
+# Was als Nächstes kommt
+# --------------------------------------------------------------------------
+#
+# Nur drei Werkzeuge, obwohl es sieben Aktionen sind: `musik_do` erreicht den
+# Rest ohne eine Zeile hier — `master.queue_drop`, `queue_bump`, `queue_note`,
+# `queue_clear` nehmen genau ein Argument und stehen mit ihrer Erklärung schon
+# in der erzeugten Beschreibung. Ein eigenes Werkzeug bekommt nur, wo sonst die
+# Zusammensetzung oder das Auseinandernehmen beim Agenten läge.
+
+
+@mcp.tool(
+    name="musik_queue",
+    annotations={"title": "Was als Nächstes kommt", **NUR_LESEN},
+)
+async def musik_queue(params: ListeEingabe) -> str:
+    """Zeigt die Liste der vorgemerkten Tracks, in ihrer Reihenfolge.
+
+    **Die Liste ist gemeinsam.** Wer auswählt, schreibt hier hinein; wer
+    auflegt, nimmt hier heraus. Zwei Agenten, die je ihre eigene Liste im Kopf
+    führen, legen irgendwann beide auf dasselbe Deck.
+
+    Jeder Eintrag trägt eine Notiz — warum er dort steht. Das ist der
+    Unterschied zu einer Playlist, und für den Nächsten, der liest, der ganze
+    Punkt.
+
+    Args:
+        params (ListeEingabe): limit (1–200), response_format.
+
+    Returns:
+        str: Markdown-Liste oder JSON:
+        {"count": int, "entries": [{"nr": int, "path": str, "note": str|null}]}
+        `nr` spricht einen Eintrag an — für `musik_do('master.queue_drop', …)`,
+        `queue_bump` und `queue_note`.
+
+    Beispiele:
+        - „Was kommt als Nächstes?"
+        - „Warum steht der da?" → das Feld `note`.
+        - Nicht dafür: den nächsten auflegen → `musik_queue_next`.
+    """
+    try:
+        zeilen = await eine_antwort("do master.queue")
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
+    if fehler := _fehlerzeile(zeilen):
+        return f"Fehler: {fehler}"
+
+    eintraege = _liste_aus_zeilen(zeilen)[: params.limit]
+    if params.response_format is Format.JSON:
+        return json.dumps(
+            {"count": len(eintraege), "entries": eintraege}, indent=2, ensure_ascii=False
+        )
+
+    if not eintraege:
+        return "Die Liste ist leer."
+    aus = [f"# {len(eintraege)} vorgemerkt", ""]
+    for e in eintraege:
+        notiz = f" — {e['note']}" if e["note"] else ""
+        aus.append(f"{e['nr']}. `{e['path']}`{notiz}")
+    return "\n".join(aus)
+
+
+@mcp.tool(
+    name="musik_queue_add",
+    annotations={"title": "Einen Track vormerken", **SCHREIBT},
+)
+async def musik_queue_add(params: VormerkenEingabe) -> str:
+    """Merkt einen Track für später vor, mit dem Grund dazu.
+
+    **Derselbe Pfad wird nicht zweimal angenommen** — die Antwort nennt dann
+    die Nummer, unter der er schon steht. Das ist der häufigste Zusammenstoß,
+    wenn zwei unabhängig voneinander auswählen: Beide suchen, was zu 128 BPM in
+    8A passt, und finden denselben Track.
+
+    Args:
+        params (VormerkenEingabe):
+            - pfad (str): wie ihn `musik_search` liefert
+            - notiz (str): warum
+            - als_naechstes (bool): an den Anfang statt hinten anhängen
+
+    Returns:
+        str: 'queue <nr> angehaengt <pfad>' oder 'Fehler: <Grund>'.
+
+    Beispiele:
+        - „Merk den für nachher vor" → pfad=…, notiz='ruhiger, nach dem Peak'
+        - „Der soll als Nächstes" → als_naechstes=true
+    """
+    try:
+        zeilen = await eine_antwort(f"do master.queue_add {params.pfad}")
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
+    if fehler := _fehlerzeile(zeilen):
+        return f"Fehler: {fehler}"
+
+    nummer = next(
+        (
+            teile[1]
+            for zeile in zeilen
+            if zeile.startswith("queue ") and len((teile := zeile.split(" ", 2))) > 1
+        ),
+        None,
+    )
+    if nummer is None:
+        return "\n".join(zeilen)
+
+    # Notiz und Vorziehen sind eigene Befehle auf der Leitung. Der Agent soll
+    # sie nicht einzeln senden müssen — der Grund gehört zum Vormerken.
+    nachtrag = []
+    if params.notiz:
+        nachtrag.append(f"do master.queue_note {nummer} {params.notiz}")
+    if params.als_naechstes:
+        nachtrag.append(f"do master.queue_bump {nummer}")
+    if nachtrag:
+        for antwort in await sprich(*nachtrag):
+            if fehler := _fehlerzeile(antwort):
+                return f"queue {nummer} angelegt, aber: {fehler}"
+
+    return "\n".join(zeilen)
+
+
+@mcp.tool(
+    name="musik_queue_next",
+    annotations={
+        "title": "Den nächsten auflegen",
+        "readOnlyHint": False,
+        # Tauscht den Track eines Decks und nimmt den Eintrag aus der Liste.
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def musik_queue_next(params: AuflegenEingabe) -> str:
+    """Nimmt den vordersten Eintrag aus der Liste und legt ihn auf.
+
+    Ohne Deckangabe auf eines, das gerade nicht läuft. **Laufen alle, kommt ein
+    Fehler statt einer Vermutung** — ein Track über einen laufenden gelegt reißt
+    den Mix ab, und das ist keine Entscheidung, die eine Vorgabe treffen darf.
+
+    Scheitert das Laden, bleibt der Eintrag in der Liste stehen.
+
+    Args:
+        params (AuflegenEingabe): deck ('deck1'|'deck2'|None).
+
+    Returns:
+        str: Die Antwortzeilen — Annahme des Ladeauftrags (nicht Erledigung;
+        der Fortschritt steht in 'deckN.load_status'), welcher Eintrag
+        abgenommen wurde, und seine Notiz. Sonst 'Fehler: <Grund>'.
+
+    Beispiele:
+        - „Leg den nächsten auf"
+        - „Leg den nächsten auf Deck 2" → deck='deck2'
+    """
+    befehl = "do master.queue_next"
+    if params.deck:
+        befehl += f" {params.deck.value}"
+
+    try:
+        zeilen = await eine_antwort(befehl)
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
     if fehler := _fehlerzeile(zeilen):
         return f"Fehler: {fehler}"
     return "\n".join(zeilen)

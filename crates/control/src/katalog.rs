@@ -448,6 +448,37 @@ pub static MASTER: &[Beschreibung] = &[
         "<tonart>",
         "Tracks suchen, deren Tonart harmonisch passt; nimmt Am, F# oder 8A",
     ),
+    aktion(
+        "queue",
+        "",
+        "Was als Nächstes kommt — eine Zeile je Eintrag, mit Nummer und Notiz",
+    ),
+    aktion(
+        "queue_add",
+        "<pfad>",
+        "Einen Track hinten anhängen; derselbe Pfad wird nicht zweimal angenommen",
+    ),
+    aktion(
+        "queue_note",
+        "<nr> <text>",
+        "Notieren, warum ein Eintrag dort steht — auch, um es zu widerrufen",
+    ),
+    aktion(
+        "queue_bump",
+        "<nr>",
+        "Einen Eintrag nach vorn ziehen, also zum Nächsten machen",
+    ),
+    aktion("queue_drop", "<nr>", "Einen Eintrag herausnehmen"),
+    aktion(
+        "queue_clear",
+        "",
+        "Die ganze Liste leeren — auch, was andere vorgemerkt haben",
+    ),
+    aktion(
+        "queue_next",
+        "[deck]",
+        "Den vordersten Eintrag laden; ohne Angabe auf ein Deck, das nicht läuft",
+    ),
     zahl(
         "crossfader",
         "XFADER",

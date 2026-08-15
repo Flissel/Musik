@@ -5,6 +5,10 @@ Spricht den Server im selben Prozess über einen echten MCP-Client an — also
 über `tools/list` und `tools/call`, nicht an der Schnittstelle vorbei. Damit
 wird geprüft, was ein Agent wirklich sieht.
 
+Der Test **verändert die laufende Anlage**: Er bewegt Fader, merkt Tracks vor
+und legt auf, wenn kein Deck läuft. Nicht auf einer Anlage laufen lassen, an der
+gerade jemand arbeitet.
+
 Braucht eine laufende `musik-app`. Ohne sie meldet sich der Test ab, statt
 Grün zu behaupten, wo nichts geprüft wurde:
 
@@ -35,6 +39,9 @@ ERWARTETE_WERKZEUGE = {
     "musik_ramp",
     "musik_schedule",
     "musik_cancel",
+    "musik_queue",
+    "musik_queue_add",
+    "musik_queue_next",
 }
 
 
@@ -95,6 +102,10 @@ async def hauptteil() -> int:
         pruefe(
             isinstance(daten.get("plan"), list),
             "musik_status zeigt den gemeinsamen Plan",
+        )
+        pruefe(
+            isinstance(daten.get("queue", {}).get("count"), int),
+            "musik_status sagt, wie viel vorgemerkt ist",
         )
 
         liste = text_von(
@@ -339,6 +350,101 @@ async def hauptteil() -> int:
                 await client.call_tool(
                     "musik_set",
                     {"params": {"control": "channel1.eq_low", "wert": eq_vorher}},
+                )
+
+        # ------------------------------------------------------------------
+        # Was als Nächstes kommt
+        # ------------------------------------------------------------------
+
+        async def liste_jetzt() -> list[dict]:
+            roh = text_von(
+                await client.call_tool(
+                    "musik_queue", {"params": {"response_format": "json"}}
+                )
+            )
+            return json.loads(roh)["entries"]
+
+        vorher_liste = await liste_jetzt()
+        pfade = [t["path"] for t in treffer["tracks"][:2]]
+
+        angehaengt = text_von(
+            await client.call_tool(
+                "musik_queue_add",
+                {"params": {"pfad": pfade[0], "notiz": "warm anfangen"}},
+            )
+        ).strip()
+        pruefe(
+            angehaengt.startswith("queue "),
+            f"musik_queue_add merkt einen Track vor ({angehaengt})",
+        )
+
+        # Zwei, die unabhängig auswählen, finden denselben Track. Ihn zweimal
+        # aufzunehmen hieße, ihn zweimal zu spielen.
+        doppelt = text_von(
+            await client.call_tool(
+                "musik_queue_add", {"params": {"pfad": pfade[0], "notiz": "auch gut"}}
+            )
+        ).strip()
+        pruefe(
+            doppelt.startswith("Fehler:") and "Nummer" in doppelt,
+            f"derselbe Pfad wird nicht zweimal angenommen ({doppelt})",
+        )
+
+        eintraege = await liste_jetzt()
+        meiner = next((e for e in eintraege if e["path"] == pfade[0]), None)
+        pruefe(meiner is not None, "der Eintrag steht in der Liste")
+        pruefe(
+            meiner is not None and meiner["note"] == "warm anfangen",
+            f"die Notiz kommt mit ({meiner and meiner['note']})",
+        )
+
+        if len(pfade) > 1:
+            await client.call_tool(
+                "musik_queue_add",
+                {
+                    "params": {
+                        "pfad": pfade[1],
+                        "notiz": "doch der zuerst",
+                        "als_naechstes": True,
+                    }
+                },
+            )
+            zuerst = (await liste_jetzt())[0]
+            pruefe(
+                zuerst["path"] == pfade[1],
+                f"als_naechstes zieht nach vorn ({zuerst['path']})",
+            )
+        else:
+            ausgelassen("als_naechstes", "die Sammlung hat nur einen Track")
+
+        # Auflegen verändert ein Deck. Nur, wenn dort ohnehin nichts läuft.
+        if any(d["playing"] for d in daten["decks"]):
+            ausgelassen("musik_queue_next", "es läuft gerade etwas")
+        else:
+            vorn = (await liste_jetzt())[0]
+            aufgelegt = text_von(
+                await client.call_tool("musik_queue_next", {"params": {}})
+            )
+            pruefe(
+                f"queue {vorn['nr']} abgenommen" in aufgelegt,
+                f"musik_queue_next nimmt den vordersten ({aufgelegt.splitlines()})",
+            )
+            pruefe(
+                vorn["note"] is None or f"notiz {vorn['note']}" in aufgelegt,
+                "die Notiz kommt beim Auflegen mit",
+            )
+            pruefe(
+                not any(e["nr"] == vorn["nr"] for e in await liste_jetzt()),
+                "und ist danach aus der Liste heraus",
+            )
+
+        # Aufräumen: nur die eigenen Einträge, nie die der anderen.
+        alte = {e["nr"] for e in vorher_liste}
+        for e in await liste_jetzt():
+            if e["nr"] not in alte:
+                await client.call_tool(
+                    "musik_do",
+                    {"params": {"aktion": "master.queue_drop", "argument": str(e["nr"])}},
                 )
 
     print()

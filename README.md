@@ -280,6 +280,17 @@ gibt auf, sobald jemand anders denselben Regler anfasst** — der Griff daneben
 ist stärker als die Automatik, ob er von einem Menschen kommt oder von einem
 zweiten Agenten.
 
+Was als Nächstes kommt, steht ebenfalls in der Anlage und nicht in einem Kopf:
+
+```sh
+do master.queue_add /musik/track.mp3
+do master.queue_note 1 mehr Druck nach dem Break
+do master.queue_next                  # auf ein Deck, das gerade nicht läuft
+```
+
+**Jeder Eintrag trägt eine Notiz** — warum er dort steht. Das ist der
+Unterschied zu einer Playlist, und für den Nächsten, der liest, der ganze Punkt.
+
 Das ist die Grundlage für die Agenten-Schicht und für den Anschluss an
 VibeMind — für die liegt in [`mcp/`](mcp/README.md) eine MCP-Brücke bereit,
 deren Werkzeugbeschreibungen aus demselben Katalog erzeugt werden. Details in

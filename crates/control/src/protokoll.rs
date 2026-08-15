@@ -807,3 +807,145 @@ mod plan_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod warteschlangen_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+
+    fn mit_liste() -> (Steuerpult, audio_engine::EngineRunner, Sitzung) {
+        let (mut pult, runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "do master.queue_add /musik/eins.wav");
+        behandle(&mut pult, &mut s, "do master.queue_add /musik/zwei.wav");
+        (pult, runner, s)
+    }
+
+    #[test]
+    fn die_liste_wird_der_reihe_nach_abgearbeitet() {
+        let (mut pult, _runner, mut s) = mit_liste();
+
+        let liste = behandle(&mut pult, &mut s, "do master.queue");
+        assert!(liste.contains("queue 1 /musik/eins.wav -"), "{liste}");
+        assert!(liste.contains("queue 2 /musik/zwei.wav -"), "{liste}");
+
+        let auf = behandle(&mut pult, &mut s, "do master.queue_next");
+        assert!(auf.contains("queue 1 abgenommen /musik/eins.wav"), "{auf}");
+
+        let rest = behandle(&mut pult, &mut s, "do master.queue");
+        assert!(!rest.contains("eins.wav"), "{rest}");
+        assert!(rest.contains("queue 2 /musik/zwei.wav"), "{rest}");
+    }
+
+    /// Der häufigste Zusammenstoß zweier Auswählender: Beide suchen, was zu
+    /// 128 BPM in 8A passt, und finden denselben Track.
+    #[test]
+    fn derselbe_track_kommt_nicht_zweimal_in_die_liste() {
+        let (mut pult, _runner, mut s) = mit_liste();
+
+        let nochmal = behandle(&mut pult, &mut s, "do master.queue_add /musik/eins.wav");
+        assert!(nochmal.starts_with("err"), "{nochmal}");
+        assert!(
+            nochmal.contains("Nummer 1"),
+            "sagt nicht, wo er steht: {nochmal}"
+        );
+    }
+
+    #[test]
+    fn aufgelegt_wird_auf_ein_deck_das_nicht_laeuft() {
+        let (mut pult, _runner, mut s) = mit_liste();
+        behandle(&mut pult, &mut s, "set deck1.play 1");
+
+        behandle(&mut pult, &mut s, "do master.queue_next");
+        assert_eq!(
+            behandle(&mut pult, &mut s, "get deck2.load_status"),
+            "value deck2.load_status laedt",
+            "der laufende Track wurde überschrieben"
+        );
+    }
+
+    /// Laufen alle Decks, wird gefragt statt geraten — ein Track über einen
+    /// laufenden zu legen, reißt den Mix ab.
+    #[test]
+    fn laufen_alle_decks_wird_gefragt_statt_geraten() {
+        let (mut pult, _runner, mut s) = mit_liste();
+        behandle(&mut pult, &mut s, "set deck1.play 1");
+        behandle(&mut pult, &mut s, "set deck2.play 1");
+
+        let antwort = behandle(&mut pult, &mut s, "do master.queue_next");
+        assert!(antwort.starts_with("err"), "{antwort}");
+        // Und der Eintrag steht noch da.
+        assert!(behandle(&mut pult, &mut s, "do master.queue").contains("eins.wav"));
+
+        // Mit ausdrücklicher Deckangabe geht es trotzdem.
+        let mit_deck = behandle(&mut pult, &mut s, "do master.queue_next deck1");
+        assert!(mit_deck.contains("abgenommen"), "{mit_deck}");
+    }
+
+    #[test]
+    fn ein_gescheitertes_auflegen_verliert_den_eintrag_nicht() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        // Die Testsammlung weist alles ab, was nicht nach Audio aussieht.
+        behandle(&mut pult, &mut s, "do master.queue_add /musik/kein.txt");
+
+        let antwort = behandle(&mut pult, &mut s, "do master.queue_next");
+        assert!(antwort.starts_with("err"), "{antwort}");
+        assert!(
+            behandle(&mut pult, &mut s, "do master.queue").contains("queue 1 /musik/kein.txt"),
+            "der Eintrag ist verschwunden, ohne gespielt worden zu sein"
+        );
+    }
+
+    #[test]
+    fn eine_notiz_kommt_beim_auflegen_mit() {
+        let (mut pult, _runner, mut s) = mit_liste();
+        behandle(
+            &mut pult,
+            &mut s,
+            "do master.queue_note 2 mehr Druck nach dem Break",
+        );
+
+        let liste = behandle(&mut pult, &mut s, "do master.queue");
+        assert!(
+            liste.contains("zwei.wav mehr Druck nach dem Break"),
+            "{liste}"
+        );
+
+        behandle(&mut pult, &mut s, "do master.queue_bump 2");
+        let auf = behandle(&mut pult, &mut s, "do master.queue_next");
+        assert!(auf.contains("notiz mehr Druck nach dem Break"), "{auf}");
+    }
+
+    #[test]
+    fn vorziehen_streichen_und_leeren() {
+        let (mut pult, _runner, mut s) = mit_liste();
+
+        assert!(behandle(&mut pult, &mut s, "do master.queue_bump 2").contains("Naechste"));
+        assert!(behandle(&mut pult, &mut s, "do master.queue_drop 2").contains("gestrichen"));
+        assert!(behandle(&mut pult, &mut s, "do master.queue").contains("eins.wav"));
+        assert!(behandle(&mut pult, &mut s, "do master.queue_clear").contains("1 gestrichen"));
+        assert!(behandle(&mut pult, &mut s, "do master.queue").contains("hinweis"));
+    }
+
+    #[test]
+    fn unsinnige_listenbefehle_werden_benannt_abgewiesen() {
+        let (mut pult, _runner, mut s) = mit_liste();
+
+        for zeile in [
+            "do master.queue_add",
+            "do master.queue_drop",
+            "do master.queue_drop zwei",
+            "do master.queue_drop 99",
+            "do master.queue_bump 99",
+            "do master.queue_note",
+            "do master.queue_note 2",
+            "do master.queue_note 99 gibt es nicht",
+            "do master.queue_next deck9",
+            "do master.queue_next channel1",
+        ] {
+            let antwort = behandle(&mut pult, &mut s, zeile);
+            assert!(antwort.starts_with("err"), "'{zeile}' → {antwort}");
+        }
+    }
+}

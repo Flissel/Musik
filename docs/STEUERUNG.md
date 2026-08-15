@@ -276,10 +276,11 @@ abonniert, sollte deshalb getrennt lesen und schreiben.
 ## Anschluss für Agenten: MCP
 
 Für Agenten liegt eine Brücke bei — [`mcp/`](../mcp/README.md), ein
-MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Neun Werkzeuge statt
+MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Zwölf Werkzeuge statt
 zweihundert: `musik_set` und `musik_do` erreichen alles, `musik_status` und
 `musik_search` sparen die häufigsten Wege, `musik_ramp`, `musik_schedule` und
-`musik_cancel` reichen den Zeitplan des nächsten Abschnitts durch.
+`musik_cancel` reichen den Zeitplan durch, `musik_queue`, `musik_queue_add` und
+`musik_queue_next` die Liste.
 
 Der Gewinn aus dem selbstbeschreibenden Katalog wird dort eingelöst: Die
 Beschreibungen von `musik_set` und `musik_do` **erzeugt der Server beim Start
@@ -368,6 +369,45 @@ eine Momentaufnahme nimmt, bevor er zugreift, soll die Absichten der anderen
 sehen, ohne sie extra abfragen zu müssen. Und `musik_cancel` verlangt für
 „alles" einen eigenen Schalter — eine vergessene Nummer soll nicht die Arbeit
 der anderen leeren.
+
+## Was als Nächstes kommt
+
+Der Zeitplan sagt, **wann** etwas geschieht. Die Liste sagt, **was** als
+Nächstes kommt — die zweite Hälfte der Koordination, sobald mehr als einer
+auswählt.
+
+```text
+do master.queue_add /musik/track.mp3   → queue 1 angehaengt /musik/track.mp3
+do master.queue_note 1 mehr Druck nach dem Break
+do master.queue                        → queue 1 /musik/track.mp3 mehr Druck nach dem Break
+do master.queue_bump 1                 → der als Nächstes
+do master.queue_next                   → load deck2 angenommen
+                                         queue 1 abgenommen /musik/track.mp3
+                                         notiz mehr Druck nach dem Break
+```
+
+Sie liegt im Pult, hinter demselben Mutex wie alles andere. Wer abnimmt, nimmt
+den Eintrag heraus — ein zweiter, der im selben Moment abnimmt, bekommt den
+nächsten und nicht denselben. Zwei Agenten, die ihre Liste je für sich halten,
+legen irgendwann beide auf dasselbe Deck.
+
+**Jeder Eintrag trägt eine Notiz**, und das ist der Unterschied zu einer
+Playlist. Wer vormerkt, weiß warum; ohne die Notiz muss der Nächste den Grund
+aus BPM und Tonart erraten, und bei einem Team von Agenten heißt erraten:
+erfinden.
+
+Drei Entscheidungen, die aus dem Mehrbedienerfall kommen:
+
+- **Derselbe Pfad wird nicht zweimal angenommen** — die Antwort nennt die
+  Nummer, unter der er schon steht. Zwei, die unabhängig nach 128 BPM in 8A
+  suchen, finden denselben Track.
+- **Nummern bleiben stehen**, auch wenn davor etwas herausgenommen wird. Sonst
+  spräche ein Agent, der sich Nummer 3 gemerkt hat, plötzlich über einen
+  anderen Track.
+- **`queue_next` legt ohne Deckangabe nur auf ein Deck, das nicht läuft.**
+  Laufen alle, wird gefragt statt geraten; mit `queue_next deck1` geht es
+  trotzdem, wenn es wirklich so gemeint ist. Und scheitert das Laden, kommt der
+  Eintrag zurück nach vorn, statt still zu verschwinden.
 
 ## Was am Deck eingestellt wird, bleibt
 
