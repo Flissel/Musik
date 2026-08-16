@@ -53,11 +53,12 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
 | `musik_schedule` | Eine Aktion oder einen Wert auf einen späteren Beat legen |
 | `musik_cancel` | Vorgemerktes zurücknehmen |
 | `musik_when` | Einen Befehl an eine Schwelle hängen — „wenn noch 32 Beats" |
+| `musik_signal` | Etwas aus dem Raum melden — Energie, Andrang, Stimmung |
 | `musik_queue` | Was als Nächstes kommt — mit Notiz, warum |
 | `musik_queue_add` | Einen Track vormerken |
 | `musik_queue_next` | Den vordersten auflegen |
 
-Dreizehn statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
+Vierzehn statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
 Übersetzung und die schlechtere: Der Steuerraum hat über zweihundert Einträge,
 und ein Agent, der sie alle als Werkzeuge sieht, findet keins davon.
 `musik_set` und `musik_do` erreichen alles, `musik_status` und `musik_search`
@@ -114,6 +115,35 @@ Trifft die Bedingung schon zu, läuft der Befehl sofort: `when` heißt „sobald
 so weit ist", nicht „beim nächsten Überschreiten". Und ein Control, das keine
 Zahl ist, wird abgewiesen — ein Auftrag auf `deck1.play < 1` würde stumm für
 immer warten.
+
+## Was von außen hereinkommt
+
+Ein DJ liest die Fläche; ein Agent kann das nicht sehen. `musik_signal` gibt es
+hinein:
+
+```text
+musik_signal(name='Energie auf der Flaeche', wert=0.2)
+… später …
+musik_signal(name='Energie auf der Flaeche', wert=0.7)
+
+musik_status → ## Aus dem Raum
+               - **Energie auf der Flaeche** +0.70, +1.28/min
+```
+
+**Melde regelmäßig, nicht nur bei Änderungen.** Aus einem Wert entsteht kein
+Trend, und der Trend ist das, wonach sich handeln lässt: „0,7" beantwortet keine
+Frage, „0,7 und seit zwei Minuten fallend" beantwortet sie.
+
+Vier Plätze; derselbe Name landet immer auf demselben. Sind alle vier mit
+anderen Namen belegt, kommt ein Fehler statt einer stillen Überschreibung — ein
+überschriebenes Signal wäre ein Verlauf, den jemand anders gerade auswertet.
+
+Ab dann ist es ein Control wie jedes andere:
+
+```text
+musik_when(control='master.signal1_trend', richtung='unter', schwelle=-0.3,
+           aktion='master.queue_next')
+```
 
 ## Der Plan ist das gemeinsame Blatt
 

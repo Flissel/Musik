@@ -41,6 +41,10 @@ mcp = FastMCP("musik_mcp")
 #: nur `search` fasst eine SQLite-Abfrage an, und auch die ist schnell.
 ZEITLIMIT = 5.0
 
+#: Wie viele Signalplätze es gibt. Muss zu `crate::signal::SIGNALE` passen —
+#: mehr wäre eine Behauptung über Plätze, die es nicht gibt.
+SIGNALE = 4
+
 #: Zeilen, die eine Antwort abschließen. `get` antwortet mit genau einer
 #: `value`-Zeile, alles andere endet auf `ok` oder `err`.
 ABSCHLUSS = ("ok", "err", "value")
@@ -535,6 +539,29 @@ class BedingungEingabe(Basis):
         return f"set {self.control_setzen} {self.wert}"
 
 
+class SignalEingabe(Basis):
+    name: str = Field(
+        ...,
+        description=(
+            "Wofür das Signal steht, etwa 'Energie auf der Flaeche'. Derselbe "
+            "Name landet immer auf demselben Platz."
+        ),
+        min_length=1,
+        max_length=64,
+    )
+    wert: float = Field(
+        ...,
+        description="Der Messwert, -1 bis 1. 0 ist neutral, nicht 'nichts'.",
+        ge=-1,
+        le=1,
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _einzeilig(cls, v: str) -> str:
+        return _pruefe_einzeilig(v, "name")
+
+
 class ListeEingabe(Basis):
     limit: int = Field(default=50, description="Höchstzahl der Einträge", ge=1, le=200)
     response_format: Format = Field(default=Format.MARKDOWN, description="Ausgabeform")
@@ -620,7 +647,9 @@ async def musik_status(params: StatusEingabe) -> str:
                         "fx": str}],
           "master": {"crossfader": float, "gain": float, "recording": bool,
                      "record_seconds": float, "record_dropped": float},
-          "plan": [{"id": int, "art": "ramp"|"in", "text": str}]
+          "signals": [{"slot": int, "name": str, "value": float|null,
+                       "trend_per_minute": float|null, "age_seconds": float|null}],
+          "plan": [{"id": int, "art": "ramp"|"in"|"wenn", "text": str}]
         }
 
     Beispiele:
@@ -725,6 +754,11 @@ async def _status(form: Format) -> str:
         "load_status",
     ]
     kanal_felder = ["fader", "cue", "fx"]
+    signal_felder = [
+        f"master.signal{i}{f}"
+        for i in range(1, SIGNALE + 1)
+        for f in ("_name", "", "_trend", "_age")
+    ]
     master_felder = [
         "crossfader",
         "gain",
@@ -737,6 +771,7 @@ async def _status(form: Format) -> str:
         [f"{d}.{f}" for d in decks for f in deck_felder]
         + [f"{k}.{f}" for k in kanaele for f in kanal_felder]
         + [f"master.{f}" for f in master_felder]
+        + signal_felder
     )
     roh = await _werte(gefragt)
     zeitplan, liste = await sprich("plan", "do master.queue")
@@ -780,6 +815,19 @@ async def _status(form: Format) -> str:
             "record_seconds": _als_zahl(roh.get("master.record_seconds", "-")) or 0.0,
             "record_dropped": _als_zahl(roh.get("master.record_dropped", "-")) or 0.0,
         },
+        # Nur die benutzten Plätze: Vier leere Zeilen zu melden hieße, dem
+        # Leser vier Dinge zu zeigen, über die niemand etwas gesagt hat.
+        "signals": [
+            {
+                "slot": i,
+                "name": roh.get(f"master.signal{i}_name", ""),
+                "value": _als_zahl(roh.get(f"master.signal{i}", "-")),
+                "trend_per_minute": _als_zahl(roh.get(f"master.signal{i}_trend", "-")),
+                "age_seconds": _als_zahl(roh.get(f"master.signal{i}_age", "-")),
+            }
+            for i in range(1, SIGNALE + 1)
+            if _als_text(roh.get(f"master.signal{i}_name", "-"))
+        ],
         "plan": plan,
         "queue": {
             "count": len(warteschlange),
@@ -830,6 +878,24 @@ async def _status(form: Format) -> str:
             else ""
         )
         zeilen.append(f"- Mitschnitt läuft: {m['record_seconds']:.1f} s{warnung}")
+
+    if daten["signals"]:
+        zeilen.append("\n## Aus dem Raum")
+        for s in daten["signals"]:
+            wert = "—" if s["value"] is None else f"{s['value']:+.2f}"
+            trend = (
+                ""
+                if s["trend_per_minute"] is None
+                else f", {s['trend_per_minute']:+.2f}/min"
+            )
+            # Das Alter gehört dazu: Ein Wert von vor zwanzig Minuten ist keine
+            # Lüge, aber auch keine Auskunft über jetzt.
+            alt = (
+                f" (vor {s['age_seconds']:.0f} s)"
+                if s["age_seconds"] is not None and s["age_seconds"] > 120
+                else ""
+            )
+            zeilen.append(f"- **{s['name']}** {wert}{trend}{alt}")
 
     if plan:
         zeilen.append("\n## Vorgemerkt")
@@ -1279,6 +1345,90 @@ async def musik_cancel(params: StreichEingabe) -> str:
     if fehler := _fehlerzeile(zeilen):
         return f"Fehler: {fehler}"
     return "\n".join(zeilen)
+
+
+@mcp.tool(
+    name="musik_signal",
+    annotations={
+        "title": "Etwas von außen melden",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        # Zwei Meldungen desselben Namens sind zwei Messpunkte, keine
+        # Wiederholung — daraus entsteht ja gerade der Trend.
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def musik_signal(params: SignalEingabe) -> str:
+    """Meldet einen Wert aus dem Raum — Energie, Andrang, Stimmung.
+
+    Ein DJ liest die Fläche. Ein Agent kann das nicht sehen, also muss es
+    jemand hereingeben: ein Mikrofonpegel, eine Umfrage, ein Mensch im Chat.
+    Ab dann ist es ein Control wie jedes andere und lässt sich mit `musik_when`
+    zur Bedingung machen.
+
+    **Ein einzelner Wert nützt wenig.** „Energie 0,7" beantwortet keine Frage;
+    „0,7 und seit zwei Minuten fallend" beantwortet sie. Deshalb wird jede
+    Meldung als Messpunkt aufbewahrt und der Trend daraus gerechnet — melde
+    also **regelmäßig**, nicht nur bei Änderungen.
+
+    Es gibt vier Plätze. Derselbe Name landet immer auf demselben; sind alle
+    vier mit anderen Namen belegt, kommt ein Fehler statt einer Überschreibung.
+
+    Args:
+        params (SignalEingabe): name (str), wert (float, -1 bis 1).
+
+    Returns:
+        str: 'ok master.signalN <wert>' oder 'Fehler: <Grund>'.
+
+    Beispiele:
+        - „Die Fläche füllt sich" → name='Andrang', wert=0.6
+        - „Die Energie kippt" → name='Energie', wert=-0.3
+        - Auswerten: `musik_status` zeigt Wert, Trend und Alter je Signal;
+          `musik_when('master.signal1', 'unter', -0.2, …)` reagiert darauf.
+    """
+    namen = [f"master.signal{i}_name" for i in range(1, SIGNALE + 1)]
+    try:
+        belegt = await _werte(namen)
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
+
+    platz = next(
+        (i for i in range(1, SIGNALE + 1) if belegt.get(namen[i - 1]) == params.name),
+        None,
+    )
+    if platz is None:
+        platz = next(
+            (
+                i
+                for i in range(1, SIGNALE + 1)
+                if _als_text(belegt.get(namen[i - 1], "-")) is None
+            ),
+            None,
+        )
+        if platz is None:
+            vergeben = ", ".join(
+                f"{i}: {belegt.get(namen[i - 1])}" for i in range(1, SIGNALE + 1)
+            )
+            return (
+                f"Fehler: alle {SIGNALE} Plätze sind belegt ({vergeben}). "
+                "Einen freimachen mit musik_set auf signalN_name = '-'."
+            )
+        # Erst der Name, dann der Wert: Ein Wert auf einem namenlosen Platz
+        # sagt niemandem, wovon er handelt.
+        antworten = await sprich(
+            f"set master.signal{platz}_name {params.name}",
+            f"set master.signal{platz} {_zahl_als_text(params.wert)}",
+        )
+    else:
+        antworten = await sprich(
+            f"set master.signal{platz} {_zahl_als_text(params.wert)}"
+        )
+
+    for antwort in antworten:
+        if fehler := _fehlerzeile(antwort):
+            return f"Fehler: {fehler}"
+    return "\n".join(antworten[-1])
 
 
 @mcp.tool(

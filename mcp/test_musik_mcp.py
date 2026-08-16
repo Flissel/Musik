@@ -43,6 +43,7 @@ ERWARTETE_WERKZEUGE = {
     "musik_queue_add",
     "musik_queue_next",
     "musik_when",
+    "musik_signal",
 }
 
 
@@ -358,6 +359,86 @@ async def hauptteil() -> int:
                     "musik_set",
                     {"params": {"control": "channel1.eq_low", "wert": eq_vorher}},
                 )
+
+        # ------------------------------------------------------------------
+        # Was von außen hereinkommt
+        # ------------------------------------------------------------------
+
+        async def signale_jetzt() -> list[dict]:
+            roh = text_von(
+                await client.call_tool(
+                    "musik_status", {"params": {"response_format": "json"}}
+                )
+            )
+            return json.loads(roh)["signals"]
+
+        vorher_signale = {s["name"] for s in await signale_jetzt()}
+        marke = "Probe-Energie"
+
+        gemeldet = text_von(
+            await client.call_tool(
+                "musik_signal", {"params": {"name": marke, "wert": 0.4}}
+            )
+        ).strip()
+        pruefe(
+            gemeldet.startswith("ok master.signal"),
+            f"musik_signal nimmt eine Meldung an ({gemeldet})",
+        )
+
+        meins = next((s for s in await signale_jetzt() if s["name"] == marke), None)
+        pruefe(meins is not None, "das Signal steht in musik_status")
+        pruefe(
+            meins is not None and abs(meins["value"] - 0.4) < 0.001,
+            f"mit seinem Wert ({meins and meins['value']})",
+        )
+        # Eine Probe ergibt noch keine Richtung — das muss leer bleiben statt
+        # eine Null zu behaupten.
+        pruefe(
+            meins is not None and meins["trend_per_minute"] is None,
+            f"aus einer Probe wird kein Trend ({meins and meins['trend_per_minute']})",
+        )
+
+        # Derselbe Name landet auf demselben Platz, sonst wären vier Meldungen
+        # vier Signale statt eines mit Verlauf.
+        await client.call_tool(
+            "musik_signal", {"params": {"name": marke, "wert": 0.7}}
+        )
+        nachher = [s for s in await signale_jetzt() if s["name"] == marke]
+        pruefe(len(nachher) == 1, f"derselbe Name bleibt ein Platz ({len(nachher)})")
+        pruefe(
+            nachher and nachher[0]["trend_per_minute"] is not None,
+            "aus zwei Proben wird eine Richtung",
+        )
+
+        # Ein Signal ist ein Control wie jedes andere — also auch als Bedingung
+        # brauchbar, ohne Sonderweg.
+        platz = nachher[0]["slot"]
+        bedingung = text_von(
+            await client.call_tool(
+                "musik_when",
+                {
+                    "params": {
+                        "control": f"master.signal{platz}",
+                        "richtung": "unter",
+                        "schwelle": -0.9,
+                        "aktion": "deck2.sync",
+                    }
+                },
+            )
+        ).strip()
+        pruefe(
+            bedingung.startswith("ok plan "),
+            f"ein Signal taugt als Bedingung ({bedingung})",
+        )
+        nummer = int(bedingung.split(" ", 3)[2])
+        await client.call_tool("musik_cancel", {"params": {"plan_id": nummer}})
+
+        # Aufräumen: nur den eigenen Platz, nie fremde.
+        if marke not in vorher_signale:
+            await client.call_tool(
+                "musik_set",
+                {"params": {"control": f"master.signal{platz}_name", "wert": "-"}},
+            )
 
         # ------------------------------------------------------------------
         # Auf einen Zustand warten

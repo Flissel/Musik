@@ -122,6 +122,21 @@ const fn aktion(element: &'static str, argument: &'static str, text: &'static st
     }
 }
 
+/// Ein Textfeld, das sich auch beschreiben lässt.
+const fn text_schreibbar(element: &'static str, text: &'static str) -> Beschreibung {
+    Beschreibung {
+        element,
+        art: Art::Text,
+        bereich: None,
+        einheit: Einheit::Keine,
+        auswahl: &[],
+        kurz: "",
+        schreibbar: true,
+        argument: "",
+        text,
+    }
+}
+
 const fn text_feld(element: &'static str, text: &'static str) -> Beschreibung {
     Beschreibung {
         element,
@@ -487,6 +502,134 @@ pub static MASTER: &[Beschreibung] = &[
         "search_harmonic",
         "<tonart>",
         "Tracks suchen, deren Tonart harmonisch passt; nimmt Am, F# oder 8A",
+    ),
+    // Was von außen hereinkommt: die Reaktion des Raums. Feste Plätze mit
+    // beschriftbarem Namen — wie ein Kanalzug, den man mit Klebeband
+    // beschriftet. Dynamische Namen bräuchten geleakte Zeichenketten, und
+    // dieselbe Entscheidung ist schon bei den Hot Cues gefallen.
+    zahl(
+        "signal1",
+        "SIG1",
+        -1.0,
+        1.0,
+        Einheit::Keine,
+        true,
+        "Signal 1 von außen; -1 bis 1, wofür es steht sagt signal1_name",
+    ),
+    text_schreibbar(
+        "signal1_name",
+        "Wofür Signal 1 steht, etwa 'Energie auf der Flaeche'; leer heisst ungenutzt",
+    ),
+    zahl(
+        "signal1_trend",
+        "TRD1",
+        -100.0,
+        100.0,
+        Einheit::Keine,
+        false,
+        "Änderung von Signal 1 je Minute; positiv steigt, leer heisst zu wenige Proben",
+    ),
+    zahl(
+        "signal1_age",
+        "ALT1",
+        0.0,
+        f64::MAX,
+        Einheit::Sekunden,
+        false,
+        "Sekunden seit der letzten Meldung an Signal 1; alte Werte lügen nicht, sie sind nur alt",
+    ),
+    zahl(
+        "signal2",
+        "SIG2",
+        -1.0,
+        1.0,
+        Einheit::Keine,
+        true,
+        "Signal 2 von außen; -1 bis 1, wofür es steht sagt signal2_name",
+    ),
+    text_schreibbar(
+        "signal2_name",
+        "Wofür Signal 2 steht, etwa 'Energie auf der Flaeche'; leer heisst ungenutzt",
+    ),
+    zahl(
+        "signal2_trend",
+        "TRD2",
+        -100.0,
+        100.0,
+        Einheit::Keine,
+        false,
+        "Änderung von Signal 2 je Minute; positiv steigt, leer heisst zu wenige Proben",
+    ),
+    zahl(
+        "signal2_age",
+        "ALT2",
+        0.0,
+        f64::MAX,
+        Einheit::Sekunden,
+        false,
+        "Sekunden seit der letzten Meldung an Signal 2; alte Werte lügen nicht, sie sind nur alt",
+    ),
+    zahl(
+        "signal3",
+        "SIG3",
+        -1.0,
+        1.0,
+        Einheit::Keine,
+        true,
+        "Signal 3 von außen; -1 bis 1, wofür es steht sagt signal3_name",
+    ),
+    text_schreibbar(
+        "signal3_name",
+        "Wofür Signal 3 steht, etwa 'Energie auf der Flaeche'; leer heisst ungenutzt",
+    ),
+    zahl(
+        "signal3_trend",
+        "TRD3",
+        -100.0,
+        100.0,
+        Einheit::Keine,
+        false,
+        "Änderung von Signal 3 je Minute; positiv steigt, leer heisst zu wenige Proben",
+    ),
+    zahl(
+        "signal3_age",
+        "ALT3",
+        0.0,
+        f64::MAX,
+        Einheit::Sekunden,
+        false,
+        "Sekunden seit der letzten Meldung an Signal 3; alte Werte lügen nicht, sie sind nur alt",
+    ),
+    zahl(
+        "signal4",
+        "SIG4",
+        -1.0,
+        1.0,
+        Einheit::Keine,
+        true,
+        "Signal 4 von außen; -1 bis 1, wofür es steht sagt signal4_name",
+    ),
+    text_schreibbar(
+        "signal4_name",
+        "Wofür Signal 4 steht, etwa 'Energie auf der Flaeche'; leer heisst ungenutzt",
+    ),
+    zahl(
+        "signal4_trend",
+        "TRD4",
+        -100.0,
+        100.0,
+        Einheit::Keine,
+        false,
+        "Änderung von Signal 4 je Minute; positiv steigt, leer heisst zu wenige Proben",
+    ),
+    zahl(
+        "signal4_age",
+        "ALT4",
+        0.0,
+        f64::MAX,
+        Einheit::Sekunden,
+        false,
+        "Sekunden seit der letzten Meldung an Signal 4; alte Werte lügen nicht, sie sind nur alt",
     ),
     aktion(
         "queue",

@@ -276,7 +276,7 @@ abonniert, sollte deshalb getrennt lesen und schreiben.
 ## Anschluss für Agenten: MCP
 
 Für Agenten liegt eine Brücke bei — [`mcp/`](../mcp/README.md), ein
-MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Dreizehn Werkzeuge statt
+MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Vierzehn Werkzeuge statt
 zweihundert: `musik_set` und `musik_do` erreichen alles, `musik_status` und
 `musik_search` sparen die häufigsten Wege, `musik_ramp`, `musik_schedule` und
 `musik_cancel` reichen den Zeitplan durch, `musik_queue`, `musik_queue_add` und
@@ -406,6 +406,54 @@ Ohne dieses Verb müsste ein Bediener `beats_left` abonnieren und bekäme zwanzi
 Zahlen je Sekunde, aus denen er die eine Schwelle selbst heraussucht. Über eine
 Chat-Schnittstelle ist das nicht nur unbequem, sondern unbezahlbar.
 
+### Was von außen hereinkommt
+
+Ein DJ liest die Fläche. Ein Agent kann das nicht sehen — also muss es jemand
+hereingeben: ein Mikrofonpegel, eine Umfrage auf dem Handy, ein Mensch, der im
+Chat „wird voller" tippt.
+
+```text
+set master.signal1_name Energie auf der Flaeche
+set master.signal1 0.2
+… zwei Minuten später …
+set master.signal1 0.7
+get master.signal1_trend      → value master.signal1_trend 1.280000
+when master.signal1_trend < -0.3 do master.queue_next
+```
+
+**Ein einzelner Wert nützt fast nichts.** „Energie 0,7" beantwortet keine Frage;
+„0,7 und seit zwei Minuten fallend" beantwortet sie. Deshalb merkt sich ein
+Signal seine jüngste Vergangenheit und rechnet daraus den Trend — dieselbe
+Überlegung wie bei `beats_left`: Was ein Bediener sonst bei jedem Blick selbst
+ausrechnet, rechnet er irgendwann falsch.
+
+| Control | Was |
+| --- | --- |
+| `master.signalN` | Der Messwert, −1 bis 1 |
+| `master.signalN_name` | Wofür er steht; leer heißt ungenutzt |
+| `master.signalN_trend` | Änderung je Minute, aus einer Ausgleichsgeraden |
+| `master.signalN_age` | Sekunden seit der letzten Meldung |
+
+Vier feste Plätze mit beschriftbarem Namen, wie ein Kanalzug, den man mit
+Klebeband beschriftet. Beliebige Namen bräuchten zur Laufzeit geleakte
+Zeichenketten, und dieselbe Entscheidung ist schon bei den Hot Cues so gefallen.
+
+Drei Dinge sind bewusst so:
+
+- **Die Steigung kommt aus einer Ausgleichsgeraden**, nicht aus „letzter minus
+  erster". Eine einzelne Fehlmessung am Rand würde daraus sonst eine Behauptung
+  machen, die die übrigen Proben nicht hergeben.
+- **Aus einer Probe wird kein Trend** — dort steht `-`, nicht 0. Eine Null wäre
+  die Aussage „ändert sich nicht", und die hat niemand getroffen. Genauso ist
+  ein ungenutztes Signal leer und nicht null.
+- **Der Wert bleibt stehen, auch wenn lange nichts kam.** Er ist die letzte
+  bekannte Lage, und die verschwindet nicht dadurch, dass niemand mehr misst.
+  Wie alt sie ist, sagt `_age`; der Trend fällt nach zwei Minuten von selbst weg.
+
+Damit ist ein Signal ein Control wie jedes andere — `sub`, `when` und `ramp`
+greifen darauf, ohne dass dafür eine Zeile geschrieben werden musste. Das ist
+der ganze Gewinn eines benannten Steuerraums.
+
 ### Über MCP
 
 Dieselben vier Verben, für einen Agenten, der kein Zeilenprotokoll spricht:
@@ -416,6 +464,7 @@ Dieselben vier Verben, für einen Agenten, der kein Zeilenprotokoll spricht:
 | `in <beats> ramp …` | `musik_ramp` mit `in_beats` |
 | `in <beats> <befehl>` | `musik_schedule` |
 | `when <control> < <wert> <befehl>` | `musik_when` |
+| `set master.signalN …` | `musik_signal` (sucht den Platz selbst) |
 | `plan` | Feld `plan` in `musik_status` |
 | `cancel [id]` | `musik_cancel` |
 

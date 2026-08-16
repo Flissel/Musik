@@ -33,6 +33,7 @@ pub mod protokoll;
 pub mod pult;
 pub mod schluessel;
 pub mod server;
+pub mod signal;
 pub mod warteschlange;
 pub mod wert;
 pub mod zeitplan;
@@ -49,6 +50,7 @@ pub use pult::{
 };
 pub use schluessel::{Gruppe, Schluessel};
 pub use server::{Server, ServerFehler};
+pub use signal::Signal;
 pub use warteschlange::Warteschlange;
 pub use wert::{Art, Einheit, Wert};
 pub use zeitplan::{Zeitplan, TAKT};

@@ -62,6 +62,14 @@ struct ListenZeile {
     notiz: String,
 }
 
+/// Ein Signal aus dem Raum, fertig zum Zeichnen.
+struct SignalZeile {
+    name: String,
+    wert: Option<f64>,
+    trend: Option<f64>,
+    alter: Option<f64>,
+}
+
 /// Der Dateiname ohne Ordner — in einer schmalen Spalte ist der Pfad Ballast.
 fn dateiname(pfad: &str) -> String {
     std::path::Path::new(pfad)
@@ -748,10 +756,23 @@ impl MusikApp {
     /// Ein Griff ins Schloss für beides, und danach ist es wieder frei. Der
     /// Taktgeber-Thread nimmt es alle fünf Millisekunden; eine Oberfläche, die
     /// es je Zeile nähme, stünde ihm im Weg.
-    fn regie_lesen(&self) -> (Vec<PlanZeile>, Vec<ListenZeile>) {
+    fn regie_lesen(&self) -> (Vec<PlanZeile>, Vec<ListenZeile>, Vec<SignalZeile>) {
         let Ok(pult) = self.pult.lock() else {
-            return (Vec::new(), Vec::new());
+            return (Vec::new(), Vec::new(), Vec::new());
         };
+
+        let jetzt = std::time::Instant::now();
+        let signale = pult
+            .signale
+            .iter()
+            .filter(|s| !s.name.is_empty())
+            .map(|s| SignalZeile {
+                name: s.name.clone(),
+                wert: s.wert(),
+                trend: s.trend(jetzt),
+                alter: s.alter(jetzt),
+            })
+            .collect();
 
         let plan = pult
             .plan
@@ -818,12 +839,12 @@ impl MusikApp {
             })
             .collect();
 
-        (plan, liste)
+        (plan, liste, signale)
     }
 
     /// Der Blick auf das, was die anderen vorhaben.
     fn regie(&mut self, ui: &mut Ui) {
-        let (plan, liste) = self.regie_lesen();
+        let (plan, liste, signale) = self.regie_lesen();
 
         ui.add_space(4.0);
         ui.label(RichText::new("REGIE").strong().size(12.0))
@@ -836,7 +857,65 @@ impl MusikApp {
                 self.plan_zeigen(ui, &plan);
                 ui.add_space(10.0);
                 self.liste_zeigen(ui, &liste);
+                if !signale.is_empty() {
+                    ui.add_space(10.0);
+                    Self::signale_zeigen(ui, &signale);
+                }
             });
+    }
+
+    /// Was von außen gemeldet wurde.
+    ///
+    /// Ohne diesen Block wüsste der Mensch am Pult nicht, worauf die Agenten
+    /// gerade reagieren — sie sähen den Raum, er nur ihre Reglerbewegungen.
+    fn signale_zeigen(ui: &mut Ui, signale: &[SignalZeile]) {
+        ui.label(
+            RichText::new("AUS DEM RAUM")
+                .color(theme::TEXT_LEISE)
+                .size(10.0)
+                .strong(),
+        );
+
+        for s in signale {
+            ui.horizontal(|ui| {
+                let wert = match s.wert {
+                    Some(v) => format!("{v:+.2}"),
+                    None => "   —".into(),
+                };
+                ui.label(RichText::new(wert).monospace().size(11.0));
+                ui.label(RichText::new(&s.name).size(11.0));
+
+                if let Some(trend) = s.trend {
+                    // Farbe statt Pfeil: Die mitgelieferte Schrift hat keine
+                    // Pfeile, und ein fehlender Glyph wird zum leeren Kästchen.
+                    let farbe = if trend > 0.02 {
+                        theme::deck_farbe(0)
+                    } else if trend < -0.02 {
+                        theme::WARNUNG
+                    } else {
+                        theme::TEXT_LEISE
+                    };
+                    ui.label(
+                        RichText::new(format!("{trend:+.2}/min"))
+                            .monospace()
+                            .color(farbe)
+                            .size(10.0),
+                    );
+                }
+            });
+
+            // Ein Wert von vor zwanzig Minuten ist keine Lüge, aber auch keine
+            // Auskunft über jetzt.
+            if s.alter
+                .is_some_and(|a| a > control::signal::FENSTER.as_secs_f64())
+            {
+                ui.label(
+                    RichText::new(format!("seit {:.0} s nichts mehr", s.alter.unwrap()))
+                        .color(theme::WARNUNG)
+                        .size(10.0),
+                );
+            }
+        }
     }
 
     fn plan_zeigen(&mut self, ui: &mut Ui, plan: &[PlanZeile]) {
@@ -872,7 +951,12 @@ impl MusikApp {
                         .color(theme::TEXT_LEISE)
                         .size(11.0),
                 );
-                ui.label(RichText::new(&zeile.text).size(11.0));
+                // In einer Spalte von 250 Pixeln passt eine Bedingung samt
+                // Befehl nicht in eine Zeile. Abgeschnitten und stumm wäre das
+                // eine halbe Auskunft — deshalb steht sie vollständig unter der
+                // Maus.
+                ui.label(RichText::new(&zeile.text).size(11.0))
+                    .on_hover_text(&zeile.text);
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("weg").clicked() {
@@ -929,7 +1013,8 @@ impl MusikApp {
                         .color(theme::TEXT_LEISE)
                         .size(11.0),
                 );
-                ui.label(RichText::new(&zeile.name).size(11.0));
+                ui.label(RichText::new(&zeile.name).size(11.0))
+                    .on_hover_text(&zeile.name);
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("weg").clicked() {

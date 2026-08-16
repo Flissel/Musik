@@ -305,6 +305,20 @@ do master.queue_next                  # auf ein Deck, das gerade nicht läuft
 **Jeder Eintrag trägt eine Notiz** — warum er dort steht. Das ist der
 Unterschied zu einer Playlist, und für den Nächsten, der liest, der ganze Punkt.
 
+Und was der Raum sagt, kommt von außen herein — der Anfang der dritten Ebene aus
+dem Zielbild:
+
+```sh
+set master.signal1_name Energie auf der Flaeche
+set master.signal1 0.7
+get master.signal1_trend              # +1.28 je Minute
+when master.signal1_trend < -0.3 do master.queue_next
+```
+
+Ein einzelner Wert nützt dabei fast nichts; „0,7 und seit zwei Minuten fallend"
+ist die Auskunft, nach der sich handeln lässt. Deshalb merkt sich ein Signal
+seine jüngste Vergangenheit.
+
 Das ist die Grundlage für die Agenten-Schicht und für den Anschluss an
 VibeMind — für die liegt in [`mcp/`](mcp/README.md) eine MCP-Brücke bereit,
 deren Werkzeugbeschreibungen aus demselben Katalog erzeugt werden. Details in

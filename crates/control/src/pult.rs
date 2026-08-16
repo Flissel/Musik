@@ -238,6 +238,8 @@ pub struct Steuerpult {
     pub plan: crate::zeitplan::Zeitplan,
     /// Was als Nächstes gespielt werden soll — siehe [`crate::warteschlange`].
     pub liste: crate::warteschlange::Warteschlange,
+    /// Was von außen hereinkommt — siehe [`crate::signal`].
+    pub signale: [crate::signal::Signal; crate::signal::SIGNALE],
     decks: Vec<DeckEintrag>,
     kanaele: Vec<KanalSpiegel>,
     master: MasterSpiegel,
@@ -251,6 +253,7 @@ impl Steuerpult {
         Steuerpult {
             plan: crate::zeitplan::Zeitplan::neu(),
             liste: crate::warteschlange::Warteschlange::neu(),
+            signale: std::array::from_fn(|_| crate::signal::Signal::neu()),
             decks: Vec::new(),
             kanaele: Vec::new(),
             master: MasterSpiegel::default(),
@@ -492,7 +495,56 @@ impl Steuerpult {
         Some(wert)
     }
 
+    /// Zerlegt `signal2_trend` in Platz und Feld.
+    fn signal_teile(element: &str) -> Option<(usize, &'static str)> {
+        let rest = element.strip_prefix("signal")?;
+        let (zahl, feld) = match rest.find('_') {
+            Some(i) => (&rest[..i], &rest[i..]),
+            None => (rest, ""),
+        };
+        let nummer: usize = zahl.parse().ok()?;
+        if nummer == 0 || nummer > crate::signal::SIGNALE {
+            return None;
+        }
+        let feld = match feld {
+            "" => "wert",
+            "_name" => "name",
+            "_trend" => "trend",
+            "_age" => "age",
+            _ => return None,
+        };
+        Some((nummer - 1, feld))
+    }
+
+    fn lies_signal(&self, element: &str) -> Option<Wert> {
+        let (i, feld) = Self::signal_teile(element)?;
+        let s = &self.signale[i];
+        // Einmal genommen und für alle Felder benutzt: Sonst lägen `wert` und
+        // `age` desselben Signals an minimal verschiedenen Zeitpunkten.
+        let jetzt = std::time::Instant::now();
+
+        let wert = match feld {
+            "name" => Wert::Text(s.name.clone()),
+            "wert" => match s.wert() {
+                Some(v) => Wert::Zahl(v),
+                None => Wert::Leer,
+            },
+            "trend" => match s.trend(jetzt) {
+                Some(v) => Wert::Zahl(v),
+                None => Wert::Leer,
+            },
+            _ => match s.alter(jetzt) {
+                Some(v) => Wert::Zahl(v),
+                None => Wert::Leer,
+            },
+        };
+        Some(wert)
+    }
+
     fn lies_master(&self, element: &str) -> Option<Wert> {
+        if element.starts_with("signal") {
+            return self.lies_signal(element);
+        }
         let m = &self.master;
 
         // Der Mitschnitt hat seinen eigenen Zustand, nicht den des Mixers.
@@ -1316,6 +1368,30 @@ impl Steuerpult {
         k: &Schluessel,
         wert: Wert,
     ) -> Result<(), Fehler> {
+        // Signale gehen nicht in den Mixer, sondern in die Ablage daneben.
+        if let Some((i, feld)) = Self::signal_teile(&k.element) {
+            return match feld {
+                "name" => {
+                    let Wert::Text(name) = wert else {
+                        return Err(Fehler::FalscherTyp {
+                            control: k.to_string(),
+                            erwartet: crate::wert::Art::Text,
+                        });
+                    };
+                    self.signale[i].name = name;
+                    Ok(())
+                }
+                "wert" => {
+                    let v = Self::zahl(b, k, &wert)?;
+                    self.signale[i].setzen(b.begrenzen(v), std::time::Instant::now());
+                    Ok(())
+                }
+                // Trend und Alter rechnen sich aus den Proben; sie zu setzen
+                // hieße, die Vergangenheit zu behaupten.
+                _ => Err(Fehler::NichtSchreibbar(k.to_string())),
+            };
+        }
+
         let v = Self::zahl(b, k, &wert)?;
 
         let befehl = match k.element.as_str() {
@@ -1631,6 +1707,9 @@ mod tests {
             let wert = match b.art {
                 Art::Schalter => Wert::Schalter(true),
                 Art::Auswahl => Wert::Auswahl(b.auswahl[0].to_string()),
+                // Ein Textfeld nimmt keine Zahl: Der Typ ist die Zusage, und
+                // sie stillschweigend zu dehnen hieße, sie aufzugeben.
+                Art::Text => Wert::Text("Probe".into()),
                 _ => Wert::Zahl(b.aus_normiert(0.5)),
             };
             pult.schreibe(&schluessel, wert)
@@ -2214,5 +2293,123 @@ mod musikalische_groessen_tests {
         for name in ["deck1.beat", "deck1.beats_left", "deck1.beats_to_phrase"] {
             assert_eq!(pult.lies(&k(name)).unwrap(), Wert::Leer, "{name}");
         }
+    }
+}
+
+#[cfg(test)]
+mod signal_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    /// Der ganze Zweck: Ein Signal von außen wird zu einem Control wie jedes
+    /// andere — und damit lassen sich `when`, `sub` und `ramp` darauf anwenden,
+    /// ohne dass hier eine Zeile dafür geschrieben werden müsste.
+    #[test]
+    fn ein_signal_von_aussen_ist_ein_control_wie_jedes_andere() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+
+        pult.schreibe(&k("master.signal1_name"), Wert::Text("Energie".into()))
+            .unwrap();
+        pult.schreibe(&k("master.signal1"), Wert::Zahl(0.4))
+            .unwrap();
+
+        assert_eq!(
+            pult.lies(&k("master.signal1_name")).unwrap(),
+            Wert::Text("Energie".into())
+        );
+        assert_eq!(pult.lies(&k("master.signal1")).unwrap(), Wert::Zahl(0.4));
+        // Und es lässt sich als Bedingung verwenden — ohne Sonderweg.
+        let mut plan = crate::Zeitplan::neu();
+        crate::zeitplan::wenn_planen(
+            &pult,
+            &mut plan,
+            k("master.signal1"),
+            crate::zeitplan::Vergleich::Unter,
+            0.2,
+            "do master.queue_next".into(),
+        )
+        .expect("ein Signal muss sich als Bedingung eignen");
+    }
+
+    /// Solange nichts gemeldet wurde, ist der Wert leer — und nicht null.
+    ///
+    /// Null wäre eine Aussage über den Raum („keine Energie"), die niemand
+    /// getroffen hat.
+    #[test]
+    fn ein_ungenutztes_signal_behauptet_nichts() {
+        let (pult, _runner) = pult_mit_zwei_decks();
+        for feld in ["", "_trend", "_age"] {
+            assert_eq!(
+                pult.lies(&k(&format!("master.signal2{feld}"))).unwrap(),
+                Wert::Leer,
+                "signal2{feld}"
+            );
+        }
+        assert_eq!(
+            pult.lies(&k("master.signal2_name")).unwrap(),
+            Wert::Text(String::new())
+        );
+    }
+
+    #[test]
+    fn ein_trend_entsteht_erst_aus_mehreren_meldungen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("master.signal1"), Wert::Zahl(0.3))
+            .unwrap();
+        assert_eq!(pult.lies(&k("master.signal1_trend")).unwrap(), Wert::Leer);
+
+        pult.schreibe(&k("master.signal1"), Wert::Zahl(0.9))
+            .unwrap();
+        // Zwei Meldungen fast gleichzeitig: eine Richtung gibt es, ihre Größe
+        // ist bei diesem Abstand beliebig — geprüft wird deshalb nur, dass
+        // überhaupt eine dasteht.
+        assert!(matches!(
+            pult.lies(&k("master.signal1_trend")).unwrap(),
+            Wert::Zahl(_)
+        ));
+    }
+
+    #[test]
+    fn was_sich_ausrechnet_laesst_sich_nicht_setzen() {
+        // Trend und Alter folgen aus den Proben. Sie zu setzen hieße, die
+        // Vergangenheit zu behaupten.
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        assert!(pult
+            .schreibe(&k("master.signal1_trend"), Wert::Zahl(1.0))
+            .is_err());
+        assert!(pult
+            .schreibe(&k("master.signal1_age"), Wert::Zahl(0.0))
+            .is_err());
+    }
+
+    #[test]
+    fn es_gibt_genau_so_viele_signale_wie_angekuendigt() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let letztes = format!("master.signal{}", crate::signal::SIGNALE);
+        pult.schreibe(&k(&letztes), Wert::Zahl(0.5)).unwrap();
+
+        // Eins darüber gibt es nicht — und das muss ein Fehler sein, kein
+        // stillschweigend angelegter Platz.
+        let zuviel = format!("master.signal{}", crate::signal::SIGNALE + 1);
+        assert!(pult.lies(&k(&zuviel)).is_err(), "{zuviel} wurde angenommen");
+        assert!(pult.schreibe(&k(&zuviel), Wert::Zahl(0.5)).is_err());
+    }
+
+    #[test]
+    fn signale_stehen_im_katalog_mit_ihrer_bedeutung() {
+        // Sonst wüsste ein Agent nicht, dass es sie gibt.
+        let (pult, _runner) = pult_mit_zwei_decks();
+        let namen: Vec<String> = pult
+            .liste()
+            .iter()
+            .map(|(s, _)| s.to_string())
+            .filter(|n| n.contains("signal"))
+            .collect();
+        assert_eq!(namen.len(), crate::signal::SIGNALE * 4, "{namen:?}");
+        assert!(namen.contains(&"master.signal1_trend".to_string()));
     }
 }
