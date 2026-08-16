@@ -345,7 +345,13 @@ die Rampe zuletzt geschrieben hat, war jemand anders am Werk. Das gilt für
 einen Menschen an der Oberfläche genauso wie für einen zweiten Agenten.
 
 Damit ist `plan` zugleich das **gemeinsame Blatt**: Wer mitliest, sieht, was die
-anderen vorhaben, statt es aus Reglerbewegungen zu erraten.
+anderen vorhaben, statt es aus Reglerbewegungen zu erraten. Und weil der Mensch
+an der Oberfläche derselbe Mitbediener ist, steht es dort auch — in der
+Regie-Spalte rechts, mit Fortschrittsbalken je Rampe. Ohne sie gewönne er jeden
+Griff blind: Er sähe einen Fader wandern und wüsste nicht, ob ihn jemand zieht
+oder ob er selbst hängengeblieben ist.
+
+![Die Regie-Spalte](bilder/regie.png)
 
 Der Takt liegt bei 5 ms — bei 128 BPM etwa ein Prozent eines Beats. Für eine
 Blende unhörbar, für einen harten Schnitt auf die Eins gerade noch vertretbar.
@@ -408,6 +414,10 @@ Drei Entscheidungen, die aus dem Mehrbedienerfall kommen:
   Laufen alle, wird gefragt statt geraten; mit `queue_next deck1` geht es
   trotzdem, wenn es wirklich so gemeint ist. Und scheitert das Laden, kommt der
   Eintrag zurück nach vorn, statt still zu verschwinden.
+
+Auch die Liste steht in der Regie-Spalte, mit `vor`, `weg` und `auflegen`; in
+der Plattenkiste merkt ein `+` einen Track vor. Sonst wäre sie von der
+Oberfläche aus nur lesbar und füllen könnte sie allein ein Agent.
 
 ## Was am Deck eingestellt wird, bleibt
 

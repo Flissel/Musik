@@ -111,6 +111,18 @@ impl Zeitplan {
         self.naechste_id
     }
 
+    /// Übernimmt den Zählerstand eines anderen Plans.
+    ///
+    /// Der Taktgeber nimmt den Plan aus dem Pult heraus, arbeitet ihn ab und
+    /// legt ihn zurück. Was währenddessen neu vorgemerkt wird — ein `in 16
+    /// ramp …`, das gerade fällig geworden ist —, landet im leeren Plan, der
+    /// solange im Pult liegt, und finge dort wieder bei 1 an. Damit trüge ein
+    /// frischer Auftrag dieselbe Nummer wie ein noch laufender, und `cancel 1`
+    /// träfe beide.
+    pub fn zaehler_von(&mut self, anderer: &Zeitplan) {
+        self.naechste_id = self.naechste_id.max(anderer.naechste_id);
+    }
+
     /// Nimmt einen fertigen Auftrag auf — für den Taktgeber, der den Plan
     /// kurzzeitig aus dem Pult nimmt und zurücklegt.
     pub fn uebernehmen(&mut self, auftrag: Auftrag) {
@@ -165,6 +177,10 @@ pub fn takt(
     ausfuehren: &mut dyn FnMut(&mut Steuerpult, &str) -> String,
 ) -> Vec<String> {
     let mut meldungen = Vec::new();
+    // Was ein fälliger Befehl selbst vormerkt, landet im Plan des Pults —
+    // der ist gerade leer, weil der Taktgeber diesen hier herausgenommen hat.
+    // Ohne den Zählerstand finge er wieder bei 1 an.
+    pult.plan.zaehler_von(plan);
     // Herausnehmen, abarbeiten, zurücklegen: Sonst läge der Plan geborgt da,
     // während die Aufträge selbst wieder ins Pult schreiben.
     let mut offen = std::mem::take(&mut plan.auftraege);
@@ -547,6 +563,55 @@ mod tests {
         // Negative Längen ergeben keinen Sinn.
         assert!(rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, -4.0, None).is_err());
         assert!(plan.ist_leer());
+    }
+
+    /// Ein fällig gewordener Befehl darf keine Nummer wiederverwenden.
+    ///
+    /// Der Taktgeber nimmt den Plan aus dem Pult heraus, arbeitet ihn ab und
+    /// legt ihn zurück. Was währenddessen neu vorgemerkt wird — ein
+    /// `in 0 ramp …`, das gerade fällig wurde —, landet im leeren Plan, der
+    /// solange im Pult liegt. Ohne übernommenen Zählerstand bekäme es dort
+    /// wieder die Nummer 1, und `cancel 1` träfe dann zwei Aufträge.
+    #[test]
+    fn ein_nachgelegter_auftrag_bekommt_keine_schon_vergebene_nummer() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut plan = Zeitplan::neu();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+
+        // Ein langer Läufer, der die 1 belegt und belegt bleibt.
+        rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, 512.0, None).unwrap();
+        // Und ein Befehl, der sofort fällig ist und selbst etwas vormerkt.
+        spaeter_planen(
+            &pult,
+            &mut plan,
+            0.0,
+            "ramp channel2.fader 0 64".into(),
+            None,
+        )
+        .unwrap();
+
+        rendern(&mut runner, RATE as usize / 10);
+        takt(&mut pult, &mut plan, &mut |pult, zeile| {
+            let mut sitzung = crate::Sitzung::neu();
+            crate::behandle(pult, &mut sitzung, zeile)
+        });
+
+        // Der Taktgeber legt zurück, was währenddessen dazukam — wie im Betrieb.
+        let neu = std::mem::take(&mut pult.plan);
+        for a in neu.auftraege() {
+            plan.uebernehmen(a.clone());
+        }
+
+        let nummern: Vec<u64> = plan.auftraege().iter().map(|a| a.id).collect();
+        let mut sortiert = nummern.clone();
+        sortiert.sort_unstable();
+        sortiert.dedup();
+        assert_eq!(
+            sortiert.len(),
+            nummern.len(),
+            "zwei Aufträge tragen dieselbe Nummer: {nummern:?}"
+        );
     }
 
     #[test]

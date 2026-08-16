@@ -280,6 +280,12 @@ gibt auf, sobald jemand anders denselben Regler anfasst** — der Griff daneben
 ist stärker als die Automatik, ob er von einem Menschen kommt oder von einem
 zweiten Agenten.
 
+Damit der Mensch diesen Griff nicht blind gewinnt, steht rechts in der
+Oberfläche die **Regie**: was vorgemerkt ist, wie weit jede Blende gelaufen
+ist, und was als Nächstes kommt.
+
+![Die Regie-Spalte](docs/bilder/regie.png)
+
 Was als Nächstes kommt, steht ebenfalls in der Anlage und nicht in einem Kopf:
 
 ```sh

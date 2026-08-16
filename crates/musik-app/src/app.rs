@@ -3,12 +3,18 @@
 //! Aufbau von oben nach unten: zwei Decks nebeneinander, darunter der Mixer,
 //! darunter die Sammlung. Das ist die Anordnung, die man von einem DJ-Setup
 //! kennt — Plattenspieler oben, Mischpult in der Mitte, Plattenkiste unten.
+//! Rechts daneben die **Regie**: was vorgemerkt ist und was als Nächstes kommt.
 //!
 //! Die Oberfläche fasst den Mixer nie direkt an — und sie hält auch keine
 //! eigenen Werte mehr. Alles Bedienbare liegt im Steuerpult (`control`), das
 //! die Kommandos in die lock-freie Schlange schickt. Damit ist die Oberfläche
 //! einer von mehreren Bedienern: Ein Skript am Socket bewegt denselben Fader,
 //! und beide sehen sofort dasselbe.
+//!
+//! Aus dieser Gleichberechtigung folgt die Regie-Spalte. Eine laufende Rampe
+//! gibt auf, sobald jemand den Regler anfasst — der Mensch gewinnt also jeden
+//! Griff. Ohne eine Anzeige gewönne er ihn blind: Er sähe einen Fader wandern
+//! und wüsste nicht, ob ihn jemand zieht oder ob er selbst hängengeblieben ist.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -33,6 +39,36 @@ const MIXER_HOEHE: f32 = 318.0;
 /// Anfangshöhe der Plattenkiste. Sie ist ziehbar, weil man beim Suchen mehr
 /// Liste will und beim Mixen mehr Wellenform.
 const SAMMLUNG_HOEHE: f32 = 190.0;
+/// Anfangsbreite der Regie-Spalte. Breit genug für einen Dateinamen und eine
+/// kurze Notiz, schmal genug, dass die Wellenformen nicht leiden.
+const REGIE_BREITE: f32 = 250.0;
+
+/// Eine Zeile im Plan, fertig zum Zeichnen.
+///
+/// Als Schnappschuss und nicht als Verweis ins Pult: Gezeichnet wird ohne
+/// gehaltenen Mutex, sonst hinge die Oberfläche an einem Schloss, an dem auch
+/// der Taktgeber alle fünf Millisekunden zieht.
+struct PlanZeile {
+    id: u64,
+    text: String,
+    /// Wie weit eine Rampe gelaufen ist, 0..1. `None` bei vorgemerkten
+    /// Befehlen — die laufen nicht, sie warten.
+    anteil: Option<f32>,
+}
+
+struct ListenZeile {
+    id: u64,
+    name: String,
+    notiz: String,
+}
+
+/// Der Dateiname ohne Ordner — in einer schmalen Spalte ist der Pfad Ballast.
+fn dateiname(pfad: &str) -> String {
+    std::path::Path::new(pfad)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| pfad.to_string())
+}
 
 /// Was die Oberfläche über ein Deck weiß, das im Steuerpult nicht steht.
 ///
@@ -126,6 +162,13 @@ impl eframe::App for MusikApp {
         egui::Panel::bottom("mixer")
             .exact_size(MIXER_HOEHE)
             .show(ui, |ui| self.mixer(ui));
+
+        // Rechts und nicht unten: Der Plan gehört neben die Decks, weil man
+        // ihn beim Mixen im Blick hat, nicht beim Suchen.
+        egui::Panel::right("regie")
+            .resizable(true)
+            .default_size(REGIE_BREITE)
+            .show(ui, |ui| self.regie(ui));
 
         egui::CentralPanel::default().show(ui, |ui| {
             // `columns` gibt jeder Spalte ein eigenes Top-down-Layout. Ein
@@ -634,7 +677,7 @@ impl MusikApp {
                     .striped(true)
                     .min_col_width(70.0)
                     .show(ui, |ui| {
-                        for spalte in ["BPM", "KEY", "KÜNSTLER", "TITEL", "LADEN"] {
+                        for spalte in ["BPM", "KEY", "KÜNSTLER", "TITEL", "AUF DECK / LISTE"] {
                             ui.label(
                                 RichText::new(spalte)
                                     .color(theme::TEXT_LEISE)
@@ -682,11 +725,234 @@ impl MusikApp {
                                         self.laden(deck, &eintrag);
                                     }
                                 }
+
+                                // Ohne diesen Knopf wäre die Liste von der
+                                // Oberfläche aus nur lesbar — füllen könnte sie
+                                // allein ein Agent.
+                                if ui
+                                    .small_button("+")
+                                    .on_hover_text("Für später vormerken")
+                                    .clicked()
+                                {
+                                    self.master_aktion("queue_add", Some(&eintrag.pfad));
+                                }
                             });
                             ui.end_row();
                         }
                     });
             });
+    }
+
+    /// Liest Plan und Liste in einem Rutsch.
+    ///
+    /// Ein Griff ins Schloss für beides, und danach ist es wieder frei. Der
+    /// Taktgeber-Thread nimmt es alle fünf Millisekunden; eine Oberfläche, die
+    /// es je Zeile nähme, stünde ihm im Weg.
+    fn regie_lesen(&self) -> (Vec<PlanZeile>, Vec<ListenZeile>) {
+        let Ok(pult) = self.pult.lock() else {
+            return (Vec::new(), Vec::new());
+        };
+
+        let plan = pult
+            .plan
+            .auftraege()
+            .iter()
+            .map(|a| {
+                let jetzt = control::zeitplan::beat_jetzt(&pult, a.takt_deck);
+                match &a.was {
+                    control::zeitplan::Was::Rampe(r) => PlanZeile {
+                        id: a.id,
+                        text: format!("{} {:.2} nach {:.2}", r.control, r.von, r.nach),
+                        anteil: jetzt.map(|j| {
+                            if r.beats > 0.0 {
+                                (((j - a.ab_beat) / r.beats) as f32).clamp(0.0, 1.0)
+                            } else {
+                                1.0
+                            }
+                        }),
+                    },
+                    control::zeitplan::Was::Spaeter { beim_beat, zeile } => PlanZeile {
+                        id: a.id,
+                        // Die Restzeit in Beats und nicht in Sekunden: Der Plan
+                        // rechnet so, und bei gedrehtem Tempo wäre eine
+                        // Sekundenangabe im nächsten Moment falsch.
+                        text: match jetzt {
+                            Some(j) => format!("in {:.0} Beats: {zeile}", (beim_beat - j).max(0.0)),
+                            None => format!("wartet: {zeile}"),
+                        },
+                        anteil: None,
+                    },
+                }
+            })
+            .collect();
+
+        let liste = pult
+            .liste
+            .eintraege()
+            .iter()
+            .map(|e| ListenZeile {
+                id: e.id,
+                name: dateiname(&e.pfad),
+                notiz: e.notiz.clone(),
+            })
+            .collect();
+
+        (plan, liste)
+    }
+
+    /// Der Blick auf das, was die anderen vorhaben.
+    fn regie(&mut self, ui: &mut Ui) {
+        let (plan, liste) = self.regie_lesen();
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("REGIE").strong().size(12.0))
+            .on_hover_text("Was vorgemerkt ist — von der Oberfläche wie von einem Agenten");
+        ui.add_space(6.0);
+
+        egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                self.plan_zeigen(ui, &plan);
+                ui.add_space(10.0);
+                self.liste_zeigen(ui, &liste);
+            });
+    }
+
+    fn plan_zeigen(&mut self, ui: &mut Ui, plan: &[PlanZeile]) {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("PLAN")
+                    .color(theme::TEXT_LEISE)
+                    .size(10.0)
+                    .strong(),
+            );
+            if !plan.is_empty() && ui.small_button("alle weg").clicked() {
+                if let Ok(mut pult) = self.pult.lock() {
+                    let weg = pult.plan.streichen(None);
+                    self.status = format!("{weg} vorgemerkte Aufträge gestrichen");
+                }
+            }
+        });
+
+        if plan.is_empty() {
+            ui.label(
+                RichText::new("nichts vorgemerkt")
+                    .color(theme::TEXT_LEISE)
+                    .size(11.0),
+            );
+            return;
+        }
+
+        for zeile in plan {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("{}", zeile.id))
+                        .monospace()
+                        .color(theme::TEXT_LEISE)
+                        .size(11.0),
+                );
+                ui.label(RichText::new(&zeile.text).size(11.0));
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("weg").clicked() {
+                        // Direkt auf dem Plan und nicht über eine Aktion: Das
+                        // Streichen selbst *ist* diese Methode, dieselbe, die
+                        // auch `cancel` am Socket aufruft. Ein zweiter Name
+                        // dafür wäre eine zweite Stelle zum Auseinanderlaufen.
+                        if let Ok(mut pult) = self.pult.lock() {
+                            pult.plan.streichen(Some(zeile.id));
+                        }
+                        self.status = format!("Auftrag {} gestrichen", zeile.id);
+                    }
+                });
+            });
+
+            if let Some(anteil) = zeile.anteil {
+                ui.add(egui::ProgressBar::new(anteil).desired_height(4.0));
+            }
+        }
+    }
+
+    fn liste_zeigen(&mut self, ui: &mut Ui, liste: &[ListenZeile]) {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("LISTE")
+                    .color(theme::TEXT_LEISE)
+                    .size(10.0)
+                    .strong(),
+            );
+            if !liste.is_empty()
+                && ui
+                    .small_button("auflegen")
+                    .on_hover_text("Den vordersten auf ein Deck legen, das nicht läuft")
+                    .clicked()
+            {
+                self.master_aktion("queue_next", None);
+            }
+        });
+
+        if liste.is_empty() {
+            ui.label(
+                RichText::new("nichts in der Liste")
+                    .color(theme::TEXT_LEISE)
+                    .size(11.0),
+            );
+            return;
+        }
+
+        for zeile in liste {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("{}", zeile.id))
+                        .monospace()
+                        .color(theme::TEXT_LEISE)
+                        .size(11.0),
+                );
+                ui.label(RichText::new(&zeile.name).size(11.0));
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("weg").clicked() {
+                        self.master_aktion("queue_drop", Some(&zeile.id.to_string()));
+                    }
+                    if ui
+                        .small_button("vor")
+                        .on_hover_text("Zum Nächsten machen")
+                        .clicked()
+                    {
+                        self.master_aktion("queue_bump", Some(&zeile.id.to_string()));
+                    }
+                });
+            });
+
+            // Die Notiz ist der Grund, warum der Track dort steht. Ohne sie
+            // wäre die Liste eine Playlist.
+            if !zeile.notiz.is_empty() {
+                ui.label(
+                    RichText::new(&zeile.notiz)
+                        .color(theme::TEXT_LEISE)
+                        .size(10.0),
+                );
+            }
+        }
+    }
+
+    /// Löst eine Master-Aktion über das Pult aus — denselben Weg, den ein
+    /// Agent nimmt.
+    fn master_aktion(&mut self, element: &str, argument: Option<&str>) {
+        let ergebnis = {
+            let Ok(mut pult) = self.pult.lock() else {
+                return;
+            };
+            pult.ausloesen(&Schluessel::neu(Gruppe::Master, element), argument)
+        };
+        match ergebnis {
+            Ok(zeilen) => {
+                if let Some(erste) = zeilen.first() {
+                    self.status = erste.clone();
+                }
+            }
+            Err(e) => self.status = e.to_string(),
+        }
     }
 
     /// Schreibt ein Deck-Control über das Pult.
@@ -1090,6 +1356,20 @@ mod tests {
         assert_eq!(zeit(0.0), "0:00.00");
         assert_eq!(zeit(65.5), "1:05.50");
         assert_eq!(zeit(-3.0), "0:00.00");
+    }
+
+    #[test]
+    fn die_liste_zeigt_den_dateinamen_nicht_den_pfad() {
+        // In einer Spalte von 250 Pixeln ist der Ordner Ballast — und die
+        // interessante Hälfte steht hinten.
+        assert_eq!(
+            dateiname("/musik/haus/nachtschicht.mp3"),
+            "nachtschicht.mp3"
+        );
+        assert_eq!(dateiname("nachtschicht.mp3"), "nachtschicht.mp3");
+        // Was keinen Dateinamen hat, wird nicht zu einer leeren Zeile.
+        assert_eq!(dateiname("/musik/"), "musik");
+        assert_eq!(dateiname(""), "");
     }
 
     #[test]
