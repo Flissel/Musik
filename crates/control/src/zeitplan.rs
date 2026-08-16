@@ -13,6 +13,13 @@
 //! Beats rechnet, bleibt musikalisch richtig. Steht das Deck, steht auch der
 //! Plan — was gestoppt ist, hat keine Takte.
 //!
+//! Neben „in so vielen Beats" gibt es „sobald es so weit ist": Ein [`Was::Wenn`]
+//! hängt nicht an Takten, sondern an einem Wert — „wenn Deck A noch 32 Beats
+//! hat, leg den nächsten auf". Ohne das müsste ein Bediener `beats_left`
+//! abonnieren und bekäme zwanzig Zahlen je Sekunde, aus denen er die eine
+//! Schwelle selbst heraussucht. Über eine Chat-Schnittstelle ist das nicht nur
+//! unbequem, sondern unbezahlbar.
+//!
 //! **Für ein Team von Agenten ist der Plan zugleich das gemeinsame Blatt.**
 //! Wer `plan` liest, sieht, was die anderen vorhaben, statt es aus
 //! Reglerbewegungen zu erraten. Und eine Rampe gibt auf, sobald jemand anders
@@ -37,6 +44,9 @@ const ABGELOEST: f64 = 1e-4;
 pub struct Auftrag {
     pub id: u64,
     /// Auf wessen Takten der Auftrag liegt.
+    ///
+    /// Bei einem [`Was::Wenn`] ohne Bedeutung — das hängt an einem Wert und
+    /// nicht an Takten.
     pub takt_deck: usize,
     /// Beat des Taktgeber-Decks, ab dem gehandelt wird.
     pub ab_beat: f64,
@@ -49,6 +59,44 @@ pub enum Was {
     Rampe(Rampe),
     /// Eine fertige Protokollzeile, die später ausgeführt wird.
     Spaeter { beim_beat: f64, zeile: String },
+    /// Dieselbe Zeile, aber ausgelöst von einem Wert statt von der Zeit.
+    Wenn {
+        control: Schluessel,
+        vergleich: Vergleich,
+        schwelle: f64,
+        zeile: String,
+    },
+}
+
+/// In welche Richtung eine Schwelle überschritten wird.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Vergleich {
+    Unter,
+    Ueber,
+}
+
+impl Vergleich {
+    pub fn parse(text: &str) -> Option<Vergleich> {
+        match text {
+            "<" => Some(Vergleich::Unter),
+            ">" => Some(Vergleich::Ueber),
+            _ => None,
+        }
+    }
+
+    pub fn zeichen(&self) -> &'static str {
+        match self {
+            Vergleich::Unter => "<",
+            Vergleich::Ueber => ">",
+        }
+    }
+
+    fn trifft_zu(&self, wert: f64, schwelle: f64) -> bool {
+        match self {
+            Vergleich::Unter => wert < schwelle,
+            Vergleich::Ueber => wert > schwelle,
+        }
+    }
 }
 
 /// Eine Bewegung eines Reglers über Beats.
@@ -187,6 +235,33 @@ pub fn takt(
     let mut bleibt = Vec::with_capacity(offen.len());
 
     for mut auftrag in offen.drain(..) {
+        // Ein Wenn zuerst und getrennt: Es hängt an einem Wert, nicht an
+        // Takten, und dürfte deshalb nicht daran scheitern, dass irgendein
+        // Deck gerade kein Grid hat.
+        if let Was::Wenn {
+            control,
+            vergleich,
+            schwelle,
+            zeile,
+        } = &auftrag.was
+        {
+            let (control, vergleich, schwelle, zeile) =
+                (control.clone(), *vergleich, *schwelle, zeile.clone());
+
+            match pult.lies(&control) {
+                Ok(Wert::Zahl(steht)) if vergleich.trifft_zu(steht, schwelle) => {
+                    let antwort = ausfuehren(pult, &zeile);
+                    meldungen.push(format!("plan {} ausgefuehrt {antwort}", auftrag.id));
+                }
+                // Noch nicht so weit — oder noch nicht bekannt. `Leer` heißt
+                // nicht „nie": Ein Track, der gerade lädt, hat noch kein Grid
+                // und damit noch keine Restbeats.
+                Ok(_) => bleibt.push(auftrag),
+                Err(e) => meldungen.push(format!("plan {} abgebrochen — {e}", auftrag.id)),
+            }
+            continue;
+        }
+
         let Some(jetzt) = beat_jetzt(pult, auftrag.takt_deck) else {
             meldungen.push(format!(
                 "plan {} abgebrochen — deck{} hat kein Grid mehr",
@@ -205,6 +280,8 @@ pub fn takt(
                 let antwort = ausfuehren(pult, &zeile.clone());
                 meldungen.push(format!("plan {} ausgefuehrt {antwort}", auftrag.id));
             }
+            // Oben schon behandelt; hier kommt nichts mehr an.
+            Was::Wenn { .. } => unreachable!("Wenn wird vor dem Taktgeber behandelt"),
             Was::Rampe(rampe) => match rampe_schritt(pult, rampe, auftrag.ab_beat, jetzt) {
                 Ausgang::Laeuft => bleibt.push(auftrag),
                 Ausgang::Fertig => meldungen.push(format!(
@@ -332,6 +409,46 @@ pub fn spaeter_planen(
         jetzt,
         Was::Spaeter {
             beim_beat: jetzt + beats,
+            zeile,
+        },
+    ))
+}
+
+/// Merkt eine Protokollzeile für den Moment vor, in dem ein Wert eine Schwelle
+/// überschreitet.
+///
+/// Geprüft wird beim Vormerken, ob das Control überhaupt eine Zahl ist — ein
+/// Schalter oder ein Titel ließe sich nie mit einer Schwelle vergleichen, und
+/// ein Auftrag, der stumm für immer wartet, ist schlimmer als eine Absage.
+///
+/// **Trifft die Bedingung schon jetzt zu, läuft der Befehl beim nächsten Takt.**
+/// Das ist gewollt: `when` heißt „sobald es so weit ist", nicht „beim nächsten
+/// Überschreiten". Wer auf eine Flanke warten will, prüft vorher selbst.
+pub fn wenn_planen(
+    pult: &Steuerpult,
+    plan: &mut Zeitplan,
+    control: Schluessel,
+    vergleich: Vergleich,
+    schwelle: f64,
+    zeile: String,
+) -> Result<u64, Fehler> {
+    let Some(b) = pult.beschreibung(&control) else {
+        return Err(Fehler::UnbekanntesControl(control.to_string()));
+    };
+    if b.art != crate::wert::Art::Zahl {
+        return Err(Fehler::FalscherTyp {
+            control: control.to_string(),
+            erwartet: crate::wert::Art::Zahl,
+        });
+    }
+
+    Ok(plan.aufnehmen(
+        0,
+        0.0,
+        Was::Wenn {
+            control,
+            vergleich,
+            schwelle,
             zeile,
         },
     ))

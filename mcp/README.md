@@ -52,11 +52,12 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
 | `musik_ramp` | Einen Regler über Beats bewegen — eine Blende |
 | `musik_schedule` | Eine Aktion oder einen Wert auf einen späteren Beat legen |
 | `musik_cancel` | Vorgemerktes zurücknehmen |
+| `musik_when` | Einen Befehl an eine Schwelle hängen — „wenn noch 32 Beats" |
 | `musik_queue` | Was als Nächstes kommt — mit Notiz, warum |
 | `musik_queue_add` | Einen Track vormerken |
 | `musik_queue_next` | Den vordersten auflegen |
 
-Zwölf statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
+Dreizehn statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
 Übersetzung und die schlechtere: Der Steuerraum hat über zweihundert Einträge,
 und ein Agent, der sie alle als Werkzeuge sieht, findet keins davon.
 `musik_set` und `musik_do` erreichen alles, `musik_status` und `musik_search`
@@ -80,6 +81,39 @@ musik_ramp(control='channel1.eq_low', ziel=0, ueber_beats=8)
 musik_ramp(control='master.crossfader', ziel=1, ueber_beats=32, in_beats=16)
 musik_schedule(beats=64, aktion='deck2.sync')
 ```
+
+## Fragen statt Rechnen
+
+`musik_status` nennt je Deck nicht nur Position und Länge, sondern das, wonach
+tatsächlich gehandelt wird:
+
+```text
+## DECK1 — Nachtschicht
+- 128.02 BPM, läuft bei 154.3 s von 380.0 s
+- noch **84 Beats**, 9 bis zur Phrasengrenze
+- Tonart Am (8A)
+```
+
+Wer sich `beats_left` aus Position, Länge und Tempo selbst ausrechnet, rechnet
+es bei jedem Blick neu — und macht dabei irgendwann einen Fehler, den niemand
+sieht. Gezählt wird in **Grid-Beats, nicht in Sekunden**, genau wie bei `in` und
+`ramp`: „noch 32 Beats" und „in 32 Beats" meinen dieselbe Strecke.
+
+`musik_when` hängt einen Befehl an eine Schwelle dieser Werte:
+
+```text
+musik_when(control='deck1.beats_left', richtung='unter', schwelle=32,
+           aktion='master.queue_next')
+```
+
+Der Agent müsste sonst `deck1.beats_left` in kurzen Abständen abfragen und die
+Schwelle selbst heraussuchen — je Abfrage ein Werkzeugaufruf, also eine
+Modellantwort weit entfernt. So sagt er es einmal und ist wieder frei.
+
+Trifft die Bedingung schon zu, läuft der Befehl sofort: `when` heißt „sobald es
+so weit ist", nicht „beim nächsten Überschreiten". Und ein Control, das keine
+Zahl ist, wird abgewiesen — ein Auftrag auf `deck1.play < 1` würde stumm für
+immer warten.
 
 ## Der Plan ist das gemeinsame Blatt
 

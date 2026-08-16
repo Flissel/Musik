@@ -140,7 +140,21 @@ pub struct DeckEintrag {
     pub pfad: String,
     /// Was der letzte Ladeauftrag macht: `bereit`, `laedt` oder ein Fehler.
     pub lade_status: String,
+    /// Wie lang eine Phrase ist, in Beats.
+    ///
+    /// Nicht im `DeckState`, weil der Audio-Thread sie nie braucht — und je
+    /// Deck und nicht global, weil sie eine Eigenschaft der Musik ist: Ein
+    /// Stück in Achtergruppen und eines in Sechzehnern liegen gleichzeitig auf
+    /// den Decks.
+    pub phrase_beats: f64,
 }
+
+/// Wie lang eine Phrase standardmäßig ist.
+///
+/// Sechzehn Beats sind vier Takte — die Gruppe, in der House und Techno gebaut
+/// sind und an deren Grenzen ein Übergang sitzt. Wer anderes auflegt, schreibt
+/// `deckN.phrase_beats`.
+pub const PHRASE_BEATS: f64 = 16.0;
 
 impl DeckEintrag {
     pub fn neu(state: Arc<DeckState>, kanal: usize, sample_rate: u32) -> DeckEintrag {
@@ -154,6 +168,7 @@ impl DeckEintrag {
             tonart: None,
             pfad: String::new(),
             lade_status: "bereit".into(),
+            phrase_beats: PHRASE_BEATS,
         }
     }
 }
@@ -390,6 +405,34 @@ impl Steuerpult {
             "keylock" => Wert::Schalter(d.state.keylock()),
             "beat_phase" => match d.state.beat_phase(d.sample_rate) {
                 Some(p) => Wert::Zahl(p),
+                None => Wert::Leer,
+            },
+            "beat" => match d.state.grid() {
+                Some(g) => Wert::Zahl(g.beat_at(d.state.position_frames() as f64, d.sample_rate)),
+                None => Wert::Leer,
+            },
+            // Grid-Beats, also ohne den Tempo-Regler. Ein Beat ist eine feste
+            // Zahl Quell-Frames; schneller abgespielt vergeht er in weniger
+            // Zeit, aber es werden davon nicht mehr. Genauso rechnen `in` und
+            // `ramp` — eine zweite Zeitrechnung im selben Steuerraum wäre eine
+            // Falle. Wer Sekunden will, teilt selbst durch das Tempo.
+            "beats_left" => match (d.state.grid(), d.frames) {
+                (Some(g), ende) if ende > 0 => {
+                    let jetzt = d.state.position_frames();
+                    let pro_beat = g.frames_per_beat(d.sample_rate);
+                    Wert::Zahl(ende.saturating_sub(jetzt) as f64 / pro_beat)
+                }
+                _ => Wert::Leer,
+            },
+            "phrase_beats" => Wert::Zahl(d.phrase_beats),
+            "beats_to_phrase" => match d.state.grid() {
+                Some(g) => {
+                    let beat = g.beat_at(d.state.position_frames() as f64, d.sample_rate);
+                    let laenge = d.phrase_beats.max(1.0);
+                    // Rest bis zur nächsten Grenze; steht man genau darauf, ist
+                    // es 0 und nicht eine ganze Phrase.
+                    Wert::Zahl((laenge - beat.rem_euclid(laenge)).rem_euclid(laenge))
+                }
                 None => Wert::Leer,
             },
             "loop_active" => Wert::Schalter(d.state.is_looping()),
@@ -992,6 +1035,13 @@ impl Steuerpult {
         match k.element.as_str() {
             "play" => d.state.set_playing(Self::schalter(b, k, &wert)?),
             "keylock" => d.state.set_keylock(Self::schalter(b, k, &wert)?),
+            "phrase_beats" => {
+                let laenge = Self::zahl(b, k, &wert)?;
+                // Über den Index und nicht über `d`: `d` ist nur geliehen, und
+                // die Phrasenlänge liegt im Eintrag, nicht im DeckState.
+                self.decks[i].phrase_beats = laenge;
+                return Ok(());
+            }
             "loop_active" => {
                 d.state.set_loop_active(Self::schalter(b, k, &wert)?);
             }
@@ -2053,5 +2103,116 @@ mod aufnahme_tests {
             pult.lies(&k("master.record_seconds")).unwrap(),
             Wert::Zahl(0.0)
         );
+    }
+}
+
+#[cfg(test)]
+mod musikalische_groessen_tests {
+    use super::*;
+    use crate::testing::{pult_mit_zwei_decks, rendern, RATE};
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    fn zahl_von(pult: &Steuerpult, name: &str) -> f64 {
+        match pult.lies(&k(name)) {
+            Ok(Wert::Zahl(v)) => v,
+            andere => panic!("{name} ist keine Zahl: {andere:?}"),
+        }
+    }
+
+    /// Der Rest zählt Grid-Beats und lässt sich vom Pitchfader nicht bewegen.
+    ///
+    /// Ein Beat ist eine feste Zahl Quell-Frames. Schneller abgespielt vergeht
+    /// er in weniger Zeit, aber es werden davon nicht mehr — wer bei 1.08 auf
+    /// einmal mehr Beats übrig hätte, hätte Zeit mit Takten verwechselt.
+    /// Entscheidend ist, dass `in` und `ramp` genauso rechnen: „noch 32 Beats"
+    /// und „in 32 Beats" müssen dieselbe Strecke meinen.
+    #[test]
+    fn der_rest_zaehlt_grid_beats_und_nicht_zeit() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let vorher = zahl_von(&pult, "deck1.beats_left");
+        // 60 s bei 128 BPM.
+        assert!((vorher - 128.0).abs() < 0.5, "{vorher}");
+
+        pult.schreibe(&k("deck1.tempo"), Wert::Zahl(1.08)).unwrap();
+        let schneller = zahl_von(&pult, "deck1.beats_left");
+        assert!(
+            (schneller - vorher).abs() < 0.01,
+            "der Tempo-Regler hat die Beats verschoben: {vorher:.1} → {schneller:.1}"
+        );
+    }
+
+    #[test]
+    fn der_rest_schrumpft_beim_abspielen_und_wird_nicht_negativ() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+
+        let vorher = zahl_von(&pult, "deck1.beats_left");
+        rendern(&mut runner, RATE as usize * 2);
+        let nachher = zahl_von(&pult, "deck1.beats_left");
+        assert!(nachher < vorher, "{vorher:.1} → {nachher:.1}");
+
+        // Über das Ende hinaus läuft es nicht ins Negative. Genau null wird es
+        // nicht: Der Abspieler steht auf dem letzten Frame, nicht dahinter.
+        rendern(&mut runner, RATE as usize * 90);
+        let am_ende = zahl_von(&pult, "deck1.beats_left");
+        assert!((0.0..0.01).contains(&am_ende), "am Ende: {am_ende}");
+    }
+
+    /// Auf der Grenze sind es null Beats bis zur Grenze — nicht eine ganze
+    /// Phrase. Sonst spränge die Zahl genau dort, wo man sie abliest.
+    #[test]
+    fn auf_der_phrasengrenze_ist_der_abstand_null() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        assert_eq!(zahl_von(&pult, "deck1.beat"), 0.0);
+        assert_eq!(zahl_von(&pult, "deck1.beats_to_phrase"), 0.0);
+
+        // Vier Beats weiter sind es noch zwölf bis zur nächsten Sechzehnergruppe.
+        // Ein Sprung ist nur ein Wunsch, den der Audio-Thread im nächsten Block
+        // ausführt, und ein stehendes Deck rendert keinen. Also laufen lassen —
+        // und mit einer Toleranz messen, weil in demselben Block schon wieder
+        // gespielt wird.
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        pult.ausloesen(&k("deck1.beatjump"), Some("4")).unwrap();
+        rendern(&mut runner, 1024);
+
+        let beat = zahl_von(&pult, "deck1.beat");
+        assert!((beat - 4.0).abs() < 0.1, "beat={beat}");
+        let bis = zahl_von(&pult, "deck1.beats_to_phrase");
+        assert!((bis - 12.0).abs() < 0.1, "bis zur Phrase={bis}");
+    }
+
+    #[test]
+    fn die_phrasenlaenge_laesst_sich_umstellen() {
+        // Nicht jede Musik ist in Sechzehnergruppen gebaut, und zwei Decks
+        // können unterschiedlich liegen.
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        pult.ausloesen(&k("deck1.beatjump"), Some("4")).unwrap();
+        rendern(&mut runner, 1024);
+        assert!((zahl_von(&pult, "deck1.beats_to_phrase") - 12.0).abs() < 0.1);
+
+        pult.schreibe(&k("deck1.phrase_beats"), Wert::Zahl(8.0))
+            .unwrap();
+        assert!((zahl_von(&pult, "deck1.beats_to_phrase") - 4.0).abs() < 0.1);
+        // Das andere Deck bleibt, wo es war.
+        assert_eq!(zahl_von(&pult, "deck2.phrase_beats"), PHRASE_BEATS);
+    }
+
+    #[test]
+    fn ohne_beatgrid_gibt_es_keine_beats() {
+        // Leer und nicht null: Null hieße „gerade auf der Eins", und das wäre
+        // eine Behauptung über einen Track, von dem niemand das Raster kennt.
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.bpm_grid"), Wert::Zahl(0.0)).ok();
+
+        for name in ["deck1.beat", "deck1.beats_left", "deck1.beats_to_phrase"] {
+            assert_eq!(pult.lies(&k(name)).unwrap(), Wert::Leer, "{name}");
+        }
     }
 }

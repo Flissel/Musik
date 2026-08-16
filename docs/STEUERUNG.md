@@ -276,7 +276,7 @@ abonniert, sollte deshalb getrennt lesen und schreiben.
 ## Anschluss für Agenten: MCP
 
 Für Agenten liegt eine Brücke bei — [`mcp/`](../mcp/README.md), ein
-MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Zwölf Werkzeuge statt
+MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Dreizehn Werkzeuge statt
 zweihundert: `musik_set` und `musik_do` erreichen alles, `musik_status` und
 `musik_search` sparen die häufigsten Wege, `musik_ramp`, `musik_schedule` und
 `musik_cancel` reichen den Zeitplan durch, `musik_queue`, `musik_queue_add` und
@@ -358,6 +358,54 @@ Blende unhörbar, für einen harten Schnitt auf die Eins gerade noch vertretbar.
 **Sample-genau ist das ausdrücklich nicht**; dafür müssten die Befehle im
 Audio-Callback liegen, und dorthin gehört keine Reglerlogik.
 
+### Sobald es so weit ist
+
+`in` wartet auf Takte. Die Frage, die beim Auflegen wirklich gestellt wird,
+lautet aber anders: **wann ist der Track fast durch?** Dafür gibt es `when`.
+
+```text
+when deck1.beats_left < 32 do master.queue_next     # nächsten auflegen
+when deck1.beats_left < 16 do deck2.sync
+when deck1.beats_left < 16 ramp channel2.fader 0.9 16
+plan
+  plan 4 wenn deck1.beats_left < 32: do master.queue_next (steht bei 47.20)
+```
+
+Und damit das überhaupt fragbar ist, tragen die Decks die Größen, die man sonst
+selbst ausrechnet:
+
+| Control | Was |
+| --- | --- |
+| `deckN.beat` | Der wievielte Beat gerade läuft, vom Grid-Anker gezählt |
+| `deckN.beats_left` | Beats bis zum Ende — danach richtet sich der Übergang |
+| `deckN.beats_to_phrase` | Beats bis zur nächsten Phrasengrenze |
+| `deckN.phrase_beats` | Wie lang eine Phrase ist; 16 als Vorgabe, schreibbar |
+
+**Alles in Grid-Beats, nicht in Sekunden.** Ein Beat ist eine feste Zahl
+Quell-Frames; schneller abgespielt vergeht er in weniger Zeit, aber es werden
+davon nicht mehr. Genauso rechnen `in` und `ramp` — „noch 32 Beats" und „in 32
+Beats" meinen dieselbe Strecke. Zwei Zeitrechnungen im selben Steuerraum wären
+eine Falle.
+
+Die Phrasenlänge steht je Deck und nicht global: Sie ist eine Eigenschaft der
+Musik, und ein Stück in Achtergruppen kann gleichzeitig mit einem in Sechzehnern
+auf den Decks liegen.
+
+Drei Dinge sind an `when` bewusst so:
+
+- **Trifft die Bedingung schon zu, läuft der Befehl sofort.** `when` heißt
+  „sobald es so weit ist", nicht „beim nächsten Überschreiten". Wer auf eine
+  Flanke warten will, prüft vorher selbst.
+- **Ein Control, das keine Zahl ist, wird beim Vormerken abgewiesen.** Ein
+  Auftrag auf `deck1.play < 1` würde stumm für immer warten, und das ist
+  schlimmer als eine Absage.
+- **Ein `when` braucht keinen Taktgeber.** Es hängt an einem Wert, nicht an
+  Takten, und läuft deshalb auch dann, wenn gerade kein Deck ein Grid hat.
+
+Ohne dieses Verb müsste ein Bediener `beats_left` abonnieren und bekäme zwanzig
+Zahlen je Sekunde, aus denen er die eine Schwelle selbst heraussucht. Über eine
+Chat-Schnittstelle ist das nicht nur unbequem, sondern unbezahlbar.
+
 ### Über MCP
 
 Dieselben vier Verben, für einen Agenten, der kein Zeilenprotokoll spricht:
@@ -367,6 +415,7 @@ Dieselben vier Verben, für einen Agenten, der kein Zeilenprotokoll spricht:
 | `ramp <control> <ziel> <beats> [deck]` | `musik_ramp` |
 | `in <beats> ramp …` | `musik_ramp` mit `in_beats` |
 | `in <beats> <befehl>` | `musik_schedule` |
+| `when <control> < <wert> <befehl>` | `musik_when` |
 | `plan` | Feld `plan` in `musik_status` |
 | `cancel [id]` | `musik_cancel` |
 

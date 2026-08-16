@@ -286,6 +286,14 @@ ist, und was als Nächstes kommt.
 
 ![Die Regie-Spalte](docs/bilder/regie.png)
 
+Und weil die Frage beim Auflegen nicht „wie viele Sekunden" lautet, sondern
+„wie viele Beats", tragen die Decks das auch:
+
+```sh
+get deck1.beats_left                  # 84
+when deck1.beats_left < 32 do master.queue_next
+```
+
 Was als Nächstes kommt, steht ebenfalls in der Anlage und nicht in einem Kopf:
 
 ```sh

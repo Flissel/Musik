@@ -215,6 +215,46 @@ pub static DECK: &[Beschreibung] = &[
         false,
         "Lage im Beat, 0 ist auf dem Schlag",
     ),
+    // Was ein Bediener wirklich wissen will, statt der Zahlen, aus denen er es
+    // sich sonst selbst ausrechnet. Position, Länge und Tempo stehen daneben —
+    // aber wer daraus „noch 32 Beats" ableiten muss, rechnet es bei jedem
+    // Blick neu und macht dabei irgendwann einen Fehler, den niemand sieht.
+    zahl(
+        "beat",
+        "BEAT",
+        0.0,
+        f64::MAX,
+        Einheit::Beats,
+        false,
+        "Der wievielte Beat gerade läuft, vom Grid-Anker gezählt",
+    ),
+    zahl(
+        "beats_left",
+        "REST",
+        0.0,
+        f64::MAX,
+        Einheit::Beats,
+        false,
+        "Beats bis zum Ende des Tracks — danach richtet sich, wann der Übergang anfängt",
+    ),
+    zahl(
+        "phrase_beats",
+        "PHRASE",
+        1.0,
+        64.0,
+        Einheit::Beats,
+        true,
+        "Wie lang eine Phrase ist; 16 passt zu den meisten Tanzstücken",
+    ),
+    zahl(
+        "beats_to_phrase",
+        "BIS PHRASE",
+        0.0,
+        64.0,
+        Einheit::Beats,
+        false,
+        "Beats bis zur nächsten Phrasengrenze — dort setzt man ein, nicht irgendwo",
+    ),
     schalter("loop_active", "LOOP", true, "Läuft gerade eine Schleife"),
     zahl(
         "loop_beats",

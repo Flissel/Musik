@@ -93,6 +93,7 @@ pub fn behandle(pult: &mut Steuerpult, sitzung: &mut Sitzung, zeile: &str) -> St
         "unsub" => abbestellen(sitzung, erstes, zweites),
         "ramp" => rampe(pult, erstes, zweites),
         "in" => spaeter(pult, erstes, zweites),
+        "when" => wenn(pult, erstes, zweites),
         "plan" => plan_zeigen(pult),
         "cancel" => streichen(pult, erstes),
         "help" => HILFE.to_string(),
@@ -126,6 +127,7 @@ ok Befehle:
   unsub [control]...     Abbestellen; ohne Argument alles
   ramp <control> <ziel> <beats> [deck]   Regler über Beats bewegen
   in <beats> <befehl>    Befehl nach so vielen Beats ausführen
+  when <control> < <wert> <befehl>   Befehl, sobald ein Wert die Schwelle reisst
   plan              was vorgemerkt ist
   cancel [id]       Vorgemerktes zurücknehmen; ohne Argument alles
   help              diese Übersicht";
@@ -186,6 +188,53 @@ fn spaeter(pult: &mut Steuerpult, beats: Option<&str>, befehl: Option<&str>) -> 
     }
 }
 
+/// `when <control> <\< oder \>> <wert> <befehl>`
+///
+/// Das Gegenstück zu `in`: Der eine wartet auf Takte, der andere auf einen
+/// Zustand. „Wenn Deck A noch 32 Beats hat, leg den nächsten auf" ist die
+/// Frage, die beim Auflegen wirklich gestellt wird — und ohne dieses Verb
+/// müsste sie jemand durch Abonnieren und Nachrechnen beantworten.
+fn wenn(pult: &mut Steuerpult, control: Option<&str>, rest: Option<&str>) -> String {
+    let Some(control) = control.and_then(Schluessel::parse) else {
+        return "err when braucht ein Control: when deck1.beats_left < 32 do master.queue_next"
+            .into();
+    };
+    let mut rest = rest.unwrap_or("");
+    let vergleich = wort(&mut rest);
+    let schwelle = wort(&mut rest);
+    let zeile = rest.trim();
+
+    let Some(vergleich) = crate::zeitplan::Vergleich::parse(vergleich) else {
+        return format!("err {vergleich} ist kein Vergleich — erlaubt sind < und >");
+    };
+    let Ok(schwelle) = schwelle.parse::<f64>() else {
+        return format!("err {schwelle} ist keine Zahl");
+    };
+    if zeile.is_empty() {
+        return "err when braucht einen Befehl: when deck1.beats_left < 32 do master.queue_next"
+            .into();
+    }
+
+    let mut plan = std::mem::take(&mut pult.plan);
+    let ergebnis = crate::zeitplan::wenn_planen(
+        pult,
+        &mut plan,
+        control.clone(),
+        vergleich,
+        schwelle,
+        zeile.to_string(),
+    );
+    pult.plan = plan;
+
+    match ergebnis {
+        Ok(id) => format!(
+            "ok plan {id} wenn {control} {} {schwelle}: {zeile}",
+            vergleich.zeichen()
+        ),
+        Err(e) => format!("err {e}"),
+    }
+}
+
 /// Was vorgemerkt ist — das gemeinsame Blatt, wenn mehrere bedienen.
 fn plan_zeigen(pult: &Steuerpult) -> String {
     let mut zeilen = Vec::new();
@@ -209,6 +258,24 @@ fn plan_zeigen(pult: &Steuerpult) -> String {
                 (beim_beat - jetzt).max(0.0),
                 a.takt_deck + 1
             )),
+            // Mit dem Ist-Wert dahinter: Wer den Plan liest, will wissen, wie
+            // weit die Schwelle noch weg ist, und nicht bloß, dass es sie gibt.
+            crate::zeitplan::Was::Wenn {
+                control,
+                vergleich,
+                schwelle,
+                zeile,
+            } => {
+                let steht = match pult.lies(control) {
+                    Ok(crate::wert::Wert::Zahl(v)) => format!("{v:.2}"),
+                    _ => "?".into(),
+                };
+                zeilen.push(format!(
+                    "plan {} wenn {control} {} {schwelle}: {zeile} (steht bei {steht})",
+                    a.id,
+                    vergleich.zeichen()
+                ))
+            }
         }
     }
 
@@ -947,5 +1014,160 @@ mod warteschlangen_tests {
             let antwort = behandle(&mut pult, &mut s, zeile);
             assert!(antwort.starts_with("err"), "'{zeile}' → {antwort}");
         }
+    }
+}
+
+#[cfg(test)]
+mod wenn_tests {
+    use super::*;
+    use crate::testing::{pult_mit_zwei_decks, rendern, RATE};
+
+    /// Der eigentliche Fall: „Wenn Deck A fast durch ist, leg den nächsten auf."
+    ///
+    /// Ohne dieses Verb müsste ein Bediener `beats_left` abonnieren, zwanzig
+    /// Zahlen je Sekunde lesen und die Schwelle selbst heraussuchen — über eine
+    /// Chat-Schnittstelle ist das nicht zu bezahlen.
+    #[test]
+    fn ein_befehl_wartet_auf_einen_wert() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "set deck1.play 1");
+
+        // Der Testtrack ist 60 s lang, also 128 Beats bei 128 BPM.
+        let antwort = behandle(
+            &mut pult,
+            &mut s,
+            "when deck1.beats_left < 120 set channel2.fader 0.9",
+        );
+        assert!(
+            antwort.starts_with("ok plan 1 wenn deck1.beats_left <"),
+            "{antwort}"
+        );
+
+        let mut plan = std::mem::take(&mut pult.plan);
+
+        // Nach einer Sekunde sind erst gut zwei Beats gelaufen — zu früh.
+        let frueh = lauf(&mut pult, &mut plan, &mut runner, 1.0);
+        assert!(frueh.is_empty(), "zu früh gelaufen: {frueh:?}");
+        assert!(!plan.ist_leer());
+
+        // Nach vier Sekunden sind es über acht Beats, die Schwelle ist gerissen.
+        let spaet = lauf(&mut pult, &mut plan, &mut runner, 4.0);
+        assert_eq!(spaet, vec!["set channel2.fader 0.9"]);
+        assert!(plan.ist_leer(), "der Auftrag hängt noch im Plan");
+    }
+
+    /// Lässt die Anlage laufen und gibt zurück, was der Plan ausgeführt hat.
+    fn lauf(
+        pult: &mut Steuerpult,
+        plan: &mut crate::Zeitplan,
+        runner: &mut audio_engine::EngineRunner,
+        sekunden: f64,
+    ) -> Vec<String> {
+        let mut gelaufen = Vec::new();
+        for _ in 0..20 {
+            rendern(runner, (RATE as f64 * sekunden / 20.0) as usize);
+            crate::zeitplan::takt(pult, plan, &mut |_, zeile| {
+                gelaufen.push(zeile.to_string());
+                "ok".into()
+            });
+        }
+        gelaufen
+    }
+
+    fn takten(pult: &mut Steuerpult, plan: &mut crate::Zeitplan) -> Vec<String> {
+        let mut gelaufen = Vec::new();
+        crate::zeitplan::takt(pult, plan, &mut |_, zeile| {
+            gelaufen.push(zeile.to_string());
+            "ok".into()
+        });
+        gelaufen
+    }
+
+    /// Trifft es schon zu, läuft es sofort — `when` heißt „sobald es so weit
+    /// ist", nicht „beim nächsten Überschreiten".
+    #[test]
+    fn eine_schon_erfuellte_bedingung_loest_beim_naechsten_takt_aus() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(
+            &mut pult,
+            &mut s,
+            "when deck1.beats_left < 999 do deck2.sync",
+        );
+
+        let mut plan = std::mem::take(&mut pult.plan);
+        assert_eq!(takten(&mut pult, &mut plan), vec!["do deck2.sync"]);
+    }
+
+    /// Ein stehendes Deck hält den Takt an — ein `when` nicht, denn es hängt
+    /// an einem Wert und nicht an Takten.
+    #[test]
+    fn ein_wenn_braucht_keinen_taktgeber() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        // Kein Deck läuft, und dieses hier hat nicht einmal ein Grid.
+        behandle(&mut pult, &mut s, "set deck1.bpm_grid 0");
+        behandle(&mut pult, &mut s, "when channel1.fader > 0.5 do deck2.sync");
+
+        let mut plan = std::mem::take(&mut pult.plan);
+        let ruhig = takten(&mut pult, &mut plan);
+        assert!(ruhig.is_empty(), "{ruhig:?}");
+        assert!(
+            !plan.ist_leer(),
+            "ohne Grid abgebrochen, obwohl es keins braucht"
+        );
+
+        pult.schreibe(
+            &Schluessel::parse("channel1.fader").unwrap(),
+            crate::wert::Wert::Zahl(0.9),
+        )
+        .unwrap();
+        assert_eq!(takten(&mut pult, &mut plan), vec!["do deck2.sync"]);
+    }
+
+    #[test]
+    fn unsinnige_bedingungen_werden_benannt_abgewiesen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+
+        for zeile in [
+            "when",
+            "when deck1.beats_left",
+            "when deck1.beats_left < 32",
+            "when deck1.beats_left ist 32 do deck2.sync",
+            "when deck1.beats_left < viele do deck2.sync",
+            "when deck1.quatsch < 32 do deck2.sync",
+            // Ein Schalter lässt sich mit keiner Schwelle vergleichen. Ihn
+            // anzunehmen hieße, einen Auftrag anzulegen, der stumm für immer
+            // wartet — schlimmer als eine Absage.
+            "when deck1.play < 1 do deck2.sync",
+            "when deck1.title < 1 do deck2.sync",
+        ] {
+            let antwort = behandle(&mut pult, &mut s, zeile);
+            assert!(antwort.starts_with("err"), "'{zeile}' → {antwort}");
+        }
+    }
+
+    #[test]
+    fn der_plan_zeigt_die_bedingung_mit_ist_wert() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "set channel1.fader 0.25");
+        behandle(&mut pult, &mut s, "when channel1.fader > 0.8 do deck2.sync");
+
+        let plan = behandle(&mut pult, &mut s, "plan");
+        assert!(plan.contains("wenn channel1.fader > 0.8"), "{plan}");
+        assert!(
+            plan.contains("steht bei 0.25"),
+            "der Ist-Wert fehlt: {plan}"
+        );
+    }
+
+    #[test]
+    fn die_hilfe_nennt_das_neue_verb() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        assert!(behandle(&mut pult, &mut s, "help").contains("when "));
     }
 }

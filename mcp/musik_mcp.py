@@ -480,6 +480,61 @@ class StreichEingabe(Basis):
         return self
 
 
+class Richtung(str, Enum):
+    UNTER = "unter"
+    UEBER = "ueber"
+
+
+class BedingungEingabe(Basis):
+    control: str = Field(
+        ...,
+        description="Wert, auf den gewartet wird, etwa 'deck1.beats_left'",
+        min_length=3,
+        max_length=64,
+    )
+    richtung: Richtung = Field(
+        ...,
+        description="'unter' feuert, sobald der Wert die Schwelle unterschreitet",
+    )
+    schwelle: float = Field(..., description="Die Schwelle")
+    aktion: Optional[str] = Field(
+        default=None,
+        description="Aktion, die dann ausgelöst wird, etwa 'master.queue_next'",
+        max_length=64,
+    )
+    argument: Optional[str] = Field(
+        default=None, description="Argument der Aktion", max_length=4096
+    )
+    control_setzen: Optional[str] = Field(
+        default=None,
+        description="Statt einer Aktion: Control, das dann gesetzt wird",
+        max_length=64,
+    )
+    wert: Optional[str] = Field(
+        default=None,
+        description="Wert dafür; Pflicht, wenn control_setzen gesetzt ist",
+        max_length=256,
+    )
+
+    @field_validator("control", "aktion", "argument", "control_setzen", "wert")
+    @classmethod
+    def _einzeilig(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _pruefe_einzeilig(v, "Argument")
+
+    @model_validator(mode="after")
+    def _genau_eines(self) -> BedingungEingabe:
+        if bool(self.aktion) == bool(self.control_setzen):
+            raise ValueError("entweder aktion oder control_setzen angeben, nicht beides")
+        if self.control_setzen and not self.wert:
+            raise ValueError("control_setzen braucht einen wert")
+        return self
+
+    def befehl(self) -> str:
+        if self.aktion:
+            return f"do {self.aktion}" + (f" {self.argument}" if self.argument else "")
+        return f"set {self.control_setzen} {self.wert}"
+
+
 class ListeEingabe(Basis):
     limit: int = Field(default=50, description="Höchstzahl der Einträge", ge=1, le=200)
     response_format: Format = Field(default=Format.MARKDOWN, description="Ausgabeform")
@@ -558,6 +613,8 @@ async def musik_status(params: StatusEingabe) -> str:
           "decks": [{"deck": "deck1", "title": str, "artist": str,
                      "bpm": float|null, "key": str|null, "key_camelot": str|null,
                      "position": float, "duration": float,
+                     "beat": float|null, "beats_left": float|null,
+                     "beats_to_phrase": float|null, "phrase_beats": float|null,
                      "playing": bool, "finished": bool, "load_status": str}],
           "channels": [{"channel": "channel1", "fader": float, "cue": bool,
                         "fx": str}],
@@ -569,6 +626,7 @@ async def musik_status(params: StatusEingabe) -> str:
     Beispiele:
         - „Was liegt auf den Decks?"
         - „Läuft die Aufnahme noch?"
+        - „Wie lange habe ich noch?" → `beats_left`, in Grid-Beats gezählt.
         - „Hat jemand schon etwas vorgemerkt?" → das Feld `plan`.
         - Nicht dafür: einen einzelnen Wert lesen → `musik_get`.
     """
@@ -654,6 +712,14 @@ async def _status(form: Format) -> str:
         "key_camelot",
         "position",
         "duration",
+        # Die musikalischen Größen gehören in dieselbe Momentaufnahme wie alles
+        # andere. Wer sie sich aus Position, Länge und Tempo selbst ausrechnet,
+        # rechnet sie bei jedem Blick neu — und macht dabei irgendwann einen
+        # Fehler, den niemand sieht.
+        "beat",
+        "beats_left",
+        "beats_to_phrase",
+        "phrase_beats",
         "play",
         "finished",
         "load_status",
@@ -688,6 +754,10 @@ async def _status(form: Format) -> str:
                 "key_camelot": _als_text(roh.get(f"{d}.key_camelot", "-")),
                 "position": _als_zahl(roh.get(f"{d}.position", "-")) or 0.0,
                 "duration": _als_zahl(roh.get(f"{d}.duration", "-")) or 0.0,
+                "beat": _als_zahl(roh.get(f"{d}.beat", "-")),
+                "beats_left": _als_zahl(roh.get(f"{d}.beats_left", "-")),
+                "beats_to_phrase": _als_zahl(roh.get(f"{d}.beats_to_phrase", "-")),
+                "phrase_beats": _als_zahl(roh.get(f"{d}.phrase_beats", "-")),
                 "playing": roh.get(f"{d}.play") == "1",
                 "finished": roh.get(f"{d}.finished") == "1",
                 "load_status": roh.get(f"{d}.load_status", ""),
@@ -731,6 +801,11 @@ async def _status(form: Format) -> str:
         zeilen.append(
             f"- {tempo}, {lauf} bei {d['position']:.1f} s von {d['duration']:.1f} s"
         )
+        if d["beats_left"] is not None:
+            zeilen.append(
+                f"- noch **{d['beats_left']:.0f} Beats**, "
+                f"{d['beats_to_phrase']:.0f} bis zur Phrasengrenze"
+            )
         if d["key"]:
             zeilen.append(f"- Tonart {d['key']} ({d['key_camelot']})")
         if d["finished"]:
@@ -1203,6 +1278,62 @@ async def musik_cancel(params: StreichEingabe) -> str:
 
     if fehler := _fehlerzeile(zeilen):
         return f"Fehler: {fehler}"
+    return "\n".join(zeilen)
+
+
+@mcp.tool(
+    name="musik_when",
+    annotations={"title": "Auf einen Zustand warten", **SCHREIBT},
+)
+async def musik_when(params: BedingungEingabe) -> str:
+    """Merkt einen Befehl für den Moment vor, in dem ein Wert eine Schwelle reißt.
+
+    Das Gegenstück zu `musik_schedule`: Der eine wartet auf Takte, dieser auf
+    einen Zustand. „Wenn Deck A noch 32 Beats hat, leg den nächsten auf" ist die
+    Frage, die beim Auflegen wirklich gestellt wird.
+
+    **Warum das nicht der Agent selbst macht.** Er müsste `deck1.beats_left` in
+    kurzen Abständen abfragen und die Schwelle selbst heraussuchen — je Abfrage
+    ein Werkzeugaufruf, also eine Modellantwort weit entfernt. Hier sagt er es
+    einmal und ist wieder frei.
+
+    Der Aufruf kommt sofort zurück. Trifft die Bedingung schon jetzt zu, läuft
+    der Befehl unmittelbar: `when` heißt „sobald es so weit ist", nicht „beim
+    nächsten Überschreiten".
+
+    Args:
+        params (BedingungEingabe):
+            - control (str): der Wert, etwa 'deck1.beats_left'. Muss eine Zahl
+              sein — ein Schalter ließe sich mit keiner Schwelle vergleichen.
+            - richtung ('unter'|'ueber'), schwelle (float)
+            - **entweder** aktion (str) + argument (str|None)
+            - **oder** control_setzen (str) + wert (str)
+
+    Returns:
+        str: 'ok plan <nr> …' mit der Nummer für `musik_cancel`, sonst
+        'Fehler: <Grund>'.
+
+    Beispiele:
+        - „Wenn Deck A fast durch ist, leg den nächsten auf" →
+          control='deck1.beats_left', richtung='unter', schwelle=32,
+          aktion='master.queue_next'
+        - „Bei 16 Beats Rest Deck B starten" → control='deck1.beats_left',
+          richtung='unter', schwelle=16, control_setzen='deck2.play', wert='1'
+        - Nicht dafür: nach einer festen Zahl Beats → `musik_schedule`.
+    """
+    zeichen = "<" if params.richtung is Richtung.UNTER else ">"
+    befehl = (
+        f"when {params.control} {zeichen} "
+        f"{_zahl_als_text(params.schwelle)} {params.befehl()}"
+    )
+
+    try:
+        zeilen = await eine_antwort(befehl)
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
+
+    if fehler := _fehlerzeile(zeilen):
+        return f"Fehler: {fehler}. `musik_list_controls` zeigt, was es gibt."
     return "\n".join(zeilen)
 
 

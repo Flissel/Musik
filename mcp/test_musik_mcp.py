@@ -42,6 +42,7 @@ ERWARTETE_WERKZEUGE = {
     "musik_queue",
     "musik_queue_add",
     "musik_queue_next",
+    "musik_when",
 }
 
 
@@ -106,6 +107,12 @@ async def hauptteil() -> int:
         pruefe(
             isinstance(daten.get("queue", {}).get("count"), int),
             "musik_status sagt, wie viel vorgemerkt ist",
+        )
+        # Die Frage beim Auflegen ist nicht „wie viele Sekunden", sondern
+        # „wie viele Beats" — und die muss dastehen, nicht errechnet werden.
+        pruefe(
+            all("beats_left" in d for d in daten["decks"]),
+            "musik_status nennt die Restbeats",
         )
 
         liste = text_von(
@@ -351,6 +358,89 @@ async def hauptteil() -> int:
                     "musik_set",
                     {"params": {"control": "channel1.eq_low", "wert": eq_vorher}},
                 )
+
+        # ------------------------------------------------------------------
+        # Auf einen Zustand warten
+        # ------------------------------------------------------------------
+
+        # Ein Schalter lässt sich mit keiner Schwelle vergleichen. Ihn
+        # anzunehmen hieße, einen Auftrag anzulegen, der stumm für immer wartet.
+        kein_wert = text_von(
+            await client.call_tool(
+                "musik_when",
+                {
+                    "params": {
+                        "control": "deck1.play",
+                        "richtung": "unter",
+                        "schwelle": 1,
+                        "aktion": "deck2.sync",
+                    }
+                },
+            )
+        )
+        pruefe(
+            kein_wert.startswith("Fehler:"),
+            f"eine Bedingung auf einem Schalter wird abgewiesen ({kein_wert.strip()})",
+        )
+
+        for was, eingabe in [
+            (
+                "weder Aktion noch Control",
+                {"control": "deck1.beats_left", "richtung": "unter", "schwelle": 32},
+            ),
+            (
+                "beides zugleich",
+                {
+                    "control": "deck1.beats_left",
+                    "richtung": "unter",
+                    "schwelle": 32,
+                    "aktion": "deck2.sync",
+                    "control_setzen": "channel1.fader",
+                    "wert": "1",
+                },
+            ),
+        ]:
+            try:
+                await client.call_tool("musik_when", {"params": eingabe})
+                pruefe(False, f"musik_when weist {was} ab")
+            except Exception:
+                pruefe(True, f"musik_when weist {was} ab")
+
+        if not hat_grid:
+            ausgelassen("musik_when", "kein Deck hat ein Beatgrid")
+        else:
+            bedingung = text_von(
+                await client.call_tool(
+                    "musik_when",
+                    {
+                        "params": {
+                            "control": "deck1.beats_left",
+                            "richtung": "unter",
+                            "schwelle": 8,
+                            "aktion": "master.queue_next",
+                        }
+                    },
+                )
+            ).strip()
+            pruefe(
+                bedingung.startswith("ok plan "),
+                f"musik_when merkt eine Bedingung vor ({bedingung})",
+            )
+
+            wenn_zeilen = [a for a in await plan_jetzt() if a["art"] == "wenn"]
+            pruefe(
+                len(wenn_zeilen) == 1,
+                f"die Bedingung steht im Plan ({[a['art'] for a in await plan_jetzt()]})",
+            )
+            # Der Ist-Wert gehört dazu: Wer den Plan liest, will wissen, wie
+            # weit die Schwelle noch weg ist.
+            pruefe(
+                "steht bei" in wenn_zeilen[0]["text"],
+                f"der Plan zeigt den Ist-Wert ({wenn_zeilen[0]['text']})",
+            )
+            await client.call_tool(
+                "musik_cancel", {"params": {"plan_id": wenn_zeilen[0]["id"]}}
+            )
 
         # ------------------------------------------------------------------
         # Was als Nächstes kommt

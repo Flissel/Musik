@@ -771,6 +771,27 @@ impl MusikApp {
                             }
                         }),
                     },
+                    // Ein Wenn hängt an einem Wert, nicht an Takten — deshalb
+                    // steht dort der Ist-Wert statt einer Restzeit.
+                    control::zeitplan::Was::Wenn {
+                        control,
+                        vergleich,
+                        schwelle,
+                        zeile,
+                    } => {
+                        let steht = match pult.lies(control) {
+                            Ok(control::Wert::Zahl(v)) => format!("{v:.2}"),
+                            _ => "?".into(),
+                        };
+                        PlanZeile {
+                            id: a.id,
+                            text: format!(
+                                "wenn {control} {} {schwelle} ({steht}): {zeile}",
+                                vergleich.zeichen()
+                            ),
+                            anteil: None,
+                        }
+                    }
                     control::zeitplan::Was::Spaeter { beim_beat, zeile } => PlanZeile {
                         id: a.id,
                         // Die Restzeit in Beats und nicht in Sekunden: Der Plan
