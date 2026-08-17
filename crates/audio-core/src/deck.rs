@@ -301,6 +301,11 @@ impl Voice {
 
         if !self.state.is_playing() {
             out.fill(0.0);
+            // Auch ein stehendes Deck muss melden, wo es steht. Sonst zeigt es
+            // nach einem Cue-Sprung die alte Stelle, ein frisch geladener Track
+            // die Position seines Vorgängers — und `beats_left`, `beat` und
+            // `beats_to_phrase` erben die Lüge, weil sie von hier rechnen.
+            self.melde_position();
             return;
         }
 
@@ -344,6 +349,11 @@ impl Voice {
             self.state.finished.store(true, Ordering::Relaxed);
         }
 
+        self.melde_position();
+    }
+
+    /// Schreibt die Abspielposition nach außen.
+    fn melde_position(&self) {
         let frames_total = self.track.frames() as f64;
         let clamped = self.pos.clamp(0.0, frames_total);
         self.state.position.store(clamped as u64, Ordering::Relaxed);
@@ -484,6 +494,53 @@ mod tests {
         let state = Arc::new(DeckState::new());
         state.set_playing(true);
         (Voice::new(track, Arc::clone(&state)), state)
+    }
+
+    /// Ein stehendes Deck muss melden, wo es steht.
+    ///
+    /// Cue setzen und anspringen, bevor der Track läuft, ist der Normalfall vor
+    /// dem Einsatz. Meldet das Deck dabei die alte Position, lügen auch
+    /// `beats_left`, `beat` und `beats_to_phrase` — und eine Bedingung, die
+    /// darauf wartet, entscheidet an der falschen Stelle.
+    #[test]
+    fn ein_stehendes_deck_meldet_die_neue_position() {
+        let (mut voice, state) = deck_mit_ton(10.0);
+        let mut aus = vec![0.0; 512 * CHANNELS];
+
+        state.set_playing(false);
+        state.seek_frames(RATE as u64 * 4);
+        voice.render_stereo(&mut aus);
+
+        assert_eq!(
+            state.position_frames(),
+            RATE as u64 * 4,
+            "das stehende Deck meldet noch die alte Position"
+        );
+    }
+
+    /// Und ein frisch geladener Track fängt nicht in der Mitte an.
+    #[test]
+    fn ein_frisch_geladener_track_meldet_den_anfang() {
+        let (mut voice, state) = deck_mit_ton(10.0);
+        let mut aus = vec![0.0; 512 * CHANNELS];
+
+        // Erst ein Stück spielen, dann anhalten — wie beim Trackwechsel.
+        voice.render_stereo(&mut aus);
+        state.set_playing(false);
+
+        // Neuer Abspieler auf demselben Zustand, so wie beim Laden.
+        let track = Arc::new(Track {
+            samples: sine(220.0, RATE, 10.0),
+            sample_rate: RATE,
+        });
+        let mut neu = Voice::new(track, Arc::clone(&state));
+        neu.render_stereo(&mut aus);
+
+        assert_eq!(
+            state.position_frames(),
+            0,
+            "der neue Track meldet die Position des alten"
+        );
     }
 
     #[test]
