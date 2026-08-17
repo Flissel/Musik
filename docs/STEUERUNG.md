@@ -358,6 +358,28 @@ Blende unhörbar, für einen harten Schnitt auf die Eins gerade noch vertretbar.
 **Sample-genau ist das ausdrücklich nicht**; dafür müssten die Befehle im
 Audio-Callback liegen, und dorthin gehört keine Reglerlogik.
 
+### Auf der nächsten Eins
+
+`in` nimmt statt einer Zahl auch `phrase` — die nächste Phrasengrenze des ersten
+Decks mit Beatgrid.
+
+```text
+in phrase do deck2.sync                    # auf der nächsten Eins
+in phrase+16 ramp master.crossfader 1 32   # eine Phrase später, dann blenden
+```
+
+**Das ist fast immer das Richtige.** Ein Übergang beginnt auf der Eins einer
+Phrase, nicht nach einer runden Zahl Beats. Wer ihn mit `in 32` nachbaut, trifft
+irgendwo hin — und der Mix klingt danach, egal wie sauber alles andere sitzt.
+
+`ramp` muss dafür nichts von Phrasen wissen: `in phrase ramp …` setzt die
+Bewegung auf die Grenze, weil `in` eine beliebige Protokollzeile trägt. Ein
+zweiter Phrasenbegriff im Rampen-Verb wäre eine zweite Stelle zum
+Auseinanderlaufen.
+
+Ohne Deck mit Beatgrid hat `phrase` keinen Bezugspunkt und wird abgewiesen,
+statt stillschweigend auf null zu fallen.
+
 ### Sobald es so weit ist
 
 `in` wartet auf Takte. Die Frage, die beim Auflegen wirklich gestellt wird,
@@ -463,6 +485,7 @@ Dieselben vier Verben, für einen Agenten, der kein Zeilenprotokoll spricht:
 | `ramp <control> <ziel> <beats> [deck]` | `musik_ramp` |
 | `in <beats> ramp …` | `musik_ramp` mit `in_beats` |
 | `in <beats> <befehl>` | `musik_schedule` |
+| `in phrase[+n] <befehl>` | `musik_schedule` mit `ab_phrase`, `musik_ramp` ebenso |
 | `when <control> < <wert> <befehl>` | `musik_when` |
 | `set master.signalN …` | `musik_signal` (sucht den Platz selbst) |
 | `plan` | Feld `plan` in `musik_status` |

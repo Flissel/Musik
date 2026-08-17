@@ -383,6 +383,22 @@ impl Steuerpult {
         .ok_or_else(|| Fehler::UnbekanntesControl(k.to_string()))
     }
 
+    /// Beats bis zur nächsten Phrasengrenze dieses Decks.
+    ///
+    /// Steht das Deck genau auf der Grenze, ist es 0 und nicht eine ganze
+    /// Phrase — sonst spränge die Zahl genau dort, wo man sie abliest.
+    ///
+    /// Liegt hier und nicht bei `lies_deck`, weil auch das Protokoll sie
+    /// braucht: `in phrase …` rechnet damit. Zwei Rechnungen für dieselbe
+    /// Frage wären zwei Stellen zum Auseinanderlaufen.
+    pub fn beats_bis_phrase(&self, deck: usize) -> Option<f64> {
+        let d = self.decks.get(deck)?;
+        let g = d.state.grid()?;
+        let beat = g.beat_at(d.state.position_frames() as f64, d.sample_rate);
+        let laenge = d.phrase_beats.max(1.0);
+        Some((laenge - beat.rem_euclid(laenge)).rem_euclid(laenge))
+    }
+
     fn lies_deck(&self, i: usize, element: &str) -> Option<Wert> {
         let d = self.decks.get(i)?;
         let rate = d.sample_rate as f64;
@@ -428,14 +444,8 @@ impl Steuerpult {
                 _ => Wert::Leer,
             },
             "phrase_beats" => Wert::Zahl(d.phrase_beats),
-            "beats_to_phrase" => match d.state.grid() {
-                Some(g) => {
-                    let beat = g.beat_at(d.state.position_frames() as f64, d.sample_rate);
-                    let laenge = d.phrase_beats.max(1.0);
-                    // Rest bis zur nächsten Grenze; steht man genau darauf, ist
-                    // es 0 und nicht eine ganze Phrase.
-                    Wert::Zahl((laenge - beat.rem_euclid(laenge)).rem_euclid(laenge))
-                }
+            "beats_to_phrase" => match self.beats_bis_phrase(i) {
+                Some(b) => Wert::Zahl(b),
                 None => Wert::Leer,
             },
             "loop_active" => Wert::Schalter(d.state.is_looping()),

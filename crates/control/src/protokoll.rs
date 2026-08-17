@@ -127,6 +127,7 @@ ok Befehle:
   unsub [control]...     Abbestellen; ohne Argument alles
   ramp <control> <ziel> <beats> [deck]   Regler über Beats bewegen
   in <beats> <befehl>    Befehl nach so vielen Beats ausführen
+  in phrase[+n] <befehl> Befehl auf der nächsten Phrasengrenze ausführen
   when <control> < <wert> <befehl>   Befehl, sobald ein Wert die Schwelle reisst
   plan              was vorgemerkt ist
   cancel [id]       Vorgemerktes zurücknehmen; ohne Argument alles
@@ -168,10 +169,16 @@ fn rampe(pult: &mut Steuerpult, control: Option<&str>, rest: Option<&str>) -> St
     }
 }
 
-/// `in <beats> <befehl>`
+/// `in <beats|phrase|phrase+n> <befehl>`
+///
+/// **`phrase` ist der Grund, warum es dieses Verb in dieser Form gibt.** Ein
+/// Übergang beginnt auf der Eins einer Phrase, nicht nach einer runden Zahl
+/// Beats. Wer das mit `in 32` nachbaut, trifft irgendwo hin — und der Mix
+/// klingt danach, egal wie sauber alles andere sitzt.
 fn spaeter(pult: &mut Steuerpult, beats: Option<&str>, befehl: Option<&str>) -> String {
-    let Some(Ok(beats)) = beats.map(|b| b.parse::<f64>()) else {
-        return "err in braucht Beats: in 16 do deck2.sync".into();
+    let beats = match beats_bezug(pult, beats.unwrap_or("")) {
+        Ok(b) => b,
+        Err(e) => return e,
     };
     let Some(befehl) = befehl.filter(|b| !b.trim().is_empty()) else {
         return "err in braucht einen Befehl: in 16 set channel2.fader 0.9".into();
@@ -233,6 +240,42 @@ fn wenn(pult: &mut Steuerpult, control: Option<&str>, rest: Option<&str>) -> Str
         ),
         Err(e) => format!("err {e}"),
     }
+}
+
+/// Liest die Wartezeit eines `in`: eine Zahl, `phrase` oder `phrase+n`.
+///
+/// Der Bezugspunkt für `phrase` ist dasselbe Deck, auf dessen Takten der
+/// Auftrag dann liegt — das erste mit Beatgrid. Sonst zählte man die Beats des
+/// einen und die Phrase des anderen.
+fn beats_bezug(pult: &Steuerpult, roh: &str) -> Result<f64, String> {
+    if let Ok(zahl) = roh.parse::<f64>() {
+        return Ok(zahl);
+    }
+
+    let (wort, versatz) = match roh.split_once('+') {
+        Some((w, rest)) => {
+            let Ok(v) = rest.parse::<f64>() else {
+                return Err(format!("err {rest} ist keine Zahl Beats"));
+            };
+            (w, v)
+        }
+        None => (roh, 0.0),
+    };
+    if wort != "phrase" {
+        return Err(
+            "err in braucht Beats oder phrase: in 16 do deck2.sync, in phrase do deck2.sync".into(),
+        );
+    }
+
+    let Some(deck) =
+        (0..pult.decks().len()).find(|i| crate::zeitplan::beat_jetzt(pult, *i).is_some())
+    else {
+        return Err("err kein Deck mit Beatgrid — phrase hat keinen Bezugspunkt".into());
+    };
+    let Some(bis) = pult.beats_bis_phrase(deck) else {
+        return Err("err die Phrasenlage ist nicht bekannt".into());
+    };
+    Ok(bis + versatz)
 }
 
 /// Was vorgemerkt ist — das gemeinsame Blatt, wenn mehrere bedienen.
@@ -1169,5 +1212,118 @@ mod wenn_tests {
         let (mut pult, _runner) = pult_mit_zwei_decks();
         let mut s = Sitzung::neu();
         assert!(behandle(&mut pult, &mut s, "help").contains("when "));
+    }
+}
+
+#[cfg(test)]
+mod phrasen_tests {
+    use super::*;
+    use crate::testing::{pult_mit_zwei_decks, rendern};
+
+    /// Der eigentliche Zweck: Ein Übergang beginnt auf der Eins einer Phrase.
+    ///
+    /// Mit `in 32` trifft man irgendwo hin, und der Mix klingt danach — egal
+    /// wie sauber alles andere sitzt.
+    #[test]
+    fn in_phrase_legt_den_befehl_auf_die_naechste_eins() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "set deck1.play 1");
+
+        // Vier Beats hinein: bis zur nächsten Sechzehnergruppe sind es zwölf.
+        behandle(&mut pult, &mut s, "do deck1.beatjump 4");
+        rendern(&mut runner, 1024);
+        let bis = match pult.lies(&Schluessel::parse("deck1.beats_to_phrase").unwrap()) {
+            Ok(crate::wert::Wert::Zahl(v)) => v,
+            andere => panic!("{andere:?}"),
+        };
+        assert!((bis - 12.0).abs() < 0.2, "Vorbedingung: {bis}");
+
+        let antwort = behandle(&mut pult, &mut s, "in phrase do deck2.sync");
+        assert!(antwort.starts_with("ok plan 1 in 1"), "{antwort}");
+
+        // Der Plan zählt dieselben Beats herunter, die beats_to_phrase nennt.
+        let plan = behandle(&mut pult, &mut s, "plan");
+        assert!(plan.contains("do deck2.sync"), "{plan}");
+    }
+
+    #[test]
+    fn phrase_plus_versatz_liegt_eine_phrase_spaeter() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "set deck1.play 1");
+        rendern(&mut runner, 1024);
+
+        let ohne = behandle(&mut pult, &mut s, "in phrase do deck2.sync");
+        let mit = behandle(&mut pult, &mut s, "in phrase+16 do deck2.sync");
+
+        let zahl = |z: &str| -> f64 {
+            z.split_whitespace()
+                .nth(4)
+                .and_then(|w| w.parse().ok())
+                .unwrap_or(-1.0)
+        };
+        let (a, b) = (zahl(&ohne), zahl(&mit));
+        assert!(
+            (b - a - 16.0).abs() < 0.5,
+            "erwartet 16 Beats Abstand, war {a} und {b}"
+        );
+    }
+
+    /// Und der Punkt daran: Eine Rampe lässt sich damit auf die Eins legen,
+    /// ohne dass `ramp` selbst etwas von Phrasen wissen müsste.
+    #[test]
+    fn eine_rampe_laesst_sich_auf_die_phrase_legen() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "set deck1.play 1");
+        rendern(&mut runner, 1024);
+
+        let antwort = behandle(&mut pult, &mut s, "in phrase ramp master.crossfader 1.0 32");
+        assert!(antwort.starts_with("ok plan 1 in "), "{antwort}");
+        assert!(
+            antwort.contains("ramp master.crossfader 1.0 32"),
+            "{antwort}"
+        );
+    }
+
+    #[test]
+    fn unsinnige_bezuege_werden_benannt_abgewiesen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+
+        for zeile in [
+            "in takt do deck2.sync",
+            "in phrase+viel do deck2.sync",
+            "in phrasen do deck2.sync",
+            "in phrase",
+        ] {
+            let antwort = behandle(&mut pult, &mut s, zeile);
+            assert!(antwort.starts_with("err"), "'{zeile}' → {antwort}");
+        }
+    }
+
+    /// Ohne Beatgrid gibt es keine Phrase — und das muss dastehen, statt
+    /// stillschweigend auf null zu fallen.
+    #[test]
+    fn ohne_grid_hat_phrase_keinen_bezugspunkt() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "set deck1.bpm_grid 0");
+        behandle(&mut pult, &mut s, "set deck2.bpm_grid 0");
+
+        let antwort = behandle(&mut pult, &mut s, "in phrase do deck2.sync");
+        assert!(antwort.starts_with("err"), "{antwort}");
+        assert!(
+            antwort.contains("Bezugspunkt") || antwort.contains("Beatgrid"),
+            "{antwort}"
+        );
+    }
+
+    #[test]
+    fn die_hilfe_nennt_den_phrasenbezug() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        assert!(behandle(&mut pult, &mut s, "help").contains("in phrase"));
     }
 }

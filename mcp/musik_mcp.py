@@ -401,6 +401,14 @@ class RampeEingabe(Basis):
         ge=0,
         le=4096,
     )
+    ab_phrase: bool = Field(
+        default=False,
+        description=(
+            "Auf der nächsten Phrasengrenze losfahren statt sofort. in_beats "
+            "zählt dann ab der Grenze. **Das ist fast immer das Richtige** — "
+            "ein Übergang beginnt auf der Eins, nicht nach einer runden Zahl."
+        ),
+    )
     taktgeber_deck: Optional[DeckName] = Field(
         default=None,
         description=(
@@ -421,6 +429,14 @@ class VormerkEingabe(Basis):
         description="In wie vielen Beats der Befehl ausgeführt wird",
         ge=0,
         le=4096,
+    )
+    ab_phrase: bool = Field(
+        default=False,
+        description=(
+            "beats ab der nächsten Phrasengrenze zählen statt ab jetzt. "
+            "**Für alles Musikalische das Richtige** — was auf der Eins sitzen "
+            "soll, gehört auf die Phrase und nicht auf eine runde Zahl."
+        ),
     )
     aktion: Optional[str] = Field(
         default=None,
@@ -1241,6 +1257,8 @@ async def musik_ramp(params: RampeEingabe) -> str:
     Beispiele:
         - „Blende den Bass von Deck 1 über 8 Beats raus" →
           control='channel1.eq_low', ziel=0, ueber_beats=8
+        - „Auf der nächsten Eins den Crossfader über 32 rüberziehen" →
+          control='master.crossfader', ziel=1, ueber_beats=32, ab_phrase=true
         - „Nach 16 Beats den Crossfader über 32 rüberziehen" →
           control='master.crossfader', ziel=1, ueber_beats=32, in_beats=16
         - Nicht dafür: einen Wert sofort setzen → `musik_set`.
@@ -1251,7 +1269,11 @@ async def musik_ramp(params: RampeEingabe) -> str:
     )
     if params.taktgeber_deck:
         befehl += f" {params.taktgeber_deck.value}"
-    if params.in_beats is not None:
+    if params.ab_phrase:
+        versatz = params.in_beats or 0
+        bezug = "phrase" if versatz == 0 else f"phrase+{_zahl_als_text(versatz)}"
+        befehl = f"in {bezug} {befehl}"
+    elif params.in_beats is not None:
         befehl = f"in {_zahl_als_text(params.in_beats)} {befehl}"
 
     try:
@@ -1293,9 +1315,10 @@ async def musik_schedule(params: VormerkEingabe) -> str:
           in_beats).
     """
     try:
-        zeilen = await eine_antwort(
-            f"in {_zahl_als_text(params.beats)} {params.befehl()}"
-        )
+        bezug = _zahl_als_text(params.beats)
+        if params.ab_phrase:
+            bezug = "phrase" if params.beats == 0 else f"phrase+{bezug}"
+        zeilen = await eine_antwort(f"in {bezug} {params.befehl()}")
     except NichtErreichbar as fehler:
         return f"Fehler: {fehler}"
 
