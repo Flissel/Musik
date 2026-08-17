@@ -46,21 +46,28 @@ bauen.
 Daraus folgt eine Reihenfolge, die zwei Dinge vorzieht, die nach außen wie
 Umwege aussehen.
 
-## P1 — Der Prüfstand
+## P1 — Der Prüfstand ✅
 
-*Macht die Eichung überprüfbar. Kostet wenig und ist ohne neue Musik zu bauen.*
+*Gebaut. Macht die Eichung überprüfbar, ohne neue Musik.*
 
 Ein Programm, das einen Ordner Tracks und eine **Angabe von Hand** nebeneinander
 legt und meldet, wo die Analyse zustimmt und wo nicht:
 
 ```text
-musik-pruefstand --wahrheit wahrheit.txt /musik/
+musik-pruefstand wahrheit.txt
 ```
 
+Die Wahrheitsdatei liegt neben der Musik, eine Zeile je Track:
+
 ```text
-# wahrheit.txt — was ein Mensch hört
-Nachtschicht.mp3   bpm 124   tonart Am   intro 0:00-0:32  drop 1:04  outro 5:12
+# was ich höre
+Nachtschicht.mp3  bpm 124  tonart Am  intro 0:00  aufbau 0:32  drop 1:04  outro 5:12
+Alpenglühen.wav   bpm 126
 ```
+
+Abschnitte stehen mit ihrem **Anfang**, nicht als Bereich: Wer zuhört, notiert
+„hier fängt das Outro an" und nicht „das Outro geht von … bis …". Jede Angabe
+ist einzeln freiwillig — weglassen ist besser als raten.
 
 Der Bericht sagt je Track und in der Summe, wie weit Tempo, Tonart und
 Abschnittsgrenzen daneben liegen. Nicht als Note — als Abstand mit Vorzeichen,
@@ -82,10 +89,32 @@ den Anfang eines Drops eine Phrase auseinander, und beide haben recht. Der
 Prüfstand meldet deshalb Abweichungen, keine Fehler — und ab welcher Abweichung
 etwas kaputt ist, entscheidet weiterhin ein Mensch.
 
-Er hat am ersten Tag einen Kunden: Das gebaute Material aus der
-Strukturanalyse trägt seine Wahrheit bereits (128 BPM, Grenzen bei Sekunde 15,
-30, 45, 60, 75). Damit lässt sich der Prüfer prüfen, bevor er auf echte Musik
-losgelassen wird.
+Er hat am ersten Tag einen Kunden gehabt: Das gebaute Material aus der
+Strukturanalyse trägt seine Wahrheit bereits (128 BPM, A-Dur, Grenzen bei
+Sekunde 15, 30, 45, 60, 75). Der erste Lauf dagegen:
+
+```text
+  Tempo    127.99 gegen  128.00 gehört   -0.01   ✓
+  Tonart  A    (11B) gegen A (11B) gehört   ✓
+  Gliederung  6 erkannt gegen 6 gehört
+        0.0s  intro   Grenze +0.5s (+1.0 Beats)   Name ✓
+       15.0s  aufbau  Grenze +0.5s (+1.0 Beats)   Name ✓
+       …
+    ── Davon systematisch: +1.0 Beats auf allen Grenzen ──
+```
+
+Und dabei kam gleich etwas heraus, das die reine Tabelle verschluckt hätte:
+**Jede** Grenze liegt um dasselbe daneben, keine streut. Ein konstanter Abstand
+ist eine Tatsache und keine sechs — er sagt etwas über den Nullpunkt (der Anker
+des Beatgrids sitzt auf dem ersten erkannten Schlag, die Wahrheitsdatei zählt ab
+Dateianfang) und nichts über die Segmentierung. Der Prüfstand trennt beides
+seither: gemeinsamer Versatz oben, Rest darunter. Streuen die Abweichungen
+stärker, als sie gemeinsam verschoben sind, wird nichts als Versatz erklärt —
+sonst würde aus „die Segmentierung wackelt" ein beruhigendes „nur der
+Nullpunkt".
+
+Eine Vorlage zum Ausfüllen liegt in
+[`wahrheit-vorlage.txt`](wahrheit-vorlage.txt).
 
 ## P2 — Das Team
 
@@ -193,8 +222,8 @@ machen** — deshalb steht der Prüfstand vorn.
 
 | | Was fehlt | Was ich vorbereite |
 | --- | --- | --- |
-| **M1** | **Musik mit Angabe, wo Intro, Drop und Outro anfangen.** Der größte Hebel überhaupt: Damit wird die Benennung der Abschnitte aus einer Vermutung ein Befund | P1, plus eine Vorlage für die Wahrheitsdatei |
-| **M2** | **Die Suno-Prompts zu den Tracks** — daraus ergibt sich die Tonart, und damit ist prüfbar, ob die Erkennung stimmt | derselbe Prüfstand |
+| **M1** | **Musik mit Angabe, wo Intro, Drop und Outro anfangen.** Der größte Hebel überhaupt: Damit wird die Benennung der Abschnitte aus einer Vermutung ein Befund | steht: `musik-pruefstand` und [`wahrheit-vorlage.txt`](wahrheit-vorlage.txt) |
+| **M2** | **Die Suno-Prompts zu den Tracks** — daraus ergibt sich die Tonart, und damit ist prüfbar, ob die Erkennung stimmt | steht: derselbe Prüfstand, Spalte `tonart` |
 | **M3** | **Ein Interface mit vier Ausgängen.** Phase 1 ist bis auf einen Schritt abgenommen: ob der Treiber die Pufferkanäle 3/4 auf die Buchsen 3/4 legt. Ohne Vorhören fehlt dem System außerdem das Ohr am Kopfhörer | vierkanaliges Rendern steht (`musik-mix --cue`), gemessen ist es auch |
 | **M4** | **Einmal hinhören, ob die Zeitstreckung bei ±8 % taugt.** Gemessen ist sie, gehört nie | eine Datei mit demselben Takt bei 0,92 / 1,00 / 1,08 zum Vergleichen |
 | **M5** | **Eine echte `collection.nml`** — der Traktor-Import ist nie gegen eine gelaufen | der Import steht, der Testfall ist synthetisch |
@@ -235,7 +264,7 @@ bräuchte es einen zweiten Weg für die Steuerung); MIDI-Controller (Phase 10).
 
 | | Was | Warum dort | Hängt an |
 | --- | --- | --- | --- |
-| P1 | Prüfstand | Macht jede spätere Zahl prüfbar und deinen Beitrag billig | — |
+| P1 ✅ | Prüfstand | Macht jede spätere Zahl prüfbar und deinen Beitrag billig | — |
 | P2 | Das Team | Der Zweck des Projekts; alles darüber wäre sonst zweimal gebaut | — |
 | P3 | Geste und Repertoire | Sofort hörbar, seit S1 messbar | — |
 | P4 | Der Bogen | Braucht S2; für ein Team der gemeinsame Maßstab | P2 |
