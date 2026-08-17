@@ -83,6 +83,20 @@ Zum Auflegen fehlt jetzt nur noch Hardware: Phase 1 ist abgenommen, sobald der
 Cue-Bus hörbar getrennt auf den Ausgängen 3/4 liegt, und das braucht ein
 Interface mit vier Ausgängen.
 
+**Ohne Gerät lässt sich der halbe Weg trotzdem hören.** `musik-mix --cue`
+rendert vierkanalig — denselben Weg, den auch das Gerät nimmt — und legt Summe
+und Kopfhörer als zwei Dateien ab:
+
+```sh
+musik-mix --a A.wav --b B.wav --out summe.wav --cue kopfhoerer.wav
+```
+
+In der Summe überwog im Versuch der Akkord von Deck A dreifach, im Kopfhörer
+der von Deck B viereinhalbfach — bei geschlossenem Fader auf B. Was damit
+**nicht** geprüft ist: ob der Treiber die Pufferkanäle 3/4 auch auf die Buchsen
+3/4 legt. Das bleibt am Gerät hängen, ist aber jetzt der einzige ungeprüfte
+Schritt.
+
 Darauf setzen die beiden Schichten aus dem Zielbild auf:
 
 | Phase | Inhalt | Abhängig von |

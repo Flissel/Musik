@@ -24,6 +24,12 @@ const BLOCK: usize = 512;
 
 struct Options {
     out: PathBuf,
+    /// Wohin der Kopfhörer-Bus geschrieben wird.
+    ///
+    /// Ohne Angabe gar nicht — dann rendert der Mixer wie bisher zweikanalig.
+    /// Mit Angabe läuft er vierkanalig, also über denselben Weg, den ein Gerät
+    /// mit vier Ausgängen nimmt.
+    cue_out: Option<PathBuf>,
     a: Option<PathBuf>,
     b: Option<PathBuf>,
     aux: Option<PathBuf>,
@@ -37,6 +43,7 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             out: PathBuf::from("mix.wav"),
+            cue_out: None,
             a: None,
             b: None,
             aux: None,
@@ -103,8 +110,20 @@ fn main() -> Result<()> {
         opts.transition_len
     );
 
+    // Mit `--cue` läuft der Mixer vierkanalig — derselbe Weg, den ein Gerät mit
+    // vier Ausgängen nimmt. Ohne bleibt es beim Stereo-Pfad, damit ein
+    // gewöhnlicher Mixdown nicht die doppelte Arbeit macht.
+    let kanaele = if opts.cue_out.is_some() { 4 } else { 2 };
+    if let Some(pfad) = &opts.cue_out {
+        // Ohne Cue-Taste bliebe die Datei still — dann sähe eine Trennung, die
+        // nicht funktioniert, genauso aus wie eine, die funktioniert.
+        engine.channel(deck_b).set_cue(true);
+        println!("  Cue:    {} (Deck B liegt vor)", pfad.display());
+    }
+
     let mut pcm: Vec<f32> = Vec::with_capacity(frames_total * 2);
-    let mut block = vec![0.0f32; BLOCK * 2];
+    let mut cue_pcm: Vec<f32> = Vec::new();
+    let mut block = vec![0.0f32; BLOCK * kanaele];
     let mut frame = 0usize;
 
     while frame < frames_total {
@@ -120,9 +139,14 @@ fn main() -> Result<()> {
             opts.transition_len,
         );
 
-        let slice = &mut block[..n * 2];
-        engine.render(slice, 2);
-        pcm.extend_from_slice(slice);
+        let slice = &mut block[..n * kanaele];
+        engine.render(slice, kanaele);
+
+        if kanaele == 2 {
+            pcm.extend_from_slice(slice);
+        } else {
+            aufteilen(slice, kanaele, &mut pcm, &mut cue_pcm);
+        }
 
         frame += n;
     }
@@ -134,7 +158,28 @@ fn main() -> Result<()> {
         (pcm.len() * 2) as f64 / 1_048_576.0
     );
 
+    if let Some(pfad) = &opts.cue_out {
+        schreibe_wav(pfad, &cue_pcm, rate).context("Cue-WAV konnte nicht geschrieben werden")?;
+        println!(
+            "{} geschrieben ({:.1} MB) — muss anders klingen als die Summe",
+            pfad.display(),
+            (cue_pcm.len() * 2) as f64 / 1_048_576.0
+        );
+    }
+
     Ok(())
+}
+
+/// Trennt einen vierkanaligen Block in Summe und Kopfhörer.
+///
+/// 0/1 sind die Summe, 2/3 der Kopfhörer — genau die Belegung, die auch am
+/// Gerät herauskommt. Vertauscht wäre sie hörbar falsch, aber erst beim
+/// Anhören; deshalb steht sie in einer eigenen Funktion mit eigenem Test.
+fn aufteilen(block: &[f32], kanaele: usize, summe: &mut Vec<f32>, kopfhoerer: &mut Vec<f32>) {
+    for f in block.chunks_exact(kanaele) {
+        summe.extend_from_slice(&f[..2]);
+        kopfhoerer.extend_from_slice(&f[2..4]);
+    }
 }
 
 /// Fahrplan des Übergangs.
@@ -424,6 +469,7 @@ fn parse_args() -> Result<Options> {
         let mut wert = || args.next().context("fehlender Wert");
         match arg.as_str() {
             "--out" | "-o" => opts.out = PathBuf::from(wert()?),
+            "--cue" => opts.cue_out = Some(PathBuf::from(wert()?)),
             "--a" => opts.a = Some(PathBuf::from(wert()?)),
             "--b" => opts.b = Some(PathBuf::from(wert()?)),
             "--aux" => opts.aux = Some(PathBuf::from(wert()?)),
@@ -457,8 +503,27 @@ fn hilfe() {
     println!("  --b <datei>            Deck B");
     println!("  --aux <datei>          AUX-Zuspieler, läuft auf Thru durch");
     println!("  --out <datei>          Ausgabe (Vorgabe: mix.wav)");
+    println!("  --cue <datei>          Kopfhörer-Bus als eigene Datei; Deck B liegt");
+    println!("                         darauf vor, während A auf der Summe läuft");
     println!("  --seconds <n>          Gesamtlänge (Vorgabe: 60)");
     println!("  --transition <sek>     Beginn des Übergangs (Vorgabe: Mitte)");
     println!("  --transition-len <sek> Dauer des Übergangs (Vorgabe: 16)");
     println!("  --rate <hz>            Samplerate (Vorgabe: 48000)");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summe_und_kopfhoerer_kommen_aus_den_richtigen_kanaelen() {
+        // Zwei Frames: erst die Summe, dann der Kopfhörer.
+        let block = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let mut summe = Vec::new();
+        let mut kopfhoerer = Vec::new();
+        aufteilen(&block, 4, &mut summe, &mut kopfhoerer);
+
+        assert_eq!(summe, vec![1.0, 2.0, 5.0, 6.0]);
+        assert_eq!(kopfhoerer, vec![3.0, 4.0, 7.0, 8.0]);
+    }
 }
