@@ -300,6 +300,13 @@ pub fn takt(
     }
 
     plan.auftraege = bleibt;
+    // In die Mitschrift gehört vor allem das hier: `plan 3 fertig` sagt auf
+    // den Frame genau, wann eine Blende zu Ende war. Aus dem Klang allein wäre
+    // das Ende einer langen Blende genauso schwer zu finden wie ihr Anfang —
+    // dort ist der eingehende Track längst der einzige.
+    for m in &meldungen {
+        pult.halten(crate::mitschrift::Richtung::Meldung, m);
+    }
     meldungen
 }
 
@@ -743,5 +750,53 @@ mod tests {
         assert_eq!(plan.auftraege().len(), 1);
         assert_eq!(plan.streichen(None), 1);
         assert!(plan.ist_leer());
+    }
+
+    /// Was der Plan meldet, gehört in die Mitschrift — und zwar mit dem Frame.
+    ///
+    /// Das Ende einer langen Blende ist im Klang genauso schwer zu finden wie
+    /// ihr Anfang: Dort läuft der eingehende Track längst allein. Der Plan
+    /// weiß es auf den Takt.
+    #[test]
+    fn was_der_plan_meldet_steht_in_der_mitschrift() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let wav = std::env::temp_dir().join(format!("musik-plan-{}.wav", std::process::id()));
+        let neben = wav.with_extension(crate::mitschrift::ENDUNG);
+        let _ = std::fs::remove_file(&wav);
+        let _ = std::fs::remove_file(&neben);
+
+        pult.ausloesen(&k("master.record"), Some(&wav.to_string_lossy()))
+            .expect("Mitschnitt");
+        pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+            .unwrap();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+
+        let mut plan = Zeitplan::neu();
+        // Acht Beats bei 128 BPM sind 3,75 s.
+        rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, 8.0, None).expect("planen");
+        laufen(&mut pult, &mut plan, &mut runner, RATE as usize * 4);
+
+        let p = crate::mitschrift::lesen(&neben).expect("lesbar");
+        let fertig = p
+            .ereignisse
+            .iter()
+            .find(|e| e.text.contains("fertig"))
+            .expect("das Ende der Blende steht nicht in der Mitschrift");
+        let sek = fertig.sekunden(p.kopf.rate);
+        assert!(
+            (3.5..4.1).contains(&sek),
+            "die Blende endete laut Mitschrift bei {sek:.2} s, erwartet wurden rund 3,75"
+        );
+        assert!(
+            fertig.stand(0).is_some_and(|s| s.beat > 7.5),
+            "der Beat beim Ende fehlt oder passt nicht: {:?}",
+            fertig.staende
+        );
+
+        pult.ausloesen(&k("master.record_stop"), None)
+            .expect("Stop");
+        let _ = std::fs::remove_file(&wav);
+        let _ = std::fs::remove_file(&neben);
     }
 }

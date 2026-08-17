@@ -29,6 +29,7 @@
 //! dem Mixer selbst.
 
 pub mod katalog;
+pub mod mitschrift;
 pub mod protokoll;
 pub mod pult;
 pub mod schluessel;
@@ -42,6 +43,7 @@ pub mod zeitplan;
 pub(crate) mod testing;
 
 pub use katalog::Beschreibung;
+pub use mitschrift::{Mitschrift, Richtung, Stand};
 pub use protokoll::behandle;
 pub use protokoll::Sitzung;
 pub use pult::{

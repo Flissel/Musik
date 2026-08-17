@@ -20,6 +20,7 @@
 //! < ok channel1.fader 1
 //! ```
 
+use crate::mitschrift::Richtung;
 use crate::pult::Steuerpult;
 use crate::schluessel::Schluessel;
 use crate::wert::{Art, Wert};
@@ -83,7 +84,13 @@ pub fn behandle(pult: &mut Steuerpult, sitzung: &mut Sitzung, zeile: &str) -> St
     let erstes = Some(wort(&mut rest)).filter(|w| !w.is_empty());
     let zweites = Some(rest.trim()).filter(|w| !w.is_empty());
 
-    match befehl {
+    // Vor dem Ausführen: Der festgehaltene Frame soll der sein, an dem der
+    // Befehl ankam, nicht der, an dem die Antwort fertig war.
+    if aendert(befehl) {
+        pult.halten(Richtung::Befehl, zeile);
+    }
+
+    let antwort = match befehl {
         "list" => list(pult, erstes),
         "get" => get(pult, erstes),
         "set" => set(pult, erstes, zweites, false),
@@ -98,7 +105,30 @@ pub fn behandle(pult: &mut Steuerpult, sitzung: &mut Sitzung, zeile: &str) -> St
         "cancel" => streichen(pult, erstes),
         "help" => HILFE.to_string(),
         andere => format!("err unbekannter Befehl: {andere} (help hilft)"),
+    };
+
+    if aendert(befehl) {
+        // Auch die Antwort, denn sie trägt die Plannummer — ohne sie ließe
+        // sich ein späteres „plan 3 fertig" keinem Auftrag zuordnen. Und ein
+        // `err` gehört genauso hinein: Ein Befehl, der nicht durchkam, erklärt
+        // im Nachhinein mehr als einer, der durchkam.
+        pult.halten(Richtung::Meldung, &antwort);
     }
+
+    antwort
+}
+
+/// Ob ein Befehl etwas verändert — und damit in die Mitschrift gehört.
+///
+/// `list`, `get`, `plan`, `help` und die Abos fragen nur nach. Sie stünden in
+/// jeder zweiten Zeile und würden zuschütten, was die Mitschrift zeigen soll:
+/// die Bewegungen. Ein Ereignisprotokoll, in dem man suchen muss, ist eines,
+/// in das niemand sieht.
+fn aendert(befehl: &str) -> bool {
+    matches!(
+        befehl,
+        "set" | "setn" | "do" | "ramp" | "in" | "when" | "cancel"
+    )
 }
 
 /// Nimmt das nächste Wort und lässt den Rest stehen.

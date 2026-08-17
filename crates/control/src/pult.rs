@@ -246,6 +246,7 @@ pub struct Steuerpult {
     handle: EngineHandle,
     sammlung: Option<Box<dyn Sammlung>>,
     aufnahme: Option<Aufnahme>,
+    mitschrift: Option<crate::mitschrift::Mitschrift>,
 }
 
 impl Steuerpult {
@@ -260,6 +261,7 @@ impl Steuerpult {
             handle,
             sammlung: None,
             aufnahme: None,
+            mitschrift: None,
         }
     }
 
@@ -397,6 +399,43 @@ impl Steuerpult {
         let beat = g.beat_at(d.state.position_frames() as f64, d.sample_rate);
         let laenge = d.phrase_beats.max(1.0);
         Some((laenge - beat.rem_euclid(laenge)).rem_euclid(laenge))
+    }
+
+    /// Wo alle Decks gerade stehen — für die Mitschrift.
+    ///
+    /// Decks ohne Beatgrid fehlen: Sie haben keinen Beat, auf den sich später
+    /// etwas beziehen ließe, und ein Platzhalter in der Zeile wäre nur eine
+    /// Zahl, die zu einer Aussage einlädt, die sie nicht trägt.
+    pub fn staende(&self) -> Vec<crate::mitschrift::Stand> {
+        self.decks
+            .iter()
+            .enumerate()
+            .filter_map(|(i, d)| {
+                let grid = d.state.grid()?;
+                Some(crate::mitschrift::Stand {
+                    deck: i,
+                    beat: grid.beat_at(d.state.position_frames() as f64, d.sample_rate),
+                    phrase_beats: d.phrase_beats,
+                    laeuft: d.state.is_playing(),
+                })
+            })
+            .collect()
+    }
+
+    /// Hält fest, was geschah — falls eine Mitschrift läuft.
+    ///
+    /// Ohne laufenden Mitschnitt tut das nichts: Eine Mitschrift ohne Klang
+    /// daneben hätte keinen Bezugspunkt, an dem sich ihre Frames festmachen
+    /// ließen.
+    pub fn halten(&mut self, richtung: crate::mitschrift::Richtung, text: &str) {
+        if self.mitschrift.is_none() {
+            return;
+        }
+        let frame = self.aufnahme.as_ref().map(|a| a.frames()).unwrap_or(0);
+        let staende = self.staende();
+        if let Some(m) = self.mitschrift.as_mut() {
+            m.halten(frame, &staende, richtung, text);
+        }
     }
 
     fn lies_deck(&self, i: usize, element: &str) -> Option<Wert> {
@@ -962,7 +1001,23 @@ impl Steuerpult {
         aufnahme
             .starten(std::path::Path::new(pfad))
             .map_err(Fehler::Gescheitert)?;
-        Ok(vec![format!("record läuft nach {pfad}")])
+        let rate = aufnahme.rate();
+        let mut zeilen = vec![format!("record läuft nach {pfad}")];
+
+        // Die Mitschrift gehört zum Mitschnitt und wird deshalb nicht einzeln
+        // eingeschaltet. Sie kostet ein paar Kilobyte je Set, und ein Set, von
+        // dem hinterher niemand mehr weiß, was gemeint war, kostet mehr.
+        let ziel = std::path::Path::new(pfad).with_extension(crate::mitschrift::ENDUNG);
+        match crate::mitschrift::Mitschrift::starten(&ziel, std::path::Path::new(pfad), rate) {
+            Ok(m) => {
+                zeilen.push(format!("mitschrift {}", m.pfad().display()));
+                self.mitschrift = Some(m);
+            }
+            // Ohne Mitschrift läuft der Mitschnitt trotzdem: Der Klang ist das
+            // Werk, die Mitschrift die Fußnote. Verschwiegen wird es nicht.
+            Err(e) => zeilen.push(format!("warnung Mitschrift nicht möglich — {e}")),
+        }
+        Ok(zeilen)
     }
 
     fn aufnahme_stoppen(&mut self) -> Result<Vec<String>, Fehler> {
@@ -982,6 +1037,15 @@ impl Steuerpult {
             zeilen.push(format!(
                 "warnung {verworfen} Frames fehlen — der Mitschnitt hat Lücken"
             ));
+        }
+        if let Some(m) = self.mitschrift.take() {
+            zeilen.push(format!("mitschrift {}", m.pfad().display()));
+            if m.fehler() > 0 {
+                zeilen.push(format!(
+                    "warnung {} Zeilen der Mitschrift fehlen",
+                    m.fehler()
+                ));
+            }
         }
         Ok(zeilen)
     }
@@ -2421,5 +2485,180 @@ mod signal_tests {
             .collect();
         assert_eq!(namen.len(), crate::signal::SIGNALE * 4, "{namen:?}");
         assert!(namen.contains(&"master.signal1_trend".to_string()));
+    }
+}
+
+/// Die Mitschrift im Zusammenspiel: Mitschnitt an, Befehl geben, nachlesen.
+///
+/// Getrennt von den Mitschrift-Tests im eigenen Modul: Dort geht es um die
+/// Form der Datei, hier darum, dass überhaupt und nur das Richtige hineinkommt.
+#[cfg(test)]
+mod mitschrift_tests {
+    use super::*;
+    use crate::mitschrift::{self, Richtung};
+    use crate::testing::{pult_mit_zwei_decks, rendern, RATE};
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "musik-mitschrift-{}-{name}.wav",
+            std::process::id()
+        ));
+        p
+    }
+
+    fn aufraeumen(wav: &std::path::Path) {
+        let _ = std::fs::remove_file(wav);
+        let _ = std::fs::remove_file(wav.with_extension(mitschrift::ENDUNG));
+    }
+
+    fn sagen(pult: &mut Steuerpult, zeile: &str) -> String {
+        let mut sitzung = crate::Sitzung::neu();
+        crate::behandle(pult, &mut sitzung, zeile)
+    }
+
+    #[test]
+    fn die_mitschrift_entsteht_neben_dem_mitschnitt() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let wav = scratch("neben");
+        aufraeumen(&wav);
+
+        let zeilen = pult
+            .ausloesen(&k("master.record"), Some(&wav.to_string_lossy()))
+            .expect("Start");
+        assert!(
+            zeilen.iter().any(|z| z.starts_with("mitschrift ")),
+            "der Start verschweigt die Mitschrift: {zeilen:?}"
+        );
+
+        let neben = wav.with_extension(mitschrift::ENDUNG);
+        let p = mitschrift::lesen(&neben).expect("Mitschrift lesbar");
+        assert_eq!(p.kopf.mitschnitt, wav.display().to_string());
+        assert_eq!(p.kopf.rate, RATE);
+
+        let zeilen = pult
+            .ausloesen(&k("master.record_stop"), None)
+            .expect("Stop");
+        assert!(
+            zeilen.iter().any(|z| z.starts_with("mitschrift ")),
+            "das Ende verschweigt, wo die Mitschrift liegt: {zeilen:?}"
+        );
+
+        aufraeumen(&wav);
+    }
+
+    /// Was fragt, gehört nicht hinein. Sonst steht in jeder zweiten Zeile ein
+    /// `get`, und die Bewegungen gehen darin unter.
+    #[test]
+    fn was_sich_aendert_steht_drin_was_nur_fragt_nicht() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let wav = scratch("auswahl");
+        aufraeumen(&wav);
+        pult.ausloesen(&k("master.record"), Some(&wav.to_string_lossy()))
+            .expect("Start");
+
+        sagen(&mut pult, "get channel1.fader");
+        sagen(&mut pult, "list channel1");
+        sagen(&mut pult, "plan");
+        sagen(&mut pult, "set channel1.fader 0.5");
+
+        let p = mitschrift::lesen(&wav.with_extension(mitschrift::ENDUNG)).expect("lesbar");
+        let texte: Vec<&str> = p.ereignisse.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(
+            texte,
+            vec!["set channel1.fader 0.5", "ok channel1.fader 0.500000"],
+            "in der Mitschrift steht das Falsche"
+        );
+        assert_eq!(p.ereignisse[0].richtung, Richtung::Befehl);
+        assert_eq!(p.ereignisse[1].richtung, Richtung::Meldung);
+
+        pult.ausloesen(&k("master.record_stop"), None)
+            .expect("Stop");
+        aufraeumen(&wav);
+    }
+
+    /// Der Punkt der ganzen Übung: Wo standen die Decks, als es geschah.
+    #[test]
+    fn die_mitschrift_haelt_frame_und_beat_fest() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let wav = scratch("stand");
+        aufraeumen(&wav);
+        pult.ausloesen(&k("master.record"), Some(&wav.to_string_lossy()))
+            .expect("Start");
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+
+        // Zwei Sekunden: bei 128 BPM gut vier Beats.
+        rendern(&mut runner, RATE as usize * 2);
+        sagen(&mut pult, "ramp master.crossfader 1 32");
+
+        let p = mitschrift::lesen(&wav.with_extension(mitschrift::ENDUNG)).expect("lesbar");
+        let befehl = p
+            .ereignisse
+            .iter()
+            .find(|e| e.text.starts_with("ramp "))
+            .expect("der Befehl fehlt");
+
+        let sek = befehl.sekunden(p.kopf.rate);
+        assert!(
+            (1.5..2.5).contains(&sek),
+            "der Griff steht bei {sek:.2} s statt bei rund 2 s"
+        );
+        let stand = befehl
+            .stand(0)
+            .expect("Deck 1 hat ein Grid, steht aber nicht drin");
+        assert!(
+            (3.5..5.0).contains(&stand.beat),
+            "Beat {:.2} passt nicht zu zwei Sekunden bei 128 BPM",
+            stand.beat
+        );
+        assert_eq!(stand.phrase_beats, 16.0);
+
+        pult.ausloesen(&k("master.record_stop"), None)
+            .expect("Stop");
+        aufraeumen(&wav);
+    }
+
+    /// Ohne Mitschnitt gibt es nichts, worauf sich ein Frame beziehen könnte.
+    /// Dann wird auch nichts geschrieben — und schon gar nicht irgendwohin.
+    #[test]
+    fn ohne_mitschnitt_wird_nichts_mitgeschrieben() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let wav = scratch("ohne");
+        aufraeumen(&wav);
+
+        sagen(&mut pult, "set channel1.fader 0.5");
+
+        assert!(!wav.with_extension(mitschrift::ENDUNG).exists());
+        assert_eq!(pult.lies(&k("channel1.fader")).unwrap(), Wert::Zahl(0.5));
+    }
+
+    /// Nach dem Stoppen ist Schluss. Sonst schriebe die Mitschrift weiter in
+    /// eine Datei, zu der es keinen Klang mehr gibt.
+    #[test]
+    fn nach_dem_stoppen_kommt_nichts_mehr_dazu() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let wav = scratch("danach");
+        aufraeumen(&wav);
+        pult.ausloesen(&k("master.record"), Some(&wav.to_string_lossy()))
+            .expect("Start");
+        sagen(&mut pult, "set channel1.fader 0.5");
+        pult.ausloesen(&k("master.record_stop"), None)
+            .expect("Stop");
+
+        sagen(&mut pult, "set channel1.fader 0.9");
+
+        let p = mitschrift::lesen(&wav.with_extension(mitschrift::ENDUNG)).expect("lesbar");
+        assert!(
+            p.ereignisse.iter().all(|e| !e.text.contains("0.9")),
+            "nach dem Stoppen kam noch etwas dazu: {:?}",
+            p.ereignisse
+        );
+
+        aufraeumen(&wav);
     }
 }

@@ -242,9 +242,11 @@ festgehalten und begründet.
 ```text
 do master.record ~/sets/2026-08-13.wav
 record läuft nach ~/sets/2026-08-13.wav
+mitschrift ~/sets/2026-08-13.mitschrift
 get master.record_seconds     → value master.record_seconds 6.784000
 get master.record_dropped     → value master.record_dropped 0
 do master.record_stop         → record ~/sets/2026-08-13.wav · 6.8 s
+                                mitschrift ~/sets/2026-08-13.mitschrift
 ```
 
 Aufgenommen wird die Summe **hinter dem Begrenzer** — also das, was auf die
@@ -256,6 +258,40 @@ nicht hinterher, gehen Frames verloren — blockieren wäre schlimmer. Verloren
 heißt hier aber nicht verschwiegen: Der Zähler ist abfragbar, und `record_stop`
 sagt es von sich aus dazu. Ein Mitschnitt mit Lücken, der aussieht wie einer
 ohne, wäre das schlechteste Ergebnis von allen.
+
+## Die Mitschrift
+
+Neben dem Mitschnitt entsteht eine zweite Datei, gleicher Name, Endung
+`.mitschrift`. Sie wird nicht einzeln eingeschaltet — der Klang ohne die
+Absicht ist die Hälfte der Geschichte.
+
+```text
+# musik-mitschrift 1
+# mitschnitt /pfad/set.wav
+# rate 48000
+962560 20.053 deck1=41.187/16 deck2=-0.998/16~ > in phrase set deck2.play 1
+1116160 23.253 deck1=48.012/16 deck2=-0.998/16~ > ramp master.crossfader 1 32
+1837056 38.272 deck1=80.049/16 deck2=31.039/16 < plan 3 fertig master.crossfader 1.0000
+```
+
+Je Zeile: **Frame im Mitschnitt**, Sekunden zur Bequemlichkeit, dann für jedes
+Deck mit Beatgrid `deck<N>=<beat>/<phrase>` — ein angehängtes `~` heißt, das
+Deck stand. `>` ist hereingekommen, `<` ist hinausgegangen.
+
+Drinsteht, was **verändert**: `set`, `setn`, `do`, `ramp`, `in`, `when`,
+`cancel`, dazu die Meldungen des Zeitplans. `get`, `list`, `plan` und `help`
+fragen nur und stünden sonst in jeder zweiten Zeile.
+
+**Wozu.** Der Griff an den Fader steht nicht im Klang. Am Anfang einer langen
+Blende ist der eingehende Track per Konstruktion unhörbar; wer den Beginn
+nachträglich aus dem Mitschnitt schätzt, liegt an einem gemessenen Beispiel
+3,7 Sekunden daneben. Dieselbe Lücke bei der Phrasenlage: Der Anker eines
+nachträglich geschätzten Rasters ist irgendein starker Schlag, nicht die Eins.
+Beides weiß die Anlage im Moment des Geschehens genau.
+
+Gelesen wird sie von `musik-kritik`, der sie von selbst neben dem Mitschnitt
+findet. Maßgeblich ist immer der **Frame**; die Sekunden in der Zeile sind für
+Menschen da und werden beim Lesen aus der Rate neu gerechnet.
 
 ## Antworten lesen
 

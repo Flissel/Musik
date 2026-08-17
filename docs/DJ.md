@@ -111,6 +111,40 @@ sie ein Urteil über die Phrasenlage.
 Die Strukturanalyse (S2) liefert den zweiten fehlenden Nullpunkt: Wo eine Phrase
 anfängt, weiß man erst, wenn man weiß, wo der Abschnitt anfängt.
 
+## S1b — Die Mitschrift ✅
+
+*Gebaut. Sie liegt neben dem Mitschnitt und wird nicht einzeln eingeschaltet.*
+
+Je Ereignis eine Zeile: der Frame im Mitschnitt, der Beat jedes Decks, ob es
+lief, und die Zeile selbst — hereinkommend `>`, hinausgehend `<`. Geschrieben
+wird, was verändert; `get` und `list` bleiben draußen. `musik-kritik` findet sie
+von selbst und liest sie mit.
+
+Am ersten vollständig gefahrenen Übergang danach:
+
+| Frage | Aus dem Klang | Aus der Mitschrift |
+| --- | --- | --- |
+| Wann begann die Blende? | 27,0 s (±4) | **23,25 s** |
+| Auf welchem Beat? | „nicht beurteilbar" | **48,01 — 0,01 in die Phrase** |
+| Wie lang war sie wirklich? | 18 s geschätzt | **32,0 von 32 bestellten Beats** |
+
+Damit ist die erste Zahl da, die dieses ganze Vorhaben rechtfertigt: **Die
+Schätzung aus dem Klang lag 3,7 Sekunden zu spät.** Vorher war das eine
+Vermutung; `--ohne-mitschrift` misst sie jetzt bei jedem Set neu.
+
+Und der erste Befund, den vorher niemand hätte finden können: Deck 2 setzte auf
+*seinem* Beat −1 ein, also fünfzehn Beats neben seiner eigenen Eins. Der
+ausgehende Track war auf der Phrase, der eingehende nicht. Genau dafür braucht
+es S2 — der Einstiegspunkt gehört auf einen Downbeat, nicht auf Sekunde 0.
+
+Zwei Grenzen bleiben, und beide gehören dazu:
+
+- **Die Mitschrift misst die Anlage an sich selbst.** Sie sagt, ob die Anlage
+  traf, was sie vorhatte — nicht, ob Beat 0 des Rasters musikalisch die Eins
+  ist.
+- **Sie sagt nichts über Klang.** Ein Griff ohne hörbaren Wechsel bleibt ein
+  Griff ohne hörbaren Wechsel; der Kritiker meldet das inzwischen als Befund.
+
 ## S2 — Struktur
 
 *Die größte Lücke in der Analyse. Alles Musikalische hängt daran.*
@@ -198,7 +232,7 @@ Dann ist es kein Automixer mehr.
 | --- | --- | --- |
 | S0 | Phrase als Bezugspunkt | Ein Verb, wirkt auf jeden Mix, blockiert nichts |
 | S1 | Kritiker über den Mitschnitt | Macht alles Folgende prüfbar statt behauptbar |
-| S1b | Plan-Protokoll neben den Mitschnitt legen | Ohne die Absicht ist die Phrasenlage nicht messbar |
+| S1b ✅ | Mitschrift neben den Mitschnitt legen | Ohne die Absicht ist die Phrasenlage nicht messbar |
 | S2 | Strukturanalyse | Voraussetzung für jede musikalische Regel |
 | S3 | Set-Bogen | Braucht S2, um Abschnitte zu planen |
 | S4 | Gestenformen und Repertoire | Lohnt erst, wenn die Stellen stimmen |
@@ -208,6 +242,11 @@ Dann ist es kein Automixer mehr.
 S0 und S1 sind zusammen die kleinste Menge, nach der sich das Ergebnis
 **belegen** lässt statt nur behaupten. Sie kommen zuerst, auch wenn S2 den
 größeren Klanggewinn verspricht.
+
+S0, S1 und S1b stehen. Was jetzt gemessen werden kann, hat beim ersten Lauf
+sofort einen Fehler gezeigt, den niemand vermutet hatte — der eingehende Track
+kam fünfzehn Beats neben seiner eigenen Eins herein. Das ist der Auftrag für
+S2.
 
 ## Was daran nicht Software ist
 

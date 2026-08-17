@@ -9,8 +9,10 @@ Loops; Mixer mit EQ, Filter, Crossfader, Cue-Bus und AUX; Analyse für Tempo,
 Beatgrid und Wellenform; Sync über Tempo *und* Phase; Sammlung mit
 Traktor-Import; Oberfläche mit zwei Decks, Wellenform, Beatgrid und
 Plattenkiste; vier Effekte hinter dem Fader; **Fernsteuerung über einen
-selbstbeschreibenden Steuerraum**; Mitschnitt der Summe. Nativ in Rust. Was
-fehlt, sind Stems und MIDI.
+selbstbeschreibenden Steuerraum**; Mitschnitt der Summe — und daneben eine
+**Mitschrift**, die festhält, was gemeint war, damit `musik-kritik` das Set
+hinterher nachmessen kann statt zu raten. Nativ in Rust. Was fehlt, sind Stems
+und MIDI.
 
 ![Die Oberfläche](docs/bilder/oberflaeche.png)
 

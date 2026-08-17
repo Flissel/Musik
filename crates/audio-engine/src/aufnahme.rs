@@ -161,6 +161,14 @@ impl Aufnahme {
         self.frames() as f64 / self.sample_rate.max(1) as f64
     }
 
+    /// Mit welcher Rate mitgeschnitten wird.
+    ///
+    /// Wer Frames aufhebt, um sie später einer Stelle im Mitschnitt zuzuordnen,
+    /// braucht sie dazu — sonst sind es Zahlen ohne Zeit.
+    pub fn rate(&self) -> u32 {
+        self.sample_rate
+    }
+
     /// Frames, die nicht mehr in den Ring passten.
     ///
     /// Alles über null heißt: Der Mitschnitt hat Lücken.

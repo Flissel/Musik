@@ -21,10 +21,20 @@
 //! **Eine Grenze, die er selbst benennt:** Am Anfang einer langen Blende ist
 //! der eingehende Track per Konstruktion unhörbar — das ist, was eine Blende
 //! ausmacht. Der Griff an den Fader lässt sich aus dem Mitschnitt allein
-//! deshalb nicht auf den Beat genau zurückverfolgen. Der Kritiker gibt die
-//! Unschärfe mit an und schweigt zur Phrasenlage, wenn sie größer ist als der
-//! gemessene Versatz. Um das zu schließen, müsste er das Plan-Protokoll
-//! mitlesen — das ist der nächste Schritt, nicht dieser.
+//! deshalb nicht auf den Beat genau zurückverfolgen, und der Nullpunkt eines
+//! nachträglich geschätzten Rasters ist nicht der Anfang einer Phrase.
+//!
+//! **Deshalb liest er die Mitschrift mit.** Sie liegt neben dem Mitschnitt und
+//! hält fest, welcher Befehl bei welchem Frame ankam und wo die Decks dabei
+//! standen. Damit muss er den Griff an den Fader nicht mehr erraten: Der
+//! Mitschnitt sagt, was herauskam, die Mitschrift, was gemeint war. Und der
+//! Abstand zwischen beiden ist selbst ein Befund — er misst, wie weit die
+//! Schätzung danebenliegt, wenn keine Mitschrift da ist.
+//!
+//! Die Mitschrift ersetzt das Hören ausdrücklich nicht. Sie sagt, wann der
+//! Fader bewegt wurde, nicht, ob es gut klang. Wo beide sich widersprechen,
+//! ist das ein Befund und keine Fehlerquelle: Ein Griff ohne hörbaren Wechsel
+//! heißt, dass die Bewegung nichts bewirkt hat.
 //!
 //! Was er ausdrücklich **nicht** tut: eine Note geben. Ob ein Set gut war,
 //! entscheidet weiterhin jemand, der dabei war. Der Kritiker nimmt ihm die
@@ -36,6 +46,7 @@ use anyhow::{Context, Result, bail};
 
 use analysis::{onset, tempo, tonart};
 use audio_core::track::Track;
+use control::mitschrift::{self, Protokoll, Richtung, Stand};
 
 /// Fensterlänge für das Klangbild. Eine Sekunde ist kurz genug, um den Beginn
 /// einer Blende auf den Takt genau einzugrenzen, und lang genug, dass ein
@@ -52,8 +63,17 @@ const ABSTAND_SEK: f64 = 16.0;
 /// 0,1; eine Blende reißt deutlich darüber.
 const WECHSEL_SCHWELLE: f32 = 0.25;
 
+/// Wie weit ein gemessener Übergang von einem festgehaltenen Griff entfernt
+/// sein darf, um noch als derselbe zu gelten.
+///
+/// Eine Blende dauert selten über eine Minute; was weiter auseinanderliegt,
+/// gehört nicht zusammen. Lieber „kein Griff in der Nähe" sagen als zwei Dinge
+/// zusammenzwingen, die nichts miteinander zu tun haben.
+const ZUORDNUNG_SEK: f64 = 45.0;
+
 struct Optionen {
     datei: PathBuf,
+    mitschrift: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -68,6 +88,34 @@ fn main() -> Result<()> {
         track.sample_rate
     );
 
+    let absicht = match &opts.mitschrift {
+        Some(pfad) => match mitschrift::lesen(pfad) {
+            Ok(p) => {
+                absicht_bericht(pfad, &p);
+                Some(Absicht {
+                    rate: p.kopf.rate,
+                    einsaetze: einsaetze(&p),
+                    griffe: griffe(&p),
+                })
+            }
+            Err(e) => {
+                // Kein Abbruch: Der Mitschnitt bleibt lesbar, auch wenn die
+                // Mitschrift es nicht ist. Verschwiegen wird es nicht.
+                println!("Mitschrift {}: {e}\n", pfad.display());
+                None
+            }
+        },
+        None => {
+            println!("Keine Mitschrift daneben — Beginn und Phrasenlage bleiben geschätzt.");
+            println!("  Sie entsteht beim Aufnehmen von selbst und heißt wie der");
+            println!(
+                "  Mitschnitt, nur mit der Endung .{}.\n",
+                mitschrift::ENDUNG
+            );
+            None
+        }
+    };
+
     let kurve = wechselkurve(&track);
     let uebergaenge = uebergaenge_finden(&kurve, FENSTER_SEK);
 
@@ -77,16 +125,295 @@ fn main() -> Result<()> {
         println!("\nKein Übergang gefunden.");
         println!("  Entweder lief nur ein Track, oder der Wechsel war zu leise für");
         println!("  die Schwelle. Das ist ein Befund, keine Entwarnung.");
+        // Ein Griff ohne hörbaren Wechsel ist selbst ein Befund: Die Bewegung
+        // hat nichts bewirkt. Das darf hier nicht untergehen.
+        if let Some(a) = absicht.as_ref().filter(|a| !a.griffe.is_empty()) {
+            println!(
+                "\n⚠ Die Mitschrift kennt {} Griff(e), gehört hat man keinen.",
+                a.griffe.len()
+            );
+            println!("   Entweder stand der Kanal zu, oder die Bewegung war zu klein.");
+        }
         return Ok(());
     }
 
     println!("\n{} Übergänge gefunden:", uebergaenge.len());
     for (i, u) in uebergaenge.iter().enumerate() {
         println!("\n── Übergang {} ──────────────────────────────", i + 1);
-        uebergang_bericht(&track, u);
+        uebergang_bericht(&track, u, absicht.as_ref());
+    }
+
+    if let Some(a) = &absicht {
+        schaetzfehler_bericht(&uebergaenge, a);
     }
 
     Ok(())
+}
+
+/// Was die Anlage vorhatte, gelesen aus der Mitschrift.
+struct Absicht {
+    rate: u32,
+    griffe: Vec<Griff>,
+    /// Wann welches Deck losgelaufen ist — `(deck, frame)`, nullbasiert.
+    einsaetze: Vec<(usize, u64)>,
+}
+
+impl Absicht {
+    fn sekunden(&self, frame: u64) -> f64 {
+        frame as f64 / self.rate.max(1) as f64
+    }
+
+    /// Der Griff, der einem gemessenen Beginn am nächsten liegt.
+    ///
+    /// Bewusst über den Abstand und nicht über die Reihenfolge: Nicht jeder
+    /// Griff wird hörbar, und nicht jeder hörbare Wechsel hat einen Griff —
+    /// eine Paarung nach Position wäre eine Behauptung.
+    fn naechster(&self, sekunde: f64) -> Option<(&Griff, f64)> {
+        self.griffe
+            .iter()
+            .map(|g| (g, self.sekunden(g.frame) - sekunde))
+            .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .filter(|(_, ab)| ab.abs() <= ZUORDNUNG_SEK)
+    }
+}
+
+/// Eine Reglerbewegung, wie die Mitschrift sie festgehalten hat.
+///
+/// **Das ist die Absicht, nicht das Ergebnis.** Ob der Griff hörbar war, sagt
+/// weiterhin nur der Mitschnitt — hier steht, wann er geschah und wo die Decks
+/// dabei standen.
+struct Griff {
+    frame: u64,
+    control: String,
+    ziel: f64,
+    /// Bestellte Länge in Beats.
+    beats: f64,
+    /// Nummer im Plan, über die sich das Ende wiederfindet.
+    plan: Option<u64>,
+    staende: Vec<Stand>,
+    ende: Option<Ende>,
+}
+
+/// Wie eine Bewegung ausging.
+struct Ende {
+    frame: u64,
+    /// `fertig`, `abgeloest` oder `abgebrochen` — die Worte des Zeitplans.
+    ausgang: String,
+    staende: Vec<Stand>,
+}
+
+/// Liest die Bewegungen aus einer Mitschrift.
+fn griffe(p: &Protokoll) -> Vec<Griff> {
+    let mut gefunden = Vec::new();
+
+    for (i, e) in p.ereignisse.iter().enumerate() {
+        if e.richtung != Richtung::Befehl {
+            continue;
+        }
+        let Some(rest) = e.text.strip_prefix("ramp ") else {
+            continue;
+        };
+        let mut worte = rest.split_whitespace();
+        let (Some(control), Some(ziel), Some(beats)) = (worte.next(), worte.next(), worte.next())
+        else {
+            continue;
+        };
+        let (Ok(ziel), Ok(beats)) = (ziel.parse::<f64>(), beats.parse::<f64>()) else {
+            continue;
+        };
+
+        // Genau die nächste Zeile, nicht die nächste passende: Die Antwort
+        // folgt dem Befehl unmittelbar. Weiter zu suchen hieße, bei einem
+        // abgelehnten Befehl die Nummer des übernächsten zu erwischen.
+        let plan = p
+            .ereignisse
+            .get(i + 1)
+            .filter(|n| n.richtung == Richtung::Meldung)
+            .and_then(|n| plan_nummer(&n.text));
+
+        let ende = plan.and_then(|id| ende_von(p, i + 1, id));
+
+        gefunden.push(Griff {
+            frame: e.frame,
+            control: control.to_string(),
+            ziel,
+            beats,
+            plan,
+            staende: e.staende.clone(),
+            ende,
+        });
+    }
+
+    gefunden
+}
+
+/// Die Nummer aus einer Zeile, die von einem Plan spricht.
+fn plan_nummer(text: &str) -> Option<u64> {
+    let mut worte = text.split_whitespace();
+    while let Some(w) = worte.next() {
+        if w == "plan" {
+            return worte.next()?.parse().ok();
+        }
+    }
+    None
+}
+
+/// Sucht die Meldung, mit der ein Auftrag zu Ende ging.
+fn ende_von(p: &Protokoll, ab: usize, id: u64) -> Option<Ende> {
+    const AUSGAENGE: [&str; 3] = ["fertig", "abgeloest", "abgebrochen"];
+
+    p.ereignisse.iter().skip(ab).find_map(|e| {
+        if e.richtung != Richtung::Meldung || plan_nummer(&e.text) != Some(id) {
+            return None;
+        }
+        let wort = e.text.split_whitespace().nth(2)?;
+        AUSGAENGE.contains(&wort).then(|| Ende {
+            frame: e.frame,
+            ausgang: wort.to_string(),
+            staende: e.staende.clone(),
+        })
+    })
+}
+
+/// Was die Mitschrift für sich genommen sagt.
+fn absicht_bericht(pfad: &Path, p: &Protokoll) {
+    println!("Mitschrift: {}", pfad.display());
+    println!(
+        "  {} Ereignisse, {} Bewegungen",
+        p.ereignisse.len(),
+        griffe(p).len()
+    );
+    if p.unlesbar > 0 {
+        println!(
+            "  ⚠ {} Zeilen ließen sich nicht lesen — die Mitschrift hat Lücken.",
+            p.unlesbar
+        );
+    }
+    println!();
+}
+
+/// Wann welches Deck eingesetzt hat.
+///
+/// Ein Deck, das genau bei einem Griff losläuft, steht dabei noch auf seinem
+/// Einstiegspunkt — die Position wird erst nach dem nächsten Audioblock
+/// veröffentlicht. Genau darin liegt aber der Befund: Wo im *eigenen* Raster
+/// der eingehende Track anfängt, ist die Frage, die ein Cue-Punkt beantwortet.
+fn einsaetze(p: &Protokoll) -> Vec<(usize, u64)> {
+    p.ereignisse
+        .iter()
+        .filter(|e| e.richtung == Richtung::Befehl)
+        .filter_map(|e| {
+            let rest = e.text.strip_prefix("set deck")?;
+            let (nummer, rest) = rest.split_once(".play")?;
+            let an = matches!(rest.trim(), "1" | "true" | "on");
+            let deck: usize = nummer.parse().ok()?;
+            (an && deck > 0).then_some((deck - 1, e.frame))
+        })
+        .collect()
+}
+
+/// Ein Griff mit allem, was die Mitschrift über ihn weiß.
+fn griff_bericht(g: &Griff, rate: u32, einzug: &str, einsaetze: &[(usize, u64)]) {
+    let sek = |frame: u64| frame as f64 / rate.max(1) as f64;
+    println!(
+        "{einzug}Griff bei {:.2} s: {} → {:.2} über {:.0} Beats",
+        sek(g.frame),
+        g.control,
+        g.ziel,
+        g.beats
+    );
+
+    for s in &g.staende {
+        let einsatz = einsaetze.contains(&(s.deck, g.frame));
+        // Ein stehendes Deck bekommt keine Phrasenlage. Sie wäre ausrechenbar
+        // und würde gelesen wie „es kam neben der Eins herein" — dabei kam es
+        // überhaupt nicht herein.
+        let Some(lage) = s.phrasenlage() else {
+            println!("{einzug}  deck{}: steht bei Beat {:.2}", s.deck + 1, s.beat);
+            continue;
+        };
+        let hinweis = if lage < 0.25 {
+            " — auf der Eins"
+        } else if (s.phrase_beats - lage) < 0.25 {
+            " — knapp vor der Eins"
+        } else if einsatz {
+            " ⚠ nicht auf seiner Eins"
+        } else {
+            ""
+        };
+        let was = if einsatz {
+            "setzt hier ein bei Beat"
+        } else {
+            "Beat"
+        };
+        println!(
+            "{einzug}  deck{}: {was} {:.2}, {lage:.2} in die Phrase ({:.0}){hinweis}",
+            s.deck + 1,
+            s.beat,
+            s.phrase_beats
+        );
+    }
+    if g.staende.is_empty() {
+        println!("{einzug}  Kein Deck hatte ein Beatgrid — die Phrasenlage fehlt.");
+    }
+
+    match &g.ende {
+        Some(e) => {
+            let dauer = sek(e.frame) - sek(g.frame);
+            print!("{einzug}  {} nach {dauer:.1} s", e.ausgang);
+            // Was wirklich an Beats vergangen ist, weiß nur die Mitschrift:
+            // Wer am Tempo dreht, verschiebt Sekunden, nicht Beats.
+            match (g.staende.first(), e.staende.first()) {
+                (Some(a), Some(b)) if a.deck == b.deck => {
+                    let gefahren = b.beat - a.beat;
+                    print!(" · {gefahren:.1} von {:.0} Beats", g.beats);
+                    if (gefahren - g.beats).abs() > 1.0 {
+                        print!(" ⚠");
+                    }
+                }
+                _ => {}
+            }
+            println!();
+        }
+        None => println!(
+            "{einzug}  Kein Ende in der Mitschrift{}.",
+            match g.plan {
+                Some(id) => format!(" (Plan {id} läuft noch oder das Set brach ab)"),
+                None => " — der Befehl kam nicht durch".to_string(),
+            }
+        ),
+    }
+}
+
+/// Wie weit die Schätzung aus dem Klang danebenlag.
+///
+/// **Das ist die Zahl, die diese ganze Übung rechtfertigt.** Ohne Mitschrift
+/// bleibt sie unbekannt, und dann hält man die Schätzung für die Wahrheit.
+fn schaetzfehler_bericht(uebergaenge: &[Uebergang], a: &Absicht) {
+    let abweichungen: Vec<f64> = uebergaenge
+        .iter()
+        .filter_map(|u| a.naechster(u.beginn).map(|(_, ab)| ab))
+        .collect();
+    if abweichungen.is_empty() {
+        return;
+    }
+
+    let mittel = abweichungen.iter().map(|d| d.abs()).sum::<f64>() / abweichungen.len() as f64;
+    let groesste = abweichungen
+        .iter()
+        .copied()
+        .max_by(|x, y| x.abs().total_cmp(&y.abs()))
+        .unwrap_or(0.0);
+
+    println!("\n── Was die Schätzung taugt ──────────────────");
+    println!(
+        "  {} von {} Übergängen ließen sich einem Griff zuordnen.",
+        abweichungen.len(),
+        uebergaenge.len()
+    );
+    println!("  Im Mittel lag die Schätzung {mittel:.1} s daneben, am weitesten {groesste:+.1} s.");
+    println!("  Ein negatives Vorzeichen heißt: zu spät geschätzt — genau der Fehler,");
+    println!("  den eine lange Blende erzwingt, weil ihr Anfang unhörbar ist.");
 }
 
 /// Ein gefundener Übergang, in Sekunden.
@@ -242,12 +569,30 @@ fn pegel_bericht(track: &Track) {
     }
 }
 
-fn uebergang_bericht(track: &Track, u: &Uebergang) {
+fn uebergang_bericht(track: &Track, u: &Uebergang, absicht: Option<&Absicht>) {
     let dauer = u.ende - u.beginn;
     println!(
         "  Beginn {:>7.2} s (±{:.0} s), Dauer {:.1} s, Stärke {:.2}",
         u.beginn, u.unschaerfe, dauer, u.hoehe
     );
+
+    // --- Was gemeint war ------------------------------------------------
+    // Steht vor der Schätzung, weil es sie ablöst: Wo die Mitschrift den
+    // Griff kennt, ist alles Zurückverfolgen aus dem Klang nur noch die
+    // Gegenprobe.
+    let zugeordnet = absicht.and_then(|a| a.naechster(u.beginn));
+    if let (Some(a), Some((g, ab))) = (absicht, &zugeordnet) {
+        println!("  ── laut Mitschrift ──");
+        griff_bericht(g, a.rate, "  ", &a.einsaetze);
+        println!(
+            "    Die Schätzung aus dem Klang liegt {:.1} s {}.",
+            ab.abs(),
+            if *ab < 0.0 { "zu spät" } else { "zu früh" }
+        );
+    } else if absicht.is_some() {
+        println!("  Kein Griff in der Mitschrift in der Nähe — der Wechsel kam nicht");
+        println!("  von einem Regler, oder er stand nicht im Plan.");
+    }
 
     // --- Phrasenlage ----------------------------------------------------
     // Das Raster kommt aus dem Material *davor*: Dort läuft der ausgehende
@@ -270,10 +615,10 @@ fn uebergang_bericht(track: &Track, u: &Uebergang) {
 (Unschärfe ±{unschaerfe_beats:.1})"
             );
 
-            // Bewusst kein Urteil über Beat- oder Phrasenlage. Zwei Gründe,
-            // beide hart:
+            // Kein Urteil aus dem Klang allein — und mit Mitschrift ein
+            // anderes, kleineres. Zwei Gründe, beide hart:
             //
-            // Das Fenster ist ein Sekunde breit, bei 126 BPM also zwei Beats.
+            // Das Fenster ist eine Sekunde breit, bei 126 BPM also zwei Beats.
             // Damit lässt sich nicht feststellen, ob ein Einsatz auf dem
             // Schlag sitzt — die Auflösung ist gröber als die Frage.
             //
@@ -282,13 +627,19 @@ fn uebergang_bericht(track: &Track, u: &Uebergang) {
             // neben der Eins" wäre gegen einen willkürlichen Nullpunkt
             // gemessen.
             //
-            // Beides ließe sich schließen — feinere Fenster für das eine, ein
-            // bekannter Downbeat aus der Strukturanalyse oder dem
-            // Plan-Protokoll für das andere. Bis dahin steht hier die Zahl
-            // ohne Urteil, und daneben, was fehlt.
-            println!("  · Beat- und Phrasenlage sind so nicht beurteilbar: Die Unschärfe");
-            println!("     (±{unschaerfe_beats:.0} Beats) ist größer als der Versatz, und der");
-            println!("     Nullpunkt des Rasters ist nicht der Anfang einer Phrase.");
+            // Die Mitschrift schließt den zweiten Grund halb: Sie kennt den
+            // Beat, den die *Anlage* meinte, und damit lässt sich prüfen, ob
+            // die Anlage getan hat, was sie vorhatte. Ob ihr Beat 0 auch
+            // musikalisch ein Downbeat ist, weiß erst die Strukturanalyse.
+            if zugeordnet.is_some() {
+                println!("  · Die Phrasenlage oben ist gegen die Rechnung der Anlage gemessen:");
+                println!("     Sie sagt, ob die Anlage traf, was sie vorhatte. Ob ihr Beat 0");
+                println!("     auch musikalisch die Eins ist, weiß erst die Strukturanalyse.");
+            } else {
+                println!("  · Beat- und Phrasenlage sind so nicht beurteilbar: Die Unschärfe");
+                println!("     (±{unschaerfe_beats:.0} Beats) ist größer als der Versatz, und der");
+                println!("     Nullpunkt des Rasters ist nicht der Anfang einer Phrase.");
+            }
         }
         None => println!("  Raster davor nicht erkennbar — Phrasenlage nicht beurteilbar."),
     }
@@ -374,15 +725,27 @@ fn raster_von(track: &Track, start: usize, ende: usize) -> Option<tempo::Beatgri
 
 fn argumente() -> Result<Optionen> {
     let mut datei = None;
+    let mut mitschrift = None;
+    let mut warte_auf_mitschrift = false;
 
     for arg in std::env::args().skip(1) {
+        if warte_auf_mitschrift {
+            mitschrift = Some(PathBuf::from(arg));
+            warte_auf_mitschrift = false;
+            continue;
+        }
         match arg.as_str() {
             "-h" | "--help" => {
                 hilfe();
                 std::process::exit(0);
             }
+            "--mitschrift" => warte_auf_mitschrift = true,
+            "--ohne-mitschrift" => mitschrift = Some(PathBuf::new()),
             _ => datei = Some(PathBuf::from(arg)),
         }
+    }
+    if warte_auf_mitschrift {
+        bail!("--mitschrift braucht eine Datei");
     }
 
     let Some(datei) = datei else {
@@ -392,16 +755,42 @@ fn argumente() -> Result<Optionen> {
     if !Path::new(&datei).exists() {
         bail!("{} gibt es nicht", datei.display());
     }
-    Ok(Optionen { datei })
+
+    // Ohne Angabe die daneben: Die Anlage legt sie beim Aufnehmen von selbst
+    // dorthin, und wer sie erst nennen müsste, ließe sie meistens liegen.
+    // `--ohne-mitschrift` trägt einen leeren Pfad und heißt: ausdrücklich
+    // nicht — dafür gibt es einen Grund, siehe `hilfe`.
+    let mitschrift = match mitschrift {
+        Some(p) if p.as_os_str().is_empty() => None,
+        Some(p) => {
+            if !p.exists() {
+                bail!("{} gibt es nicht", p.display());
+            }
+            Some(p)
+        }
+        None => {
+            let daneben = datei.with_extension(mitschrift::ENDUNG);
+            daneben.exists().then_some(daneben)
+        }
+    };
+
+    Ok(Optionen { datei, mitschrift })
 }
 
 fn hilfe() {
-    println!("Aufruf: musik-kritik <mitschnitt.wav>");
+    println!("Aufruf: musik-kritik <mitschnitt.wav> [--mitschrift <datei>]");
     println!();
     println!("Liest einen Mitschnitt und benennt, was messbar ist: wo ein Übergang");
     println!("liegt, wie lang er dauert, was der Pegel dabei macht und ob das Tempo");
-    println!("durchhält. Zur Beat- und Phrasenlage schweigt er — dafür ist die");
-    println!("Zeitauflösung zu grob und der Nullpunkt des Rasters willkürlich.");
+    println!("durchhält.");
+    println!();
+    println!("Liegt eine Mitschrift daneben (gleicher Name, Endung .mitschrift),");
+    println!("liest er sie mit. Dann muss er den Griff an den Fader nicht mehr aus");
+    println!("dem Klang erraten, und die Phrasenlage wird messbar.");
+    println!();
+    println!("--ohne-mitschrift ignoriert sie. Das ist kein Sparmodus, sondern die");
+    println!("Probe aufs Exempel: Nur so sieht man, wie weit die Schätzung");
+    println!("danebenliegt, wenn nur der Klang da ist.");
     println!();
     println!("Er gibt keine Note. Ob ein Set gut war, entscheidet, wer dabei war.");
 }
@@ -506,5 +895,152 @@ mod tests {
             *w = 0.7;
         }
         assert_eq!(uebergaenge_finden(&kurve, 1.0).len(), 1);
+    }
+
+    fn protokoll(zeilen: &[&str]) -> Protokoll {
+        let mut text = String::from("# musik-mitschrift 1\n# mitschnitt set.wav\n# rate 48000\n");
+        text.push_str(&zeilen.join("\n"));
+        mitschrift::aus_text(&text).expect("Mitschrift lesbar")
+    }
+
+    #[test]
+    fn die_plannummer_steht_in_beiden_richtungen() {
+        assert_eq!(
+            plan_nummer("ok plan 3 ramp master.crossfader nach 1"),
+            Some(3)
+        );
+        assert_eq!(
+            plan_nummer("plan 12 fertig master.crossfader 1.0000"),
+            Some(12)
+        );
+        assert_eq!(plan_nummer("err kein Deck mit Beatgrid"), None);
+        assert_eq!(plan_nummer("ok plan viele"), None);
+    }
+
+    /// Der Regelfall: bestellt, angenommen, zu Ende gefahren.
+    #[test]
+    fn aus_befehl_und_meldung_wird_ein_ganzer_griff() {
+        let p = protokoll(&[
+            "480000 10.000 deck1=64.000/16 > ramp master.crossfader 1 32",
+            "480100 10.002 deck1=64.001/16 < ok plan 3 ramp master.crossfader nach 1 über 32 Beats",
+            "1200000 25.000 deck1=96.000/16 < plan 3 fertig master.crossfader 1.0000",
+        ]);
+        let g = griffe(&p);
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].frame, 480_000);
+        assert_eq!(g[0].control, "master.crossfader");
+        assert_eq!(g[0].beats, 32.0);
+        assert_eq!(g[0].plan, Some(3));
+        assert_eq!(g[0].staende[0].beat, 64.0);
+        assert_eq!(
+            g[0].staende[0].phrasenlage(),
+            Some(0.0),
+            "64 ist eine Phrasengrenze"
+        );
+
+        let ende = g[0].ende.as_ref().expect("das Ende fehlt");
+        assert_eq!(ende.ausgang, "fertig");
+        assert_eq!(ende.staende[0].beat - g[0].staende[0].beat, 32.0);
+    }
+
+    /// Ein abgelehnter Befehl darf sich nicht die Nummer des nächsten borgen.
+    ///
+    /// Ohne das hinge ein `plan 4 fertig` am falschen Griff, und der Bericht
+    /// behauptete eine Blende, die nie lief.
+    #[test]
+    fn ein_abgelehnter_befehl_bekommt_keine_fremde_nummer() {
+        let p = protokoll(&[
+            "0 0.000 > ramp master.crossfader 1 32",
+            "0 0.000 < err kein Deck mit Beatgrid als Taktgeber",
+            "480000 10.000 deck1=64.000/16 > ramp channel1.eq_low 0 8",
+            "480100 10.002 deck1=64.001/16 < ok plan 4 ramp channel1.eq_low nach 0 über 8 Beats",
+            "600000 12.500 deck1=68.000/16 < plan 4 fertig channel1.eq_low 0.0000",
+        ]);
+        let g = griffe(&p);
+        assert_eq!(g.len(), 2);
+        assert_eq!(
+            g[0].plan, None,
+            "der abgelehnte Befehl hat eine Nummer bekommen"
+        );
+        assert!(
+            g[0].ende.is_none(),
+            "der abgelehnte Befehl hat ein fremdes Ende"
+        );
+        assert_eq!(g[1].plan, Some(4));
+        assert_eq!(
+            g[1].ende.as_ref().map(|e| e.ausgang.as_str()),
+            Some("fertig")
+        );
+    }
+
+    /// Eine abgelöste Rampe ist kein Fehler im Lesen, sondern ein Befund:
+    /// Jemand anders hat den Regler angefasst.
+    #[test]
+    fn eine_abgeloeste_rampe_wird_als_solche_gelesen() {
+        let p = protokoll(&[
+            "0 0.000 deck1=0.000/16 > ramp channel1.fader 0 16",
+            "0 0.000 deck1=0.000/16 < ok plan 1 ramp channel1.fader nach 0 über 16 Beats",
+            "96000 2.000 deck1=4.000/16 < plan 1 abgeloest channel1.fader — jemand anders hat den Regler",
+        ]);
+        let g = griffe(&p);
+        assert_eq!(
+            g[0].ende.as_ref().map(|e| e.ausgang.as_str()),
+            Some("abgeloest")
+        );
+    }
+
+    /// Zugeordnet wird über den Abstand, nicht über die Reihenfolge — und was
+    /// zu weit weg ist, wird gar nicht zugeordnet.
+    #[test]
+    fn der_griff_wird_ueber_den_abstand_gesucht() {
+        let a = Absicht {
+            rate: 48_000,
+            griffe: griffe(&protokoll(&[
+                "480000 10.000 deck1=64.000/16 > ramp master.crossfader 1 32",
+                "480100 10.002 deck1=64.001/16 < ok plan 1 ramp master.crossfader nach 1",
+                "9600000 200.000 deck1=512.000/16 > ramp master.crossfader 0 32",
+                "9600100 200.002 deck1=512.001/16 < ok plan 2 ramp master.crossfader nach 0",
+            ])),
+            einsaetze: Vec::new(),
+        };
+        assert_eq!(a.griffe.len(), 2);
+
+        // Vier Sekunden zu spät geschätzt: negativer Abstand.
+        let (g, ab) = a.naechster(14.0).expect("kein Griff gefunden");
+        assert_eq!(g.frame, 480_000);
+        assert!((ab + 4.0).abs() < 1e-6, "{ab}");
+
+        // Näher am zweiten.
+        assert_eq!(a.naechster(195.0).expect("kein Griff").0.frame, 9_600_000);
+
+        // Und dazwischen gehört nichts zusammen.
+        assert!(
+            a.naechster(120.0).is_none(),
+            "zwei Dinge wurden zusammengezwungen, die 100 s auseinanderliegen"
+        );
+    }
+
+    /// Der Einsatz eines Decks ist ein eigenes Ereignis — und die Frage, ob er
+    /// auf der Eins des *eingehenden* Tracks lag, ist die, die ein Cue-Punkt
+    /// beantwortet.
+    #[test]
+    fn ein_einsatz_wird_als_solcher_erkannt() {
+        let p = protokoll(&[
+            "1116160 23.253 deck1=48.012/16 deck2=-0.998/16~ > set deck2.play 1",
+            "1116160 23.253 deck1=48.012/16 deck2=-0.998/16 < ok deck2.play 1",
+            "1116160 23.253 deck1=48.012/16 deck2=-0.998/16 > ramp master.crossfader 1 32",
+        ]);
+        assert_eq!(einsaetze(&p), vec![(1, 1_116_160)]);
+    }
+
+    /// Ein Stopp ist kein Einsatz, und eine Frage erst recht nicht.
+    #[test]
+    fn ein_stopp_ist_kein_einsatz() {
+        let p = protokoll(&[
+            "0 0.000 deck1=0.000/16 > set deck1.play 0",
+            "0 0.000 deck1=0.000/16 < ok deck1.play 0",
+            "48000 1.000 deck1=2.000/16 < ok deck2.play 1",
+        ]);
+        assert!(einsaetze(&p).is_empty(), "{:?}", einsaetze(&p));
     }
 }
