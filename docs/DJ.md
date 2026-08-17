@@ -84,6 +84,33 @@ Das Wichtigste daran: Der Kritiker läuft **offline über den Mitschnitt**. Er
 braucht keine neue Analyse im Echtzeitpfad und kann so gründlich sein, wie er
 will.
 
+### Was der erste Kritiker gelernt hat
+
+`musik-kritik` steht und misst Übergänge, Dauer, Pegelverlauf und Tempotreue.
+Zwei Dinge kann er **nicht**, und beide sind wichtiger als das, was er kann:
+
+**Den Beginn einer langen Blende findet er nicht.** Am Anfang ist der eingehende
+Track per Konstruktion unhörbar — das ist, was eine Blende ausmacht. Bei einer
+Blende über 16 Sekunden liegt seine Schätzung um vier Sekunden daneben, und er
+gibt das als Unschärfe mit an. Aus der Summe allein ist das nicht zu lösen: Die
+Information steht dort nicht drin.
+
+**Die Phrasenlage kann er gar nicht messen.** Der Anker des Tempodetektors ist
+der erste starke Schlag im Analysefenster, nicht der Anfang einer Phrase. Eine
+Angabe wie „sechs Beats neben der Eins" wäre gegen einen willkürlichen Nullpunkt
+gemessen. Beim Bauen stand diese Zahl schon im Bericht, bevor auffiel, dass sie
+keinen Boden hat.
+
+Damit verschiebt sich der Plan an einer Stelle: **Das Plan-Protokoll gehört zum
+Kritiker dazu.** Was beabsichtigt war, weiß die Anlage — sie schreibt es im
+Zeitplan ohnehin mit. Wer es danebenlegt, kennt den Griff an den Fader auf den
+Beat genau und braucht ihn nicht aus dem Klang zu erraten. Der Mitschnitt sagt
+dann, was *herauskam*; das Protokoll, was *gemeint war*. Erst zusammen ergeben
+sie ein Urteil über die Phrasenlage.
+
+Die Strukturanalyse (S2) liefert den zweiten fehlenden Nullpunkt: Wo eine Phrase
+anfängt, weiß man erst, wenn man weiß, wo der Abschnitt anfängt.
+
 ## S2 — Struktur
 
 *Die größte Lücke in der Analyse. Alles Musikalische hängt daran.*
@@ -171,6 +198,7 @@ Dann ist es kein Automixer mehr.
 | --- | --- | --- |
 | S0 | Phrase als Bezugspunkt | Ein Verb, wirkt auf jeden Mix, blockiert nichts |
 | S1 | Kritiker über den Mitschnitt | Macht alles Folgende prüfbar statt behauptbar |
+| S1b | Plan-Protokoll neben den Mitschnitt legen | Ohne die Absicht ist die Phrasenlage nicht messbar |
 | S2 | Strukturanalyse | Voraussetzung für jede musikalische Regel |
 | S3 | Set-Bogen | Braucht S2, um Abschnitte zu planen |
 | S4 | Gestenformen und Repertoire | Lohnt erst, wenn die Stellen stimmen |
