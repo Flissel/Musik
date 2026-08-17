@@ -265,3 +265,17 @@ ein `musik_when` hängen kann.
 **Leer heißt nicht null.** Steht der Abspielkopf im Vorlauf vor der ersten Eins,
 gibt es keinen Abschnitt; hat ein Track kein Outro, gibt es keine Zahl. Beides
 kommt als `null` zurück und nicht als 0.
+
+## Wenn ein anderer dazwischenkommt
+
+`musik_status` trägt `master.last_event` und `master.event_count`. Dort steht,
+was der Plan zuletzt von sich aus gemeldet hat — meistens `fertig`, im
+interessanten Fall `abgeloest channel1.fader — jemand anders hat den Regler`.
+
+Über MCP lässt sich nicht abonnieren: Die Brücke öffnet je Aufruf eine neue
+Verbindung. Deshalb der Zähler daneben. **Springt er zwischen zwei Blicken um
+mehr als eins, sind Ereignisse dazwischen liegengeblieben** — dann lohnt ein
+Blick in den Plan, ob noch dasteht, was man vorgemerkt hatte.
+
+Wer dauerhaft zuhören kann, nimmt den Socket direkt und `sub master.events`;
+dort kommt jede Zeile einzeln.

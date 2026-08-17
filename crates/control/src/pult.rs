@@ -242,6 +242,9 @@ pub struct Steuerpult {
     pub liste: crate::warteschlange::Warteschlange,
     /// Was von außen hereinkommt — siehe [`crate::signal`].
     pub signale: [crate::signal::Signal; crate::signal::SIGNALE],
+    /// Was geschehen ist, ohne dass jemand danach gefragt hat — siehe
+    /// [`crate::ereignis`].
+    pub ereignisse: crate::ereignis::Ereignisse,
     decks: Vec<DeckEintrag>,
     kanaele: Vec<KanalSpiegel>,
     master: MasterSpiegel,
@@ -257,6 +260,7 @@ impl Steuerpult {
             plan: crate::zeitplan::Zeitplan::neu(),
             liste: crate::warteschlange::Warteschlange::neu(),
             signale: std::array::from_fn(|_| crate::signal::Signal::neu()),
+            ereignisse: crate::ereignis::Ereignisse::neu(),
             decks: Vec::new(),
             kanaele: Vec::new(),
             master: MasterSpiegel::default(),
@@ -641,6 +645,13 @@ impl Steuerpult {
 
         // Der Mitschnitt hat seinen eigenen Zustand, nicht den des Mixers.
         match element {
+            "events" => {
+                return Some(match self.ereignisse.letzte() {
+                    Some(z) => Wert::Text(z.to_string()),
+                    None => Wert::Leer,
+                });
+            }
+            "event_count" => return Some(Wert::Zahl(self.ereignisse.nummer() as f64)),
             "recording" => {
                 return Some(Wert::Schalter(
                     self.aufnahme.as_ref().is_some_and(|a| a.laeuft()),

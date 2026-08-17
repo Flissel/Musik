@@ -116,9 +116,9 @@ Nullpunkt".
 Eine Vorlage zum Ausfüllen liegt in
 [`wahrheit-vorlage.txt`](wahrheit-vorlage.txt).
 
-## P2 — Das Team
+## P2 — Das Team ✅ (Stufe 1)
 
-*Der Zweck des Projekts, und der am wenigsten geprüfte Teil davon.*
+*Gebaut: zwei Verbindungen an einem Pult. Zwei unabhängige Modelle stehen aus.*
 
 Zwei oder mehr Bediener gleichzeitig an einem Pult, jeder mit eigener
 Verbindung, und ein Aufbau, der die Zusammenstöße **absichtlich** herbeiführt:
@@ -148,6 +148,35 @@ Zwei Ausbaustufen, und die Reihenfolge ist wichtig:
 Entscheidungen darüber, *was als Nächstes kommt*. Wer die für einen Bediener
 baut und danach auf ein Team umstellt, baut sie zweimal. Und ein Fehler im
 Zusammenspiel fällt in einer Schicht darüber nur schwerer auf, nicht später weg.
+
+### Was dabei herauskam
+
+**Der Fund stand vor dem ersten Test.** Die Frage „was sieht ein zweiter
+Bediener?" genügte: `takt_starten` gab den Rückgabewert des Taktgebers nicht
+weiter, sondern verwarf ihn. Damit ging *jede* Meldung des Plans verloren —
+fertig, abgebrochen und vor allem **abgelöst**. Ein Agent, dem ein anderer den
+Fader wegnahm, erfuhr es nie und plante weiter auf einer Blende, die seit
+zwanzig Sekunden tot war. Für einen einzelnen Bediener fiel das nie auf: Er war
+derjenige, der den Regler angefasst hat.
+
+Jetzt liegen die Meldungen in einem Ring mit laufender Nummer, und
+`sub master.events` holt sie ab. Kein einzelner Wert, weil der Taktgeber alle
+5 ms läuft und der Server alle 50 ms vergleicht — neun von zehn Zeilen wären
+weg, gerade wenn viel gleichzeitig geschieht. Wer zu langsam liest, bekommt
+`warnung N Ereignisse verloren`; über MCP, wo ein Abo nicht hält, gibt es
+`master.events` und `master.event_count` zum Fragen.
+
+Neun Zusammenstöße stehen als Test, dazu einer über den echten Socket mit
+laufendem Taktgeber und zwei Verbindungen — dort geht es nicht um die Regeln,
+sondern darum, ob sich Mutex, Taktgeber und Abo-Thread gegenseitig aushungern.
+Sie tun es nicht.
+
+Was die vorhandenen Mechanismen angeht, hielten sie: Die richtige Rampe gibt
+auf, derselbe Track wird nicht zweimal abgenommen, und zwei Aufträge auf
+derselben Phrasengrenze feuern beide.
+
+**Stufe 2 steht aus:** zwei unabhängige Modelle. Die findet, was Menschen und
+Modelle unterschiedlich verstehen, und das findet man nicht durch Nachdenken.
 
 ## P3 — Geste und Repertoire (S4)
 
@@ -265,7 +294,7 @@ bräuchte es einen zweiten Weg für die Steuerung); MIDI-Controller (Phase 10).
 | | Was | Warum dort | Hängt an |
 | --- | --- | --- | --- |
 | P1 ✅ | Prüfstand | Macht jede spätere Zahl prüfbar und deinen Beitrag billig | — |
-| P2 | Das Team | Der Zweck des Projekts; alles darüber wäre sonst zweimal gebaut | — |
+| P2 ◐ | Das Team | Der Zweck des Projekts; alles darüber wäre sonst zweimal gebaut | Stufe 2: zwei Modelle |
 | P3 | Geste und Repertoire | Sofort hörbar, seit S1 messbar | — |
 | P4 | Der Bogen | Braucht S2; für ein Team der gemeinsame Maßstab | P2 |
 | P5 | Der Raum | Braucht den Bogen, sonst gibt es nichts zu lenken | P4, Quelle |
@@ -274,7 +303,8 @@ bräuchte es einen zweiten Weg für die Steuerung); MIDI-Controller (Phase 10).
 | N1–N3 | Nachweise | Läuft nebenher | P1 |
 
 **P1 und P2 sind zusammen die kleinste Menge, nach der das Projekt das prüfen
-kann, wofür es gebaut ist.** Sie kommen zuerst, obwohl P3 schneller klingt.
+kann, wofür es gebaut ist.** Sie kommen zuerst, obwohl P3 schneller klingt — und
+P2 hat den Aufwand schon beim Hinsehen gerechtfertigt.
 
 ## Was hier bewusst nicht steht
 

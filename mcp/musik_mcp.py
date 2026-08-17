@@ -794,6 +794,14 @@ async def _status(form: Format) -> str:
         "recording",
         "record_seconds",
         "record_dropped",
+        # Was geschehen ist, ohne dass jemand danach gefragt hat: eine
+        # abgelöste Rampe, ein gestrichener Auftrag. Wer über MCP arbeitet,
+        # kann nicht abonnieren — die Brücke öffnet je Aufruf eine neue
+        # Verbindung. Deshalb die letzte Zeile **und** der Zähler: Springt er
+        # um mehr als eins, sind Zeilen dazwischen verlorengegangen, und das
+        # muss sichtbar sein statt still.
+        "events",
+        "event_count",
     ]
 
     gefragt = (
@@ -848,6 +856,8 @@ async def _status(form: Format) -> str:
             "recording": roh.get("master.recording") == "1",
             "record_seconds": _als_zahl(roh.get("master.record_seconds", "-")) or 0.0,
             "record_dropped": _als_zahl(roh.get("master.record_dropped", "-")) or 0.0,
+            "last_event": _als_text(roh.get("master.events", "-")),
+            "event_count": int(_als_zahl(roh.get("master.event_count", "-")) or 0),
         },
         # Nur die benutzten Plätze: Vier leere Zeilen zu melden hieße, dem
         # Leser vier Dinge zu zeigen, über die niemand etwas gesagt hat.
@@ -906,6 +916,16 @@ async def _status(form: Format) -> str:
             zeilen.append("- **durchgelaufen**")
         if d["load_status"] not in ("bereit", ""):
             zeilen.append(f"- Laden: {d['load_status']}")
+
+    if daten["master"]["last_event"]:
+        zeilen.append(
+            f"\n**Zuletzt im Plan:** {daten['master']['last_event']} "
+            f"(Ereignis {daten['master']['event_count']})"
+        )
+        zeilen.append(
+            "Springt die Nummer beim nächsten Blick um mehr als eins, sind "
+            "dazwischen Ereignisse liegengeblieben."
+        )
 
     zeilen.append("\n## Mischpult")
     for k in daten["channels"]:

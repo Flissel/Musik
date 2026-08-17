@@ -33,6 +33,14 @@ use crate::wert::{Art, Wert};
 #[derive(Default)]
 pub struct Sitzung {
     abos: Vec<(Schluessel, Option<Wert>)>,
+    /// Ab welcher Ereignisnummer gemeldet wird. `None` heißt: nicht
+    /// abonniert.
+    ///
+    /// Getrennt von den Abos oben, weil Ereignisse keine Werte sind: Bei einem
+    /// Wert interessiert der Stand, bei einem Ereignis **jede** Zeile. Wer nur
+    /// den zuletzt geschriebenen Stand meldete, verlöre neun von zehn
+    /// Ablösungen — der Taktgeber läuft alle 5 ms, verglichen wird alle 50.
+    ereignis_ab: Option<u64>,
 }
 
 impl Sitzung {
@@ -54,7 +62,26 @@ impl Sitzung {
     pub fn aenderungen(&mut self, pult: &Steuerpult) -> Vec<String> {
         let mut zeilen = Vec::new();
 
+        // Ereignisse zuerst: Sie erklären, warum ein Wert sich gleich anders
+        // liest, als der Abonnent ihn hinterlassen hat.
+        if let Some(ab) = &mut self.ereignis_ab {
+            let (neue, verloren) = pult.ereignisse.seit(*ab);
+            if verloren > 0 {
+                zeilen.push(format!(
+                    "warnung {verloren} Ereignisse verloren — zu langsam gelesen"
+                ));
+            }
+            zeilen.extend(neue.into_iter().map(|z| format!("event {z}")));
+            *ab = pult.ereignisse.nummer();
+        }
+
         for (schluessel, letzter) in &mut self.abos {
+            // Das Ereignis-Control steht in den Abos, damit `sub`, `unsub` und
+            // die Zählung eine Stelle haben — gemeldet wird es aber oben und
+            // zeilenweise, nicht als Wert.
+            if ist_ereignis(schluessel) {
+                continue;
+            }
             let Ok(jetzt) = pult.lies(schluessel) else {
                 continue;
             };
@@ -356,6 +383,12 @@ fn plan_zeigen(pult: &Steuerpult) -> String {
     zeilen.join("\n")
 }
 
+/// `cancel [id]`
+///
+/// **Auch das gehört in den Ring.** Streicht ein Bediener den Auftrag eines
+/// anderen, verschwindet der aus dem Plan — und der, der ihn vorgemerkt hat,
+/// sieht nur noch eine Lücke. Für ein Team ist das dieselbe stille Niederlage
+/// wie eine abgelöste Rampe.
 fn streichen(pult: &mut Steuerpult, id: Option<&str>) -> String {
     let gewaehlt = match id {
         None => None,
@@ -364,7 +397,15 @@ fn streichen(pult: &mut Steuerpult, id: Option<&str>) -> String {
             Err(_) => return format!("err {text} ist keine Plan-Nummer"),
         },
     };
-    format!("ok {} gestrichen", pult.plan.streichen(gewaehlt))
+    let weg = pult.plan.streichen(gewaehlt);
+    if weg > 0 {
+        let welche = match gewaehlt {
+            Some(id) => format!("plan {id} gestrichen"),
+            None => format!("plan alle {weg} gestrichen"),
+        };
+        pult.ereignisse.melden(&welche);
+    }
+    format!("ok {weg} gestrichen")
 }
 
 fn list(pult: &Steuerpult, praefix: Option<&str>) -> String {
@@ -492,6 +533,11 @@ fn namen(erstes: Option<&str>, rest: Option<&str>) -> Vec<String> {
     aus
 }
 
+/// Ob ein Schlüssel das Ereignis-Control meint.
+fn ist_ereignis(k: &Schluessel) -> bool {
+    k.gruppe == crate::schluessel::Gruppe::Master && k.element == "events"
+}
+
 fn abonnieren(
     pult: &Steuerpult,
     sitzung: &mut Sitzung,
@@ -516,6 +562,12 @@ fn abonnieren(
         if sitzung.abos.iter().any(|(k, _)| k == &schluessel) {
             continue;
         }
+        // Ereignisse steigen bei **jetzt** ein, nicht bei null: Wer sich
+        // gerade verbindet, soll nicht die Ablösungen von vor zehn Minuten
+        // nachgereicht bekommen.
+        if ist_ereignis(&schluessel) {
+            sitzung.ereignis_ab = Some(pult.ereignisse.nummer());
+        }
         // Ohne letzten Wert: Der erste Vergleich meldet den Ist-Zustand, und
         // der Bediener muss nicht zusätzlich einmal `get` sagen.
         sitzung.abos.push((schluessel, None));
@@ -530,12 +582,18 @@ fn abbestellen(sitzung: &mut Sitzung, erstes: Option<&str>, rest: Option<&str>) 
     if namen.is_empty() {
         let weg = sitzung.abos.len();
         sitzung.abos.clear();
+        sitzung.ereignis_ab = None;
         return format!("ok unsub {weg} abbestellt");
     }
 
     let vorher = sitzung.abos.len();
     for name in namen {
         sitzung.abos.retain(|(k, _)| k.to_string() != name);
+    }
+    // Abbestellt heißt abbestellt — sonst liefen die Ereignisse weiter, weil
+    // sie nicht an der Abo-Liste hängen, sondern an einer eigenen Nummer.
+    if !sitzung.abos.iter().any(|(k, _)| ist_ereignis(k)) {
+        sitzung.ereignis_ab = None;
     }
     format!(
         "ok unsub {} abbestellt, {} gesamt",
@@ -1380,5 +1438,274 @@ mod phrasen_tests {
         let (mut pult, _runner) = pult_mit_zwei_decks();
         let mut s = Sitzung::neu();
         assert!(behandle(&mut pult, &mut s, "help").contains("in phrase"));
+    }
+}
+
+/// Zwei Bediener an einem Pult.
+///
+/// **Der Zweck dieses Projekts, und bis hierher sein am wenigsten geprüfter
+/// Teil.** Die Schutzmechanismen — eine Rampe gibt auf, wenn jemand anders den
+/// Regler anfasst; derselbe Pfad wird nicht zweimal aus der Liste genommen —
+/// waren einzeln geprüft, ihr Zusammenspiel nie. Und beim ersten Hinsehen fiel
+/// auf, dass der Verlierer eines Griffs **gar nichts erfuhr**: Die Meldung des
+/// Taktgebers ging an einen Aufrufer, der sie wegwarf.
+#[cfg(test)]
+mod team_tests {
+    use super::*;
+    use crate::testing::{pult_mit_zwei_decks, rendern, RATE};
+    use crate::zeitplan::takt;
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    /// Ein Bediener mit eigener Sitzung.
+    struct Bediener {
+        sitzung: Sitzung,
+    }
+
+    impl Bediener {
+        fn neu() -> Bediener {
+            Bediener {
+                sitzung: Sitzung::neu(),
+            }
+        }
+
+        fn sagt(&mut self, pult: &mut Steuerpult, zeile: &str) -> String {
+            behandle(pult, &mut self.sitzung, zeile)
+        }
+
+        /// Was seit dem letzten Blick hereinkam — wie über den Socket.
+        fn hoert(&mut self, pult: &Steuerpult) -> Vec<String> {
+            self.sitzung.aenderungen(pult)
+        }
+
+        fn ereignisse(&mut self, pult: &Steuerpult) -> Vec<String> {
+            self.hoert(pult)
+                .into_iter()
+                .filter(|z| z.starts_with("event ") || z.starts_with("warnung "))
+                .collect()
+        }
+    }
+
+    /// Lässt den Plan laufen, während Deck 1 spielt.
+    fn takten(pult: &mut Steuerpult, runner: &mut audio_engine::EngineRunner, frames: usize) {
+        for _ in 0..10 {
+            rendern(runner, frames / 10);
+            let mut plan = std::mem::take(&mut pult.plan);
+            takt(pult, &mut plan, &mut |p, zeile| {
+                let mut s = Sitzung::neu();
+                behandle(p, &mut s, zeile)
+            });
+            let neu = std::mem::take(&mut pult.plan);
+            pult.plan = plan;
+            for a in neu.auftraege() {
+                pult.plan.uebernehmen(a.clone());
+            }
+        }
+    }
+
+    /// **Der Fall, für den es P2 gibt.** Zwei greifen denselben Fader, einer
+    /// verliert — und muss es erfahren.
+    #[test]
+    fn wer_den_regler_verliert_erfaehrt_es() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+            .unwrap();
+
+        let (mut a, mut b) = (Bediener::neu(), Bediener::neu());
+        a.sagt(&mut pult, "sub master.events");
+        b.sagt(&mut pult, "sub master.events");
+        a.hoert(&pult);
+        b.hoert(&pult);
+
+        // A fährt eine lange Blende.
+        let antwort = a.sagt(&mut pult, "ramp channel1.fader 0 32");
+        assert!(antwort.starts_with("ok plan 1"), "{antwort}");
+        takten(&mut pult, &mut runner, RATE as usize / 2);
+
+        // B greift mitten hinein.
+        b.sagt(&mut pult, "set channel1.fader 0.5");
+        takten(&mut pult, &mut runner, RATE as usize / 4);
+
+        let gemeldet = a.ereignisse(&pult);
+        assert!(
+            gemeldet.iter().any(|z| z.contains("abgeloest")),
+            "A erfährt nicht, dass ihm der Regler weggenommen wurde: {gemeldet:?}"
+        );
+        // Und der Plan ist wirklich leer — nicht nur gemeldet.
+        assert!(pult.plan.ist_leer(), "die Rampe läuft weiter");
+    }
+
+    /// Der Plan ist das gemeinsame Blatt: Auch wer den Griff *gewonnen* hat,
+    /// sieht, dass er etwas abgelöst hat. Sonst fährt B weiter in dem Glauben,
+    /// niemandem in die Quere gekommen zu sein.
+    #[test]
+    fn auch_der_gewinner_sieht_was_er_abgeloest_hat() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+            .unwrap();
+
+        let (mut a, mut b) = (Bediener::neu(), Bediener::neu());
+        a.sagt(&mut pult, "ramp channel1.fader 0 32");
+        b.sagt(&mut pult, "sub master.events");
+        b.hoert(&pult);
+
+        takten(&mut pult, &mut runner, RATE as usize / 2);
+        b.sagt(&mut pult, "set channel1.fader 0.5");
+        takten(&mut pult, &mut runner, RATE as usize / 4);
+
+        assert!(
+            b.ereignisse(&pult).iter().any(|z| z.contains("abgeloest")),
+            "B erfährt nicht, dass er jemandem dazwischengekommen ist"
+        );
+    }
+
+    /// Wer nicht abonniert hat, bekommt keine unaufgeforderten Zeilen — sonst
+    /// verwirrte man jeden einfachen Bediener, der nur `get` sagt.
+    #[test]
+    fn ohne_abo_kommt_nichts_ungefragt() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+            .unwrap();
+
+        let mut stumm = Bediener::neu();
+        stumm.sagt(&mut pult, "ramp channel1.fader 0 8");
+        // Acht Beats sind bei 128 BPM 3,75 s — mit zwei Sekunden wäre die
+        // Rampe noch gar nicht fertig, und der Test prüfte nichts.
+        takten(&mut pult, &mut runner, RATE as usize * 5);
+
+        assert!(stumm.hoert(&pult).is_empty(), "ungefragte Zeilen");
+        // Abrufbar ist es trotzdem — nur eben auf Nachfrage.
+        let antwort = stumm.sagt(&mut pult, "get master.events");
+        assert!(antwort.contains("fertig"), "{antwort}");
+    }
+
+    /// Streicht einer den Auftrag eines anderen, sieht der eine Lücke im Plan
+    /// und sonst nichts. Für ein Team ist das dieselbe stille Niederlage.
+    #[test]
+    fn ein_gestrichener_auftrag_faellt_dem_urheber_auf() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let (mut a, mut b) = (Bediener::neu(), Bediener::neu());
+        a.sagt(&mut pult, "sub master.events");
+        a.hoert(&pult);
+
+        let antwort = a.sagt(&mut pult, "when deck1.beats_left < 8 do master.queue_next");
+        assert!(antwort.starts_with("ok plan 1"), "{antwort}");
+
+        b.sagt(&mut pult, "cancel 1");
+
+        let gemeldet = a.ereignisse(&pult);
+        assert!(
+            gemeldet.iter().any(|z| z.contains("gestrichen")),
+            "A erfährt nichts vom Streichen: {gemeldet:?}"
+        );
+    }
+
+    /// Zwei Aufträge auf derselben Phrasengrenze müssen **beide** feuern. Wenn
+    /// zwei Agenten sich auf dieselbe Eins verabreden, darf nicht einer
+    /// gewinnen.
+    #[test]
+    fn zwei_auftraege_auf_derselben_grenze_feuern_beide() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+
+        let (mut a, mut b) = (Bediener::neu(), Bediener::neu());
+        assert!(a
+            .sagt(&mut pult, "in phrase set channel1.fader 0.3")
+            .starts_with("ok plan"));
+        assert!(b
+            .sagt(&mut pult, "in phrase set channel2.fader 0.7")
+            .starts_with("ok plan"));
+
+        // Bei 128 BPM ist eine Phrase 7,5 s.
+        takten(&mut pult, &mut runner, RATE as usize * 8);
+
+        assert_eq!(pult.lies(&k("channel1.fader")).unwrap(), Wert::Zahl(0.3));
+        assert_eq!(pult.lies(&k("channel2.fader")).unwrap(), Wert::Zahl(0.7));
+        assert!(
+            pult.plan.ist_leer(),
+            "einer hing fest: {:?}",
+            pult.plan.auftraege().len()
+        );
+    }
+
+    /// Zwei nehmen denselben Track. Der zweite muss abgewiesen werden, statt
+    /// ihn auf ein zweites Deck zu legen.
+    #[test]
+    fn derselbe_track_wird_nicht_zweimal_abgenommen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let (mut a, mut b) = (Bediener::neu(), Bediener::neu());
+
+        a.sagt(&mut pult, "do master.queue_add /musik/a.wav");
+        let zweite = b.sagt(&mut pult, "do master.queue_add /musik/a.wav");
+        assert!(
+            zweite.starts_with("err"),
+            "derselbe Pfad wurde zweimal angenommen: {zweite}"
+        );
+    }
+
+    /// Wer zu langsam liest, verliert Zeilen — und muss das erfahren.
+    #[test]
+    fn wer_zu_langsam_liest_wird_gewarnt() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut a = Bediener::neu();
+        a.sagt(&mut pult, "sub master.events");
+        a.hoert(&pult);
+
+        for i in 0..crate::ereignis::PLATZ + 5 {
+            pult.ereignisse.melden(&format!("plan {i} fertig"));
+        }
+
+        let gemeldet = a.ereignisse(&pult);
+        assert!(
+            gemeldet
+                .iter()
+                .any(|z| z.starts_with("warnung") && z.contains("verloren")),
+            "die Lücke wurde verschwiegen: {} Zeilen",
+            gemeldet.len()
+        );
+    }
+
+    /// Abbestellt heißt abbestellt.
+    #[test]
+    fn nach_dem_abbestellen_kommt_nichts_mehr() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut a = Bediener::neu();
+        a.sagt(&mut pult, "sub master.events");
+        a.hoert(&pult);
+        a.sagt(&mut pult, "unsub master.events");
+
+        pult.ereignisse.melden("plan 1 abgeloest channel1.fader");
+        assert!(a.hoert(&pult).is_empty(), "nach unsub kam noch etwas");
+    }
+
+    /// Wer sich mitten im Set verbindet, bekommt nicht die Vergangenheit
+    /// nachgereicht.
+    #[test]
+    fn wer_spaeter_dazukommt_bekommt_nur_neues() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.ereignisse.melden("plan 1 fertig channel1.fader");
+        pult.ereignisse.melden("plan 2 fertig channel2.fader");
+
+        let mut spaet = Bediener::neu();
+        spaet.sagt(&mut pult, "sub master.events");
+        assert!(
+            spaet.ereignisse(&pult).is_empty(),
+            "alte Ereignisse kamen mit"
+        );
+
+        pult.ereignisse.melden("plan 3 abgeloest channel1.fader");
+        assert_eq!(
+            spaet.ereignisse(&pult),
+            vec!["event plan 3 abgeloest channel1.fader"]
+        );
     }
 }

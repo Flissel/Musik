@@ -28,6 +28,7 @@
 //! Oberfläche benutzt. Gelesen wird aus Atomics und aus dem Spiegel, nie aus
 //! dem Mixer selbst.
 
+pub mod ereignis;
 pub mod katalog;
 pub mod mitschrift;
 pub mod protokoll;
@@ -42,6 +43,7 @@ pub mod zeitplan;
 #[cfg(test)]
 pub(crate) mod testing;
 
+pub use ereignis::Ereignisse;
 pub use katalog::Beschreibung;
 pub use mitschrift::{Mitschrift, Richtung, Stand};
 pub use protokoll::behandle;

@@ -334,3 +334,119 @@ mod tests {
         assert!(!p.exists(), "der Socket bleibt liegen");
     }
 }
+
+/// Zwei Verbindungen gleichzeitig, über den echten Socket.
+///
+/// Die Zusammenstöße selbst prüft `protokoll::team_tests` — dort ohne Steckdose
+/// und deshalb schnell und genau. Hier geht es um das, was nur der volle Weg
+/// zeigt: **ob es klemmt.** Der Taktgeber nimmt den Mutex alle 5 ms, jede
+/// Verbindung nimmt ihn je Befehl, und der Abo-Thread alle 50 ms. Ob sich diese
+/// drei gegenseitig aushungern, sagt kein Modultest.
+#[cfg(all(unix, test))]
+mod zwei_verbindungen {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+    use crate::wert::Wert;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+    use std::time::{Duration, Instant};
+
+    fn k(text: &str) -> crate::Schluessel {
+        crate::Schluessel::parse(text).unwrap()
+    }
+
+    struct Draht {
+        schreiben: UnixStream,
+        lesen: BufReader<UnixStream>,
+    }
+
+    impl Draht {
+        fn neu(pfad: &Path) -> Draht {
+            let strom = UnixStream::connect(pfad).expect("verbinden");
+            strom
+                .set_read_timeout(Some(Duration::from_millis(500)))
+                .expect("Zeitlimit");
+            Draht {
+                lesen: BufReader::new(strom.try_clone().expect("klonen")),
+                schreiben: strom,
+            }
+        }
+
+        fn sagt(&mut self, zeile: &str) {
+            writeln!(self.schreiben, "{zeile}").expect("schreiben");
+            self.schreiben.flush().expect("leeren");
+        }
+
+        /// Liest, bis eine Zeile passt oder die Zeit abläuft.
+        fn wartet_auf(&mut self, teil: &str, frist: Duration) -> Option<String> {
+            let bis = Instant::now() + frist;
+            while Instant::now() < bis {
+                let mut zeile = String::new();
+                match self.lesen.read_line(&mut zeile) {
+                    Ok(0) => return None,
+                    Ok(_) => {
+                        if zeile.contains(teil) {
+                            return Some(zeile.trim_end().to_string());
+                        }
+                    }
+                    Err(_) => continue,
+                }
+            }
+            None
+        }
+    }
+
+    /// Der ganze Weg: zwei Verbindungen, ein laufender Taktgeber, eine
+    /// abgelöste Rampe — und die Meldung kommt beim Verlierer an.
+    #[test]
+    fn eine_abgeloeste_rampe_erreicht_die_andere_verbindung() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+            .unwrap();
+
+        let pfad = std::env::temp_dir().join(format!("musik-team-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&pfad);
+
+        let pult = Arc::new(Mutex::new(pult));
+        let server = Server::starten(&pfad, Arc::clone(&pult)).expect("Server");
+        let _takt = crate::zeitplan::takt_starten(Arc::clone(&pult));
+
+        // Das Deck muss laufen, sonst steht auch der Plan.
+        let laeuft = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let weiter = Arc::clone(&laeuft);
+        let audio = std::thread::spawn(move || {
+            let mut puffer = vec![0.0f32; 256 * 4];
+            while weiter.load(std::sync::atomic::Ordering::Relaxed) {
+                runner.render(&mut puffer, 4);
+                std::thread::sleep(Duration::from_millis(4));
+            }
+        });
+
+        let mut a = Draht::neu(server.pfad());
+        let mut b = Draht::neu(server.pfad());
+
+        a.sagt("sub master.events");
+        assert!(a.wartet_auf("ok sub", Duration::from_secs(2)).is_some());
+
+        a.sagt("ramp channel1.fader 0 64");
+        assert!(
+            a.wartet_auf("ok plan", Duration::from_secs(2)).is_some(),
+            "die Rampe wurde nicht angenommen"
+        );
+
+        std::thread::sleep(Duration::from_millis(200));
+        b.sagt("set channel1.fader 0.5");
+
+        let gemeldet = a.wartet_auf("abgeloest", Duration::from_secs(3));
+        laeuft.store(false, std::sync::atomic::Ordering::Relaxed);
+        audio.join().ok();
+        let _ = std::fs::remove_file(&pfad);
+
+        assert!(
+            gemeldet.is_some(),
+            "über den Socket kam keine Ablösung an — der Verlierer bleibt blind"
+        );
+    }
+}

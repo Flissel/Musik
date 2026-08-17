@@ -306,6 +306,10 @@ pub fn takt(
     // dort ist der eingehende Track längst der einzige.
     for m in &meldungen {
         pult.halten(crate::mitschrift::Richtung::Meldung, m);
+        // Und in den Ring, damit sie noch im selben Takt jemanden erreichen.
+        // Die Mitschrift ist für hinterher; wer gerade auflegt, muss *jetzt*
+        // erfahren, dass seine Blende abgelöst wurde.
+        pult.ereignisse.melden(m);
     }
     meldungen
 }

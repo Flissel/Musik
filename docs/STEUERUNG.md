@@ -677,6 +677,57 @@ antwortet dann leer statt mit einer erfundenen Null.
 **`intro_beats` ist für die Auswahl da.** „Ein Track mit langem Intro" ist damit
 eine Anforderung, die ein Agent stellen kann, statt sie zu erraten.
 
+## Wenn einer dem anderen dazwischenkommt
+
+Eine Rampe gibt auf, sobald jemand anders denselben Regler anfasst. Nur erfuhr
+das lange niemand: Der Taktgeber meldete es, und der Thread, der ihn aufruft,
+warf die Meldung weg. Für einen einzelnen Bediener fiel das nie auf — er *war*
+derjenige, der den Regler angefasst hat.
+
+Für ein Team ist es der schlimmste denkbare Zustand: Zwei greifen nach demselben
+Fader, einer verliert und plant weiter auf einer Annahme, die seit zwanzig
+Sekunden falsch ist.
+
+```text
+sub master.events
+ok sub 1 neu, 1 gesamt
+…
+event plan 3 abgeloest channel1.fader — jemand anders hat den Regler
+event plan 4 fertig master.crossfader 1.0000
+event plan 2 gestrichen
+```
+
+Gemeldet wird, was der Plan von sich aus tut: `fertig`, `abgeloest`,
+`abgebrochen`, `ausgefuehrt` — und `gestrichen`, wenn jemand den Auftrag eines
+anderen zurücknimmt. Die Zeilen kommen unaufgefordert, mit `event` davor; ein
+Bediener, der sie nicht abonniert hat, bekommt nichts.
+
+**Warum kein einzelner Wert.** Ein Control „letztes Ereignis" wäre einfacher
+gewesen und falsch: Der Taktgeber läuft alle 5 ms, verglichen wird alle 50.
+Zwischen zwei Blicken passen zehn Ereignisse, und neun davon wären weg —
+ausgerechnet dann, wenn viel gleichzeitig geschieht. Stattdessen ein Ring mit
+laufender Nummer; wer seine kennt, bekommt alles seither.
+
+**Und wer zu langsam liest, erfährt das:**
+
+```text
+warnung 3 Ereignisse verloren — zu langsam gelesen
+```
+
+Dieselbe Regel wie bei `record_dropped` und den unlesbaren Zeilen der
+Mitschrift. Eine Lücke, die aussieht wie keine, ist das schlechteste von allem.
+
+**Wer nicht abonnieren kann, fragt.** Über MCP wird je Aufruf neu verbunden, ein
+Abo hält dort nicht. Deshalb gibt es beides als Wert:
+
+```text
+get master.events        → value master.events plan 3 abgeloest channel1.fader
+get master.event_count   → value master.event_count 17
+```
+
+Springt der Zähler zwischen zwei Blicken um mehr als eins, sind Zeilen
+dazwischen liegengeblieben — und auch das ist besser sichtbar als still.
+
 ## Harmonisch mischen
 
 Tempo ist die halbe Trackauswahl. Zwei Stücke im gleichen Takt können trotzdem

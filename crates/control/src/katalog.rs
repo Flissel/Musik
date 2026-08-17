@@ -512,6 +512,24 @@ pub static MASTER: &[Beschreibung] = &[
         "",
         "Mitschnitt beenden und die Datei abschließen",
     ),
+    // Der einzige Weg, auf dem ein Bediener erfährt, dass ihm jemand anders
+    // dazwischengekommen ist. Ein Abo darauf meldet **jede** Zeile, nicht nur
+    // die zuletzt geschriebene — siehe `Sitzung::aenderungen`.
+    text_feld(
+        "events",
+        "Was der Plan zuletzt gemeldet hat: fertig, abgeloest, abgebrochen, gestrichen. \
+Abonnieren meldet jede Zeile einzeln, mit 'event' davor",
+    ),
+    zahl(
+        "event_count",
+        "",
+        0.0,
+        f64::MAX,
+        Einheit::Keine,
+        false,
+        "Wie viele Ereignisse es insgesamt gab. Springt die Zahl um mehr als eins, \
+hat man dazwischen welche verpasst — für alle, die fragen statt zu abonnieren",
+    ),
     schalter("recording", "", false, "Läuft gerade ein Mitschnitt"),
     zahl(
         "record_seconds",
