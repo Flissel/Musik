@@ -297,6 +297,15 @@ sofort einen Fehler gezeigt, den niemand vermutet hatte — der eingehende Track
 kam fünfzehn Beats neben seiner eigenen Eins herein. Das ist der Auftrag für
 S2.
 
+## Weiter als dieses Dokument
+
+Dieser Plan reicht bis S6. Was darüber hinaus offen ist — die ungeprüften
+Behauptungen, das nie gelaufene Team, die Punkte, die an Hardware und Musik
+hängen — steht in [`FAHRPLAN.md`](FAHRPLAN.md). Dort kommen zwei Schichten
+**vor** S3 und S4, und zwar aus demselben Grund, aus dem hier der Kritiker vor
+der Strukturanalyse steht: Ein Messwerkzeug, das nur an eigenem Material
+geeicht ist, misst sich selbst.
+
 ## Was daran nicht Software ist
 
 - **Material.** Drei Sinustöne und ein Kick haben nichts, was man fühlen könnte.

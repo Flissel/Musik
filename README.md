@@ -44,6 +44,7 @@ es nichts, was Agenten steuern könnten.
 | [docs/BAUSTEINE.md](docs/BAUSTEINE.md) | Fertige Bibliotheken für Audio, Analyse, Stems — inkl. Lizenzfallen |
 | [docs/APIS.md](docs/APIS.md) | Generierungs-APIs und Sample-Quellen, Zugangsstatus |
 | **[docs/DJ.md](docs/DJ.md)** | **Plan für einen AI-DJ, der nicht herzlos klingt — Reihenfolge und Begründung** |
+| **[docs/FAHRPLAN.md](docs/FAHRPLAN.md)** | **Was noch aussteht — ungebaute Schichten, ungeprüfte Behauptungen, und was an Hardware und Musik hängt** |
 | [docs/AGENTEN.md](docs/AGENTEN.md) | Multi-Agenten-Team und Crowd-Feedback-Schleife |
 | [docs/VIBEMIND.md](docs/VIBEMIND.md) | Anschluss an VibeMind — MCP, Arbeitsteilung, Lizenzfolgen |
 | [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md) | Bausteine und Schnittstellen |
