@@ -247,8 +247,29 @@ Aussage gilt statt als Rauschen, ist inzwischen ein z-Wert statt eines
 Verhältnisses zum Mittelwert — das alte Maß hat dichtes Material
 fälschlich abgewiesen, weil dessen durchgehende Energie den Sockel der
 Autokorrelation anhebt (Details in `crates/analysis/src/tempo.rs`). Sie trennt
-jetzt Klick-Track, dichten Loop und Dauerton sauber, ist gegen echte Musik aber
-weiterhin nicht geprüft; das geht erst mit einer Sammlung auf der Platte.
+jetzt Klick-Track, dichten Loop und Dauerton sauber.
+
+**Nachgemessen an fünf echten Aufnahmen** (August 2026, generierte Stücke
+zwischen 71 und 146 BPM): Alle fünf Tempi sind richtig — geprüft auf zwei
+Wegen, die beide nicht der Detektor selbst sind. Erstens die Oktavlage: Auf den
+Positionen zwischen den gemeldeten Beats liegt jeweils rund die halbe
+Onset-Stärke, also sitzt dort ein Off-Beat und kein übersehener Schlag.
+Zweitens eine Feinsuche über die Wellenform-Hüllkurve, die in allen fünf Fällen
+bis auf 0,09 BPM denselben Wert fand — und zwar getrennt für jedes Drittel des
+Stücks, das Raster hält also über die volle Länge.
+
+Zwei Dinge stehen damit fest, die vorher Vermutung waren:
+
+- Die Schwelle passt. Echte Aufnahmen liegen bei 3,0 bis 4,3, keine wurde
+  abgewiesen. Der Abstand nach unten ist aber dünn.
+- **Die Konfidenz sagt nichts über die Richtigkeit.** 0,12 war genauso richtig
+  wie 0,46. Sie misst, wie deutlich die Spitze aus dem Feld ragt, nicht ob sie
+  an der richtigen Stelle sitzt — wer sie als Gütesiegel liest, liest etwas
+  hinein, das nicht drinsteht.
+
+Offen bleibt der Bereich unter `MIN_BPM` (70): Ein Stück bei 65 BPM findet der
+Detektor nicht als solches. Bei den fünf Aufnahmen kam das nicht vor, die
+langsamste lag bei 71.
 
 ## Entschiedene Punkte
 

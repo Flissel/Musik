@@ -37,8 +37,20 @@ const FUNDAMENTAL_RATIO: f32 = 0.8;
 /// Gemessen: Klick-Tracks 4,2–6,0; ein dichter Loop aus Kick, Bass und Hi-Hats
 /// 3,5; ein reiner Dauerton 1,7. Der Wert liegt bewusst näher am unteren Ende
 /// — lieber ein zweifelhaftes Grid, das der Nutzer sieht und korrigieren kann,
-/// als gar keins. Gegen eine echte Sammlung ist er nie kalibriert worden.
-/// Siehe `schwellen_trennen_perkussiv_von_dauerton`.
+/// als gar keins. Siehe `schwellen_trennen_perkussiv_von_dauerton`.
+///
+/// **An fünf echten Aufnahmen nachgemessen** (August 2026): Sie liegen bei 3,0
+/// bis 4,3 — also über der Schwelle, aber deutlich unter dem, was gebautes
+/// Material erreicht. Kein Tempo wurde dabei fälschlich abgewiesen. Der Abstand
+/// nach unten ist allerdings dünn, und fünf Aufnahmen sind keine Sammlung.
+///
+/// **Wichtiger noch: Die daraus abgeleitete Konfidenz sagt nichts über die
+/// Richtigkeit.** Bei denselben fünf Aufnahmen war das Tempo mit 0,12 genauso
+/// richtig wie mit 0,46 — nachgeprüft über die Oktavlage und über eine
+/// Feinsuche, die in allen fünf Fällen bis auf 0,09 BPM denselben Wert fand,
+/// stabil über alle Drittel des Stücks. Wer `bpm_confidence` als Gütesiegel
+/// liest, liest etwas hinein, das nicht drinsteht: Sie misst, wie deutlich die
+/// Spitze aus dem Feld ragt, nicht ob sie an der richtigen Stelle sitzt.
 const MIN_SALIENCE: f32 = 2.5;
 
 /// Glättung der Hüllkurve für die Grobstufe, in Frames. Macht die
