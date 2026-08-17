@@ -51,6 +51,8 @@ pub struct Fertig {
     pub titel: String,
     pub artist: String,
     pub tonart: Option<Tonart>,
+    /// Gliederung aus der Analyse — Intro, Drop, Outro und der Einstiegspunkt.
+    pub struktur: Option<audio_core::Struktur>,
 }
 
 /// Die Umsetzung, die das Pult bekommt.
@@ -361,6 +363,7 @@ fn fertigen(auftrag: &Auftrag, store: &Store) -> Result<Fertig, String> {
         titel,
         artist: String::new(),
         tonart: analyse.tonart(),
+        struktur: analyse.struktur(),
     })
 }
 

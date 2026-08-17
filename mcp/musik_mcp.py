@@ -658,6 +658,9 @@ async def musik_status(params: StatusEingabe) -> str:
                      "position": float, "duration": float,
                      "beat": float|null, "beats_left": float|null,
                      "beats_to_phrase": float|null, "phrase_beats": float|null,
+                     "section": str, "section_beats_left": float|null,
+                     "beats_to_outro": float|null, "intro_beats": float|null,
+                     "entry": float|null,
                      "playing": bool, "finished": bool, "load_status": str}],
           "channels": [{"channel": "channel1", "fader": float, "cue": bool,
                         "fx": str}],
@@ -672,6 +675,9 @@ async def musik_status(params: StatusEingabe) -> str:
         - „Was liegt auf den Decks?"
         - „Läuft die Aufnahme noch?"
         - „Wie lange habe ich noch?" → `beats_left`, in Grid-Beats gezählt.
+        - „Wo im Track bin ich?" → `section` sagt intro, aufbau, drop, break,
+          outro oder teil; `beats_to_outro` sagt, wann der Übergang darf.
+          Leer heißt: keine Gliederung erkannt, nicht „keine Struktur".
         - „Hat jemand schon etwas vorgemerkt?" → das Feld `plan`.
         - Nicht dafür: einen einzelnen Wert lesen → `musik_get`.
     """
@@ -765,6 +771,13 @@ async def _status(form: Format) -> str:
         "beats_left",
         "beats_to_phrase",
         "phrase_beats",
+        # Die Gliederung. Ohne sie muss ein Agent aus Pegel und Bauchgefühl
+        # raten, wo im Track er ist — und legt den Übergang mitten in den Drop.
+        "section",
+        "section_beats_left",
+        "beats_to_outro",
+        "intro_beats",
+        "entry",
         "play",
         "finished",
         "load_status",
@@ -809,6 +822,11 @@ async def _status(form: Format) -> str:
                 "beats_left": _als_zahl(roh.get(f"{d}.beats_left", "-")),
                 "beats_to_phrase": _als_zahl(roh.get(f"{d}.beats_to_phrase", "-")),
                 "phrase_beats": _als_zahl(roh.get(f"{d}.phrase_beats", "-")),
+                "section": _als_text(roh.get(f"{d}.section", "-")),
+                "section_beats_left": _als_zahl(roh.get(f"{d}.section_beats_left", "-")),
+                "beats_to_outro": _als_zahl(roh.get(f"{d}.beats_to_outro", "-")),
+                "intro_beats": _als_zahl(roh.get(f"{d}.intro_beats", "-")),
+                "entry": _als_zahl(roh.get(f"{d}.entry", "-")),
                 "playing": roh.get(f"{d}.play") == "1",
                 "finished": roh.get(f"{d}.finished") == "1",
                 "load_status": roh.get(f"{d}.load_status", ""),
@@ -870,6 +888,18 @@ async def _status(form: Format) -> str:
                 f"- noch **{d['beats_left']:.0f} Beats**, "
                 f"{d['beats_to_phrase']:.0f} bis zur Phrasengrenze"
             )
+        if d["section"]:
+            teil = f"- Abschnitt **{d['section']}**"
+            if d["section_beats_left"] is not None:
+                teil += f", noch {d['section_beats_left']:.0f} Beats"
+            if d["beats_to_outro"] is not None:
+                bis = d["beats_to_outro"]
+                teil += (
+                    f" · Outro läuft seit {-bis:.0f} Beats"
+                    if bis < 0
+                    else f" · Outro in {bis:.0f} Beats"
+                )
+            zeilen.append(teil)
         if d["key"]:
             zeilen.append(f"- Tonart {d['key']} ({d['key_camelot']})")
         if d["finished"]:

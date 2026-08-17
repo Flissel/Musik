@@ -145,9 +145,9 @@ Zwei Grenzen bleiben, und beide gehören dazu:
 - **Sie sagt nichts über Klang.** Ein Griff ohne hörbaren Wechsel bleibt ein
   Griff ohne hörbaren Wechsel; der Kritiker meldet das inzwischen als Befund.
 
-## S2 — Struktur
+## S2 — Struktur ✅
 
-*Die größte Lücke in der Analyse. Alles Musikalische hängt daran.*
+*Gebaut. Die größte Lücke in der Analyse — alles Musikalische hängt daran.*
 
 Je Track eine Gliederung in Abschnitte mit Zeitbereichen: Intro, Aufbau, Drop,
 Break, Outro. Selbst gebaut aus einer Neuheitskurve über das vorhandene
@@ -164,6 +164,55 @@ Was dadurch erst sagbar wird:
 - **Kein Übergang mitten durch einen Drop.** Der häufigste hörbare Fehler.
 - Und für die Auswahl: „ein Track mit langem Intro" ist eine Anforderung, die
   ein Agent stellen kann.
+
+### Was daraus geworden ist
+
+Je Phrase drei Zahlen — Pegel, Bass, Onset-Dichte —, und eine Grenze liegt dort,
+wo sich das Klangbild über eine Phrasengrenze hinweg ändert. An gebautem
+Material mit bekannter Gliederung sitzen alle fünf Grenzen, und die Namen
+stimmen:
+
+| Sekunde | erkannt | Pegel | Bass | Dichte |
+| --- | --- | --- | --- | --- |
+| 0,5 | intro | 0,34 | 0,12 | 0,43 |
+| 15,5 | aufbau | 0,53 | 0,42 | 0,72 |
+| 30,5 | drop | 0,99 | 0,99 | 0,98 |
+| 45,5 | break | 0,44 | 0,41 | 0,56 |
+| 60,5 | drop | 0,98 | 0,98 | 0,97 |
+| 75,5 | outro | 0,20 | 0,06 | 0,25 |
+
+Gebaut waren die Wechsel bei 15, 30, 45, 60 und 75 Sekunden. Der halbe
+Sekundenversatz ist der Anker des Beatgrids: Das Phrasengitter hängt an der
+ersten Eins, nicht an Frame 0 — und genau das macht `deckN.entry` zu einem
+Downbeat.
+
+Im Steuerraum stehen `section`, `section_beats_left`, `beats_to_outro`,
+`intro_beats`, `entry` und die Aktion `jump_entry`. Damit ist die eigentliche
+Regel endlich sagbar:
+
+```text
+when deck1.beats_to_outro < 0  in phrase ramp master.crossfader 1 32
+```
+
+**Vier Entwürfe sind am Material gescheitert**, bevor der fünfte stand — ein
+Kern über zwei Phrasen, der die zweiphrasigen Abschnitte verschmierte; eine
+Schwelle aus Median und Streuung, die sich an ihrer eigenen bimodalen
+Verteilung überdeckte; eine z-Wert-Normierung, die aus Rauschen Struktur machte;
+und „Break heißt Bass weg", was falsch gemessen war, weil ein Kick allein schon
+reichlich Energie unter 160 Hz bringt. Alle vier stehen mit ihrer Begründung im
+Code.
+
+Dazu ein Prüfstein, der selbst untauglich war: Als „gleichförmiges Material"
+stand zuerst ein reiner Sinus da, dessen spektraler Fluss über das Stück um
+45 % driftet. Damit hätte der Test eine Robustheit gegen etwas verlangt, das in
+Musik nicht vorkommt — dieselbe Falle wie bei der Tempo-Schwelle, die an
+Klick-Tracks geeicht war.
+
+**Belegt sind die Grenzen, nicht die Namen.** Ob „lauteste 25 % mit viel Bass"
+auf echten Produktionen der Drop ist, weiß erst, wer es an echten Produktionen
+mit bekannter Gliederung nachmisst. Bis dahin stehen die drei Zahlen neben jedem
+Namen — im Bericht von `musik-analyze` und im Sidecar —, damit man ihm
+widersprechen kann.
 
 ## S3 — Der Bogen
 
@@ -233,7 +282,7 @@ Dann ist es kein Automixer mehr.
 | S0 | Phrase als Bezugspunkt | Ein Verb, wirkt auf jeden Mix, blockiert nichts |
 | S1 | Kritiker über den Mitschnitt | Macht alles Folgende prüfbar statt behauptbar |
 | S1b ✅ | Mitschrift neben den Mitschnitt legen | Ohne die Absicht ist die Phrasenlage nicht messbar |
-| S2 | Strukturanalyse | Voraussetzung für jede musikalische Regel |
+| S2 ✅ | Strukturanalyse | Voraussetzung für jede musikalische Regel |
 | S3 | Set-Bogen | Braucht S2, um Abschnitte zu planen |
 | S4 | Gestenformen und Repertoire | Lohnt erst, wenn die Stellen stimmen |
 | S5 | Stems | Teuer, braucht Streaming; größter Klanggewinn |

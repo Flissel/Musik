@@ -54,14 +54,10 @@
 
 use audio_core::track::CHANNELS;
 
+pub use audio_core::struktur::{Abschnitt, Art, Struktur, PHRASE_BEATS};
+
 use crate::onset::OnsetEnvelope;
 use crate::tempo::Beatgrid;
-
-/// Wie viele Beats eine Phrase hat.
-///
-/// Sechzehn, wie überall sonst in der Anlage (`deckN.phrase_beats`). Vier Takte
-/// zu vier Vierteln sind die Einheit, in der elektronische Musik gebaut ist.
-pub const PHRASE_BEATS: f64 = 16.0;
 
 /// Obere Grenze des Bassbands, in Hertz.
 ///
@@ -114,119 +110,6 @@ pub const MIN_PHRASEN: usize = 2;
 /// Vorstufe eines Fehlers war — er steht hier, damit die Zahl nicht für
 /// geprüft gehalten wird.
 pub const SCHWELLE: f32 = 0.15;
-
-/// Was für ein Teil eines Tracks das ist.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Art {
-    Intro,
-    Aufbau,
-    Drop,
-    Break,
-    Outro,
-    /// Läuft, ohne sich als eines der anderen zu erkennen zu geben.
-    ///
-    /// Kein Verlegenheitswert: Die meisten Tracks haben Strecken, die schlicht
-    /// laufen. Sie „Drop" zu nennen, weil ein Name dastehen soll, wäre die
-    /// schlechtere Antwort.
-    Teil,
-}
-
-impl Art {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Art::Intro => "intro",
-            Art::Aufbau => "aufbau",
-            Art::Drop => "drop",
-            Art::Break => "break",
-            Art::Outro => "outro",
-            Art::Teil => "teil",
-        }
-    }
-
-    pub fn parse(text: &str) -> Option<Art> {
-        match text {
-            "intro" => Some(Art::Intro),
-            "aufbau" => Some(Art::Aufbau),
-            "drop" => Some(Art::Drop),
-            "break" => Some(Art::Break),
-            "outro" => Some(Art::Outro),
-            "teil" => Some(Art::Teil),
-            _ => None,
-        }
-    }
-}
-
-/// Ein Abschnitt des Tracks.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Abschnitt {
-    /// Anfang in Sample-Frames. **Die maßgebliche Angabe** — der Beat ist
-    /// daraus gerechnet und dient dem Lesen.
-    pub von_frames: u64,
-    /// Ende in Sample-Frames, ausschließlich.
-    pub bis_frames: u64,
-    pub von_beat: f64,
-    pub bis_beat: f64,
-    pub art: Art,
-    /// Mittlerer Pegel, 0..1 als Anteil am lautesten Abschnitt des Tracks.
-    pub pegel: f32,
-    /// Mittlerer Bassanteil, ebenso relativ.
-    pub bass: f32,
-    /// Mittlere Onset-Dichte, ebenso relativ.
-    pub dichte: f32,
-}
-
-impl Abschnitt {
-    pub fn beats(&self) -> f64 {
-        self.bis_beat - self.von_beat
-    }
-}
-
-/// Die Gliederung eines Tracks.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Struktur {
-    pub abschnitte: Vec<Abschnitt>,
-    pub phrase_beats: f64,
-}
-
-impl Struktur {
-    /// Wo der eingehende Track einsetzen sollte.
-    ///
-    /// Der Anfang des ersten Abschnitts — und der liegt bauartbedingt auf einer
-    /// Phrasengrenze. Das ist der ganze Unterschied zu „Sekunde 0": Was davor
-    /// liegt, ist Vorlauf und gehört nicht in den Mix.
-    pub fn einstieg_frames(&self) -> Option<u64> {
-        self.abschnitte.first().map(|a| a.von_frames)
-    }
-
-    /// Wo das Outro anfängt — die Stelle, an der ein Übergang liegen darf.
-    ///
-    /// `None`, wenn der Track keines hat. Das ist eine Auskunft und kein
-    /// Mangel: Nicht jede Produktion blendet aus.
-    pub fn outro_frames(&self) -> Option<u64> {
-        self.abschnitte
-            .iter()
-            .find(|a| a.art == Art::Outro)
-            .map(|a| a.von_frames)
-    }
-
-    /// Wie lang das Intro ist, in Beats. `None` ohne Intro.
-    ///
-    /// Damit wird „ein Track mit langem Intro" eine Anforderung, die ein Agent
-    /// stellen kann.
-    pub fn intro_beats(&self) -> Option<f64> {
-        self.abschnitte
-            .iter()
-            .find(|a| a.art == Art::Intro)
-            .map(|a| a.beats())
-    }
-
-    /// In welchem Abschnitt ein Frame liegt.
-    pub fn bei_frames(&self, frames: u64) -> Option<&Abschnitt> {
-        self.abschnitte
-            .iter()
-            .find(|a| frames >= a.von_frames && frames < a.bis_frames)
-    }
-}
 
 /// Gliedert einen Track.
 ///

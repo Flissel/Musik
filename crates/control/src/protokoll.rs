@@ -384,6 +384,11 @@ fn list(pult: &Steuerpult, praefix: Option<&str>) -> String {
         let raum = match (b.art, b.bereich, b.auswahl) {
             (Art::Aktion, _, _) if !b.argument.is_empty() => b.argument.to_string(),
             (_, _, auswahl) if !auswahl.is_empty() => auswahl.join("|"),
+            // Ein offenes Ende bleibt offen. Ohne das stünde in der
+            // Selbstbeschreibung die ausgeschriebene Zahl `f64::MIN` — dreihundert
+            // Stellen, die niemandem sagen, dass es keine Untergrenze gibt.
+            (_, Some((min, max)), _) if min == f64::MIN && max == f64::MAX => "..".to_string(),
+            (_, Some((min, max)), _) if min == f64::MIN => format!("..{max}"),
             (_, Some((min, max)), _) if max == f64::MAX => format!("{min}.."),
             (_, Some((min, max)), _) => format!("{min}..{max}"),
             _ => "-".to_string(),
@@ -570,6 +575,26 @@ fn bestaetigen(pult: &Steuerpult, schluessel: &Schluessel) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// Ein offenes Ende bleibt offen — in beide Richtungen.
+    ///
+    /// `beats_to_outro` hat keine Untergrenze: Sobald das Outro läuft, wird die
+    /// Zahl negativ. Ohne diesen Fall stand in der Selbstbeschreibung die
+    /// ausgeschriebene kleinste Fließkommazahl, dreihundert Stellen lang.
+    #[test]
+    fn ein_offener_bereich_wird_nicht_ausgeschrieben() {
+        let (pult, _runner) = crate::testing::pult_mit_zwei_decks();
+        let mut sitzung = Sitzung::neu();
+        let mut pult = pult;
+
+        let antwort = behandle(&mut pult, &mut sitzung, "list deck1.beats_to_outro");
+        assert!(
+            antwort.contains(" zahl .. beats "),
+            "der Bereich steht ausgeschrieben da: {antwort}"
+        );
+        assert!(!antwort.contains("17976931348623157"), "{antwort}");
+    }
+
     use super::*;
     use crate::testing::pult_mit_zwei_decks;
 

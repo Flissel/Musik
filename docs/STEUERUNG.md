@@ -633,6 +633,50 @@ aus Traktor stammen oder von Hand korrigiert sein, und beides weiß mehr als ein
 Detektor. Scheitert das Speichern — keine Sammlung geöffnet, Track nicht darin
 —, steht der Cue trotzdem am Deck und der Grund in `deckN.load_status`.
 
+## Wo im Track das Deck steht
+
+Tempo, Tonart und Restbeats sagen, *wann* etwas geht. Sie sagen nicht, *wo* im
+Stück man ist — und das ist die Frage, an der ein Übergang hängt. Deshalb kennt
+jedes Deck seine Gliederung:
+
+```text
+get deck1.section              → value deck1.section drop
+get deck1.section_beats_left   → value deck1.section_beats_left 28.97
+get deck1.beats_to_outro       → value deck1.beats_to_outro 92.79
+get deck1.intro_beats          → value deck1.intro_beats 32.00
+get deck1.entry                → value deck1.entry 0.466417
+do deck1.jump_entry            → jump_entry deck1 auf 0.466s
+```
+
+`section` ist eines von `intro`, `aufbau`, `drop`, `break`, `outro` oder `teil`.
+Erkannt wird das offline beim Analysieren, auf dem Beatgrid — wie, steht in
+`crates/analysis/src/struktur.rs`.
+
+**`beats_to_outro` ist die Zahl, für die es das gibt.** Sie zählt herunter und
+wird negativ, sobald das Outro läuft, und damit wird die eigentliche Regel
+sagbar:
+
+```text
+when deck1.beats_to_outro < 0   in phrase ramp master.crossfader 1 32
+```
+
+Vorher hieß dieselbe Absicht „wenn noch 40 Beats übrig sind" — eine Zahl, die
+man je Track neu schätzt und meistens falsch.
+
+**`entry` ist der Einstiegspunkt: der erste Downbeat, nicht Sekunde 0.** Was
+davor liegt, ist Vorlauf. Genau diesen Fehler hat die Mitschrift beim ersten
+gemessenen Übergang aufgedeckt — Deck 2 setzte fünfzehn Beats neben seiner
+eigenen Eins ein, weil es bei Frame 0 anfing. `do deckN.jump_entry` räumt das
+in einem Griff weg.
+
+Steht der Abspielkopf im Vorlauf, ist `section` **leer**. Das ist keine Lücke,
+sondern die Auskunft: Dort läuft noch kein Abschnitt. Dasselbe gilt für einen
+Track ohne Outro — nicht jede Produktion blendet aus, und `beats_to_outro`
+antwortet dann leer statt mit einer erfundenen Null.
+
+**`intro_beats` ist für die Auswahl da.** „Ein Track mit langem Intro" ist damit
+eine Anforderung, die ein Agent stellen kann, statt sie zu erraten.
+
 ## Harmonisch mischen
 
 Tempo ist die halbe Trackauswahl. Zwei Stücke im gleichen Takt können trotzdem

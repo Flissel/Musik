@@ -132,6 +132,12 @@ pub struct DeckEintrag {
     /// Sie liegt hier und nicht im `DeckState`: Der ist der Echtzeitteil und
     /// kennt nur Atomics; eine Tonart wird nie pro Sample gebraucht.
     pub tonart: Option<Tonart>,
+    /// Gliederung des geladenen Tracks — siehe [`audio_core::struktur`].
+    ///
+    /// `None`, solange keine erkannt wurde. Das ist kein Mangel, sondern eine
+    /// Auskunft: Ohne Beatgrid oder bei sehr kurzem Material gibt es keine, und
+    /// eine geratene wäre schlechter als keine.
+    pub struktur: Option<audio_core::Struktur>,
     /// Woher der geladene Track kommt — leer, solange keiner liegt.
     ///
     /// Ohne den Pfad ließe sich nichts zurückschreiben: Die Sammlung kennt
@@ -149,12 +155,7 @@ pub struct DeckEintrag {
     pub phrase_beats: f64,
 }
 
-/// Wie lang eine Phrase standardmäßig ist.
-///
-/// Sechzehn Beats sind vier Takte — die Gruppe, in der House und Techno gebaut
-/// sind und an deren Grenzen ein Übergang sitzt. Wer anderes auflegt, schreibt
-/// `deckN.phrase_beats`.
-pub const PHRASE_BEATS: f64 = 16.0;
+pub use audio_core::struktur::PHRASE_BEATS;
 
 impl DeckEintrag {
     pub fn neu(state: Arc<DeckState>, kanal: usize, sample_rate: u32) -> DeckEintrag {
@@ -166,6 +167,7 @@ impl DeckEintrag {
             titel: String::new(),
             artist: String::new(),
             tonart: None,
+            struktur: None,
             pfad: String::new(),
             lade_status: "bereit".into(),
             phrase_beats: PHRASE_BEATS,
@@ -510,6 +512,40 @@ impl Steuerpult {
                 Some(t) => Wert::Text(t.camelot()),
                 None => Wert::Leer,
             },
+            // Die Gliederung. Alle vier antworten `Leer` statt 0, wenn nichts
+            // bekannt ist — „kein Outro" und „das Outro fängt jetzt an" sind
+            // zwei verschiedene Auskünfte, und eine 0 hieße beides.
+            "section" => match self.abschnitt(i) {
+                Some(a) => Wert::Text(a.art.name().to_string()),
+                None => Wert::Leer,
+            },
+            "section_beats_left" => match (self.abschnitt(i), d.state.grid()) {
+                (Some(a), Some(g)) => {
+                    let jetzt = d.state.position_frames() as f64;
+                    Wert::Zahl(
+                        ((a.bis_frames as f64 - jetzt) / g.frames_per_beat(d.sample_rate)).max(0.0),
+                    )
+                }
+                _ => Wert::Leer,
+            },
+            "beats_to_outro" => match (
+                d.struktur.as_ref().and_then(|s| s.outro_frames()),
+                d.state.grid(),
+            ) {
+                (Some(outro), Some(g)) => {
+                    let jetzt = d.state.position_frames() as f64;
+                    Wert::Zahl((outro as f64 - jetzt) / g.frames_per_beat(d.sample_rate))
+                }
+                _ => Wert::Leer,
+            },
+            "intro_beats" => match d.struktur.as_ref().and_then(|s| s.intro_beats()) {
+                Some(b) => Wert::Zahl(b),
+                None => Wert::Leer,
+            },
+            "entry" => match d.struktur.as_ref().and_then(|s| s.einstieg_frames()) {
+                Some(f) => sek(f),
+                None => Wert::Leer,
+            },
             "finished" => Wert::Schalter(d.state.is_finished()),
             "load_status" => Wert::Text(d.lade_status.clone()),
             _ => {
@@ -522,6 +558,13 @@ impl Steuerpult {
         };
 
         Some(wert)
+    }
+
+    /// Der Abschnitt, in dem ein Deck gerade steht.
+    pub fn abschnitt(&self, deck: usize) -> Option<audio_core::Abschnitt> {
+        let d = self.decks.get(deck)?;
+        let s = d.struktur.as_ref()?;
+        s.bei_frames(d.state.position_frames()).copied()
     }
 
     fn lies_kanal(&self, i: usize, element: &str) -> Option<Wert> {
@@ -659,6 +702,7 @@ impl Steuerpult {
                 let nummer: usize = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
                 self.hot_cue_anspringen(i, nummer)
             }
+            (Gruppe::Deck(i), "jump_entry") => self.einstieg_anspringen(i),
             (Gruppe::Deck(i), "beatjump") => {
                 let beats: f64 = argument.and_then(|a| a.parse().ok()).ok_or_else(fehlt)?;
                 self.beatjump(i, beats)
@@ -975,6 +1019,30 @@ impl Steuerpult {
         Ok(vec![format!(
             "fx_sync channel{} {beats} Beats bei {bpm:.2} BPM = {sekunden:.4} s",
             kanal + 1
+        )])
+    }
+
+    /// Springt auf den Einstiegspunkt des Tracks.
+    ///
+    /// **Das ist der Griff, für den es S2 gibt.** Vorher fing ein eingehender
+    /// Track bei Frame 0 an, und die Mitschrift hat beim ersten gemessenen
+    /// Übergang gezeigt, was das kostet: Deck 2 setzte fünfzehn Beats neben
+    /// seiner eigenen Eins ein.
+    fn einstieg_anspringen(&mut self, deck: usize) -> Result<Vec<String>, Fehler> {
+        let Some(d) = self.decks.get(deck) else {
+            return Err(Fehler::UnbekanntesControl(format!("deck{}", deck + 1)));
+        };
+        let Some(frames) = d.struktur.as_ref().and_then(|s| s.einstieg_frames()) else {
+            return Err(Fehler::Gescheitert(format!(
+                "deck{} kennt keinen Einstiegspunkt — ohne Gliederung gibt es keinen",
+                deck + 1
+            )));
+        };
+        d.state.seek_frames(frames);
+        Ok(vec![format!(
+            "jump_entry deck{} auf {:.3}s",
+            deck + 1,
+            frames as f64 / d.sample_rate as f64
         )])
     }
 
@@ -2660,5 +2728,182 @@ mod mitschrift_tests {
         );
 
         aufraeumen(&wav);
+    }
+}
+
+/// Die Gliederung im Steuerraum: Wo steht das Deck, und wo darf der Übergang
+/// liegen.
+#[cfg(test)]
+mod struktur_tests {
+    use super::*;
+    use crate::testing::{pult_mit_zwei_decks, rendern, RATE};
+    use audio_core::struktur::{Abschnitt, Art, Struktur};
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    fn je_beat() -> f64 {
+        60.0 / 128.0 * RATE as f64
+    }
+
+    /// Stellt das Deck auf einen Beat — und rendert einen Block.
+    ///
+    /// Ohne das Rendern stünde die alte Position noch da: Ein Sprung wird erst
+    /// veröffentlicht, wenn das Deck ihn abgearbeitet hat. Genau der Umstand,
+    /// den die Mitschrift bei einem stehenden Deck schon einmal ans Licht
+    /// gebracht hat.
+    fn stellen(pult: &Steuerpult, runner: &mut audio_engine::EngineRunner, beat: f64) {
+        pult.decks()[0].state.seek_frames((beat * je_beat()) as u64);
+        rendern(runner, 256);
+    }
+
+    /// Vier Abschnitte zu je acht Sekunden auf dem Testdeck (60 s, 128 BPM).
+    fn beispiel() -> Struktur {
+        let je_beat = 60.0 / 128.0 * RATE as f64;
+        let abschnitt = |art: Art, von_beat: f64, bis_beat: f64| Abschnitt {
+            von_frames: (von_beat * je_beat) as u64,
+            bis_frames: (bis_beat * je_beat) as u64,
+            von_beat,
+            bis_beat,
+            art,
+            pegel: 0.5,
+            bass: 0.5,
+            dichte: 0.5,
+        };
+        Struktur {
+            phrase_beats: PHRASE_BEATS,
+            abschnitte: vec![
+                abschnitt(Art::Intro, 0.0, 32.0),
+                abschnitt(Art::Drop, 32.0, 64.0),
+                abschnitt(Art::Outro, 64.0, 96.0),
+            ],
+        }
+    }
+
+    fn pult_mit_gliederung() -> (Steuerpult, audio_engine::EngineRunner) {
+        let (mut pult, runner) = pult_mit_zwei_decks();
+        pult.deck_mut(0).unwrap().struktur = Some(beispiel());
+        (pult, runner)
+    }
+
+    #[test]
+    fn der_laufende_abschnitt_steht_im_steuerraum() {
+        let (pult, mut runner) = pult_mit_gliederung();
+        assert_eq!(
+            pult.lies(&k("deck1.section")).unwrap(),
+            Wert::Text("intro".into())
+        );
+
+        stellen(&pult, &mut runner, 40.0);
+        assert_eq!(
+            pult.lies(&k("deck1.section")).unwrap(),
+            Wert::Text("drop".into())
+        );
+
+        stellen(&pult, &mut runner, 80.0);
+        assert_eq!(
+            pult.lies(&k("deck1.section")).unwrap(),
+            Wert::Text("outro".into())
+        );
+    }
+
+    /// Die Zahl, an der ein `when` hängt: „sobald das Outro läuft".
+    #[test]
+    fn bis_zum_outro_wird_gezaehlt_und_danach_negativ() {
+        let (pult, mut runner) = pult_mit_gliederung();
+
+        let Wert::Zahl(vorher) = pult.lies(&k("deck1.beats_to_outro")).unwrap() else {
+            panic!("keine Zahl")
+        };
+        assert!((vorher - 64.0).abs() < 0.5, "{vorher}");
+
+        stellen(&pult, &mut runner, 72.0);
+        let Wert::Zahl(drin) = pult.lies(&k("deck1.beats_to_outro")).unwrap() else {
+            panic!("keine Zahl")
+        };
+        assert!(
+            drin < 0.0,
+            "im Outro muss die Zahl negativ sein, war {drin}"
+        );
+    }
+
+    #[test]
+    fn intro_und_einstieg_stehen_da() {
+        let (pult, _runner) = pult_mit_gliederung();
+        assert_eq!(
+            pult.lies(&k("deck1.intro_beats")).unwrap(),
+            Wert::Zahl(32.0)
+        );
+        assert_eq!(pult.lies(&k("deck1.entry")).unwrap(), Wert::Zahl(0.0));
+    }
+
+    #[test]
+    fn der_rest_des_abschnitts_zaehlt_herunter() {
+        let (pult, mut runner) = pult_mit_gliederung();
+        stellen(&pult, &mut runner, 24.0);
+
+        let Wert::Zahl(rest) = pult.lies(&k("deck1.section_beats_left")).unwrap() else {
+            panic!("keine Zahl")
+        };
+        assert!((rest - 8.0).abs() < 0.5, "{rest}");
+    }
+
+    /// Ohne Gliederung wird keine erfunden. `Leer` und nicht 0 — „kein Outro"
+    /// und „das Outro fängt jetzt an" sind zwei verschiedene Auskünfte.
+    #[test]
+    fn ohne_gliederung_steht_leer_und_nicht_null() {
+        let (pult, _runner) = pult_mit_zwei_decks();
+        for name in [
+            "deck1.section",
+            "deck1.section_beats_left",
+            "deck1.beats_to_outro",
+            "deck1.intro_beats",
+            "deck1.entry",
+        ] {
+            assert_eq!(pult.lies(&k(name)).unwrap(), Wert::Leer, "{name}");
+        }
+    }
+
+    /// Ein Track ohne Outro bekommt keines angedichtet.
+    #[test]
+    fn ohne_outro_bleibt_die_zahl_leer() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = beispiel();
+        s.abschnitte.retain(|a| a.art != Art::Outro);
+        pult.deck_mut(0).unwrap().struktur = Some(s);
+
+        assert_eq!(pult.lies(&k("deck1.beats_to_outro")).unwrap(), Wert::Leer);
+        assert_eq!(
+            pult.lies(&k("deck1.intro_beats")).unwrap(),
+            Wert::Zahl(32.0),
+            "das Intro gibt es weiterhin"
+        );
+    }
+
+    #[test]
+    fn der_einstieg_laesst_sich_anspringen() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut s = beispiel();
+        // Ein Vorlauf vor der ersten Eins, wie ihn jeder echte Track hat.
+        let versatz = RATE as u64 / 2;
+        for a in &mut s.abschnitte {
+            a.von_frames += versatz;
+            a.bis_frames += versatz;
+        }
+        pult.deck_mut(0).unwrap().struktur = Some(s);
+
+        pult.ausloesen(&k("deck1.jump_entry"), None)
+            .expect("Sprung");
+        rendern(&mut runner, 256);
+        assert_eq!(pult.decks()[0].state.position_frames(), versatz);
+    }
+
+    /// Ohne Gliederung sagt der Sprung das, statt still bei 0 zu landen.
+    #[test]
+    fn ohne_gliederung_sagt_der_sprung_ab() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let fehler = pult.ausloesen(&k("deck1.jump_entry"), None);
+        assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
     }
 }

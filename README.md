@@ -6,7 +6,8 @@ Reaktionen der Crowd formt.
 
 Status: **neun von zehn Phasen gebaut.** Decks mit Keylock, Hot Cues und
 Loops; Mixer mit EQ, Filter, Crossfader, Cue-Bus und AUX; Analyse für Tempo,
-Beatgrid und Wellenform; Sync über Tempo *und* Phase; Sammlung mit
+Beatgrid, Tonart, Wellenform **und die Gliederung eines Tracks in Intro,
+Aufbau, Drop, Break und Outro**; Sync über Tempo *und* Phase; Sammlung mit
 Traktor-Import; Oberfläche mit zwei Decks, Wellenform, Beatgrid und
 Plattenkiste; vier Effekte hinter dem Fader; **Fernsteuerung über einen
 selbstbeschreibenden Steuerraum**; Mitschnitt der Summe — und daneben eine

@@ -246,3 +246,22 @@ Der Test spricht den Server über einen echten MCP-Client an — `tools/list` un
 `tools/call`, nicht an der Schnittstelle vorbei. Ohne laufende Anwendung meldet
 er sich mit Rückgabewert 77 ab, statt Grün zu behaupten, wo nichts geprüft
 wurde.
+
+## Wo im Track ein Deck steht
+
+`musik_status` trägt seit der Strukturanalyse je Deck auch `section`
+(`intro`, `aufbau`, `drop`, `break`, `outro`, `teil`), `section_beats_left`,
+`beats_to_outro`, `intro_beats` und `entry`. Im Bericht steht das als eine
+Zeile:
+
+```text
+- Abschnitt **aufbau**, noch 12 Beats · Outro in 108 Beats
+```
+
+Damit muss ein Agent nicht mehr aus Position und Länge schätzen, wo im Stück er
+ist. `beats_to_outro` wird negativ, sobald das Outro läuft — die Zahl, an der
+ein `musik_when` hängen kann.
+
+**Leer heißt nicht null.** Steht der Abspielkopf im Vorlauf vor der ersten Eins,
+gibt es keinen Abschnitt; hat ein Track kein Outro, gibt es keine Zahl. Beides
+kommt als `null` zurück und nicht als 0.

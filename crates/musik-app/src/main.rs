@@ -131,6 +131,7 @@ fn main() -> Result<()> {
         eintrag.titel = titel;
         eintrag.artist = artist;
         eintrag.tonart = analyse.tonart();
+        eintrag.struktur = analyse.struktur();
         // Nur bei echten Dateien: Ein Demo-Track steht in keiner Sammlung, und
         // ein Cue darauf hat nichts, wohin er gespeichert werden könnte.
         if let Some(p) = pfad {

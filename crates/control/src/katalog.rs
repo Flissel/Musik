@@ -280,6 +280,50 @@ pub static DECK: &[Beschreibung] = &[
         true,
         "Schleife dieser Länge ab der Position setzen",
     ),
+    // Die Gliederung (S2). Ohne sie war „blende aus, während das Outro läuft"
+    // nicht sagbar — und der eingehende Track setzte auf Sekunde 0 ein statt
+    // auf einem Downbeat.
+    text_feld(
+        "section",
+        "Welcher Abschnitt gerade läuft: intro, aufbau, drop, break, outro oder teil",
+    ),
+    zahl(
+        "section_beats_left",
+        "ABSCHNITT",
+        0.0,
+        f64::MAX,
+        Einheit::Beats,
+        false,
+        "Beats bis zum Ende des laufenden Abschnitts",
+    ),
+    zahl(
+        "beats_to_outro",
+        "BIS OUTRO",
+        f64::MIN,
+        f64::MAX,
+        Einheit::Beats,
+        false,
+        "Beats bis zum Anfang des Outros; negativ, sobald es läuft — die Stelle, \
+an der ein Übergang sitzen darf",
+    ),
+    zahl(
+        "intro_beats",
+        "INTRO",
+        0.0,
+        f64::MAX,
+        Einheit::Beats,
+        false,
+        "Wie lang das Intro ist — danach sucht man einen Track zum Einmischen aus",
+    ),
+    zahl(
+        "entry",
+        "EINSTIEG",
+        0.0,
+        f64::MAX,
+        Einheit::Sekunden,
+        false,
+        "Wo der Track einsetzen sollte: sein erster Downbeat, nicht Sekunde 0",
+    ),
     text_feld("title", "Titel des geladenen Tracks"),
     text_feld("artist", "Künstler des geladenen Tracks"),
     text_feld(
@@ -308,6 +352,11 @@ pub static DECK: &[Beschreibung] = &[
         "Track laden; arbeitet im Hintergrund, Fortschritt über load_status",
     ),
     aktion("jump_cue", "<1..8>", "Einen gesetzten Hot Cue anspringen"),
+    aktion(
+        "jump_entry",
+        "",
+        "Auf den Einstiegspunkt springen — den ersten Downbeat statt Sekunde 0",
+    ),
     aktion(
         "beatjump",
         "<beats>",

@@ -229,6 +229,7 @@ impl MusikApp {
                         e.artist = fertig.artist;
                         e.frames = fertig.frames;
                         e.tonart = fertig.tonart;
+                        e.struktur = fertig.struktur;
                         // Ohne den Pfad landet kein gesetzter Cue je wieder in
                         // der Sammlung.
                         e.pfad = ergebnis.pfad.clone();
