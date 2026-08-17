@@ -92,8 +92,44 @@ fn eine_datei(pfad: &Path, store: &Store) -> Result<()> {
             "aus dem Cache"
         },
     );
+    gliederung(&analyse);
 
     Ok(())
+}
+
+/// Die Gliederung, mit den Zahlen daneben, aus denen der Name kommt.
+///
+/// Die Zahlen stehen bewusst mit da. Die Grenzen sind an gebautem Material
+/// geprüft, die **Benennung nicht** — wer sie für falsch hält, soll sehen
+/// können, woran sie hängt, statt sie glauben zu müssen.
+fn gliederung(analyse: &analysis::Analysis) {
+    let Some(s) = analyse.struktur() else {
+        if analyse.bpm.is_some() {
+            println!("  Gliederung: keine erkennbar");
+        }
+        return;
+    };
+
+    let rate = analyse.sample_rate as f64;
+    println!("  Gliederung ({} Abschnitte):", s.abschnitte.len());
+    for a in &s.abschnitte {
+        println!(
+            "    {:>6.1}s  {:>7.1} Beats  {:<6}  Pegel {:.2}  Bass {:.2}  Dichte {:.2}",
+            a.von_frames as f64 / rate,
+            a.beats(),
+            a.art.name(),
+            a.pegel,
+            a.bass,
+            a.dichte
+        );
+    }
+    if let Some(einstieg) = s.einstieg_frames() {
+        println!("    Einstieg bei {:.2}s", einstieg as f64 / rate);
+    }
+    match s.outro_frames() {
+        Some(f) => println!("    Outro ab {:.2}s", f as f64 / rate),
+        None => println!("    Kein Outro — dieser Track blendet nicht aus"),
+    }
 }
 
 fn hilfe() {

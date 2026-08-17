@@ -29,7 +29,11 @@ use crate::peaks::PeakLevel;
 /// und `serde(default)` würde daraus ein „keine Tonart erkannt" machen — also
 /// eine Falschaussage statt einer fehlenden Angabe. Deshalb der Bump: Der
 /// Track wird einmal neu gerechnet und weiß danach Bescheid.
-pub const FORMAT_VERSION: u32 = 2;
+///
+/// 3: Gliederung dazugekommen — aus demselben Grund. Eine leere Abschnittsliste
+/// hieße „dieser Track hat keine Struktur", und das ist etwas anderes als „hier
+/// hat noch niemand nachgesehen".
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Analysis {
@@ -55,10 +59,62 @@ pub struct Analysis {
     #[serde(default)]
     pub key_confidence: Option<f32>,
 
+    /// Gliederung in Abschnitte. Leer, wenn keine erkennbar war — etwa ohne
+    /// Beatgrid oder bei einem Track von zwei Phrasen Länge.
+    #[serde(default)]
+    pub abschnitte: Vec<AbschnittData>,
+
     pub peaks: Vec<PeakLevelData>,
 }
 
+/// Ein Abschnitt, wie er im Sidecar steht.
+///
+/// **Ohne Beats.** Die stehen nicht mit drin, weil sie sich aus Tempo und Anker
+/// ergeben, die ohnehin danebenliegen. Zwei Angaben derselben Sache in einer
+/// Datei laufen irgendwann auseinander, und dann glaubt man der falschen.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AbschnittData {
+    pub von_frames: u64,
+    pub bis_frames: u64,
+    /// `intro`, `aufbau`, `drop`, `break`, `outro` oder `teil`.
+    pub art: String,
+    pub pegel: f32,
+    pub bass: f32,
+    pub dichte: f32,
+}
+
 impl Analysis {
+    /// Die Gliederung als Wert, mit den Beats aus Tempo und Anker gerechnet.
+    ///
+    /// `None`, wenn keine erkannt wurde oder das Tempo fehlt — ohne Grid gäbe
+    /// es keine Beats, auf die sich ein Abschnitt beziehen ließe.
+    pub fn struktur(&self) -> Option<crate::struktur::Struktur> {
+        let (bpm, anker) = (self.bpm?, self.beat_anchor_frames?);
+        if self.abschnitte.is_empty() || bpm <= 0.0 {
+            return None;
+        }
+        let je_beat = 60.0 / bpm as f64 * self.sample_rate as f64;
+        let beat = |frames: u64| (frames as f64 - anker as f64) / je_beat;
+
+        Some(crate::struktur::Struktur {
+            phrase_beats: crate::struktur::PHRASE_BEATS,
+            abschnitte: self
+                .abschnitte
+                .iter()
+                .map(|a| crate::struktur::Abschnitt {
+                    von_frames: a.von_frames,
+                    bis_frames: a.bis_frames,
+                    von_beat: beat(a.von_frames),
+                    bis_beat: beat(a.bis_frames),
+                    art: crate::struktur::Art::parse(&a.art).unwrap_or(crate::struktur::Art::Teil),
+                    pegel: a.pegel,
+                    bass: a.bass,
+                    dichte: a.dichte,
+                })
+                .collect(),
+        })
+    }
+
     /// Die erkannte Tonart als Wert, sofern eine dasteht.
     pub fn tonart(&self) -> Option<audio_core::Tonart> {
         self.musical_key
@@ -231,6 +287,7 @@ mod tests {
             bpm_confidence: Some(0.9),
             musical_key: Some("Am".into()),
             key_confidence: Some(0.2),
+            abschnitte: Vec::new(),
             peaks: vec![],
         };
 
@@ -262,6 +319,7 @@ mod tests {
             bpm_confidence: None,
             musical_key: None,
             key_confidence: None,
+            abschnitte: Vec::new(),
             peaks: vec![],
         };
         analysis.version = FORMAT_VERSION + 1;

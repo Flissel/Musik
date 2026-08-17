@@ -7,6 +7,7 @@
 pub mod onset;
 pub mod peaks;
 pub mod sidecar;
+pub mod struktur;
 pub mod tempo;
 pub mod tonart;
 
@@ -15,7 +16,8 @@ pub(crate) mod testing;
 
 use audio_core::Track;
 
-pub use sidecar::{Analysis, Store};
+pub use sidecar::{AbschnittData, Analysis, Store};
+pub use struktur::{Abschnitt, Art, Struktur};
 pub use tempo::Beatgrid;
 pub use tonart::Tonart;
 
@@ -25,6 +27,8 @@ pub fn analyze(track: &Track) -> Analysis {
     let grid = tempo::detect(&envelope)
         .map(|g| tempo::refine_anchor(&track.samples, track.sample_rate, g));
     let levels = peaks::compute(&track.samples);
+    let gliederung =
+        grid.and_then(|g| struktur::analysiere(&track.samples, track.sample_rate, g, &envelope));
     let key = tonart::erkenne(&track.samples, track.sample_rate);
 
     Analysis {
@@ -38,6 +42,21 @@ pub fn analyze(track: &Track) -> Analysis {
         bpm_confidence: grid.map(|g| g.confidence),
         musical_key: key.map(|k| k.tonart.name()),
         key_confidence: key.map(|k| k.konfidenz),
+        abschnitte: gliederung
+            .map(|s| {
+                s.abschnitte
+                    .iter()
+                    .map(|a| sidecar::AbschnittData {
+                        von_frames: a.von_frames,
+                        bis_frames: a.bis_frames,
+                        art: a.art.name().to_string(),
+                        pegel: a.pegel,
+                        bass: a.bass,
+                        dichte: a.dichte,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         peaks: levels
             .iter()
             .map(sidecar::PeakLevelData::from_level)
