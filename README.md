@@ -40,6 +40,7 @@ es nichts, was Agenten steuern könnten.
 | [mcp/README.md](mcp/README.md) | MCP-Brücke für Agenten — Werkzeuge aus dem Katalog erzeugt |
 | [docs/BAUSTEINE.md](docs/BAUSTEINE.md) | Fertige Bibliotheken für Audio, Analyse, Stems — inkl. Lizenzfallen |
 | [docs/APIS.md](docs/APIS.md) | Generierungs-APIs und Sample-Quellen, Zugangsstatus |
+| **[docs/DJ.md](docs/DJ.md)** | **Plan für einen AI-DJ, der nicht herzlos klingt — Reihenfolge und Begründung** |
 | [docs/AGENTEN.md](docs/AGENTEN.md) | Multi-Agenten-Team und Crowd-Feedback-Schleife |
 | [docs/VIBEMIND.md](docs/VIBEMIND.md) | Anschluss an VibeMind — MCP, Arbeitsteilung, Lizenzfolgen |
 | [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md) | Bausteine und Schnittstellen |
