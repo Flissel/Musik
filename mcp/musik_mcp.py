@@ -443,6 +443,34 @@ class RampeEingabe(Basis):
         return _pruefe_einzeilig(v, "control")
 
 
+class GriffName(str, Enum):
+    """Die benannten Übergänge."""
+
+    blende = "blende"
+    bassswap = "bassswap"
+    schnitt = "schnitt"
+    filter = "filter"
+
+
+class UebergangEingabe(Basis):
+    griff: GriffName = Field(
+        ...,
+        description=(
+            "Welcher Übergang. 'blende' lange Blende über den Crossfader, weich "
+            "verteilt (32 Beats); 'bassswap' beide laufen in der Mitte, dann "
+            "tauschen die Bässe (16); 'schnitt' auf der Eins umschalten, ohne "
+            "Übergang; 'filter' dem Ausgehenden den Boden wegziehen, während der "
+            "Neue kommt (16)."
+        ),
+    )
+    beats: Optional[float] = Field(
+        default=None,
+        description="Länge in Beats. Ohne Angabe die übliche des Griffs.",
+        ge=0,
+        le=4096,
+    )
+
+
 class VormerkEingabe(Basis):
     beats: float = Field(
         ...,
@@ -1403,6 +1431,63 @@ async def musik_schedule(params: VormerkEingabe) -> str:
 
     if fehler := _fehlerzeile(zeilen):
         return f"Fehler: {fehler}. `musik_list_controls` zeigt, was es gibt."
+    return "\n".join(zeilen)
+
+
+@mcp.tool(
+    name="musik_uebergang",
+    annotations={
+        "title": "Einen benannten Übergang vormerken",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def musik_uebergang(params: UebergangEingabe) -> str:
+    """Merkt einen Übergang aus dem Repertoire vor.
+
+    Vier Griffe statt einer immer gleichen Blende. Ein DJ, der jedes Mal
+    dasselbe macht, ist der langweiligste im Raum — auch wenn jeder einzelne
+    Übergang sauber ist.
+
+    **Die Anlage wählt nicht aus.** Welcher Griff passt, hängt daran, ob der
+    ausgehende Track ein Outro hat (`beats_to_outro`), der eingehende ein
+    langes Intro (`intro_beats`), wie groß der Energieunterschied ist — und
+    vor allem daran, was vorher schon dreimal gefahren wurde. Diese
+    Entscheidung gehört dir, samt Begründung; leg sie als Notiz an den
+    Warteschlangen-Eintrag.
+
+    Es geschieht nichts, was du nicht auch selbst tippen könntest: Die Antwort
+    nennt jede vorgemerkte Zeile. Alles läuft durch denselben Weg wie sonst,
+    steht also im Plan, in der Mitschrift und bei den Ereignissen, und
+    `musik_cancel` nimmt es zurück.
+
+    Voraussetzung: **genau ein** Deck läuft, auf dem anderen liegt etwas.
+    Sonst wäre nicht zu erraten, wer aus- und wer eingeht — dann die Zeilen
+    von Hand setzen.
+
+    Args:
+        params (UebergangEingabe): griff (str), beats (float|None).
+
+    Returns:
+        str: die vorgemerkten Zeilen mit ihren Antworten, oder 'Fehler: …'.
+
+    Beispiele:
+        - „Blende rüber" → griff='blende'
+        - „Bass-Swap über 32" → griff='bassswap', beats=32
+        - „Auf der Eins hart umschalten" → griff='schnitt'
+    """
+    befehl = f"do master.uebergang {params.griff.value}"
+    if params.beats is not None:
+        befehl += f" {_zahl_als_text(params.beats)}"
+    try:
+        zeilen = await eine_antwort(befehl)
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
+
+    if fehler := _fehlerzeile(zeilen):
+        return f"Fehler: {fehler}"
     return "\n".join(zeilen)
 
 

@@ -731,6 +731,7 @@ impl Steuerpult {
                 let pfad = argument.ok_or_else(fehlt)?;
                 self.aufnehmen(pfad)
             }
+            (Gruppe::Master, "uebergang") => self.uebergang(argument),
             (Gruppe::Master, "record_stop") => self.aufnahme_stoppen(),
             (Gruppe::Master, "search") => {
                 let treffer = self.suche(argument.unwrap_or(""));
@@ -1070,6 +1071,52 @@ impl Steuerpult {
         let ziel = (jetzt + beats * je_beat).clamp(0.0, d.frames as f64);
         d.state.seek_frames(ziel as u64);
         Ok(Vec::new())
+    }
+
+    /// Merkt einen benannten Übergang vor.
+    ///
+    /// **Es gibt hier nichts, was ein Bediener nicht auch selbst tippen
+    /// könnte.** Der Griff spart ihm eine Handvoll Zeilen, keine Magie — und
+    /// die Antwort nennt jede davon, damit er sie lesen, ändern und beim
+    /// nächsten Mal von Hand anders setzen kann. Sie laufen durch dasselbe
+    /// Protokoll wie alles andere, tauchen also im Plan auf, in der Mitschrift
+    /// und bei den Ereignissen.
+    fn uebergang(&mut self, argument: Option<&str>) -> Result<Vec<String>, Fehler> {
+        let roh = argument.unwrap_or("").trim();
+        let (name, rest) = roh.split_once(char::is_whitespace).unwrap_or((roh, ""));
+
+        let Some(griff) = crate::uebergang::Griff::parse(name) else {
+            let alle: Vec<&str> = crate::uebergang::Griff::ALLE
+                .iter()
+                .map(|g| g.name())
+                .collect();
+            return Err(Fehler::Argument {
+                control: "master.uebergang".into(),
+                erwartet: format!("einen Griff: {}", alle.join(", ")),
+            });
+        };
+
+        let beats = match rest.trim() {
+            "" => griff.beats(),
+            text => text.parse::<f64>().map_err(|_| Fehler::Argument {
+                control: "master.uebergang".into(),
+                erwartet: "eine Länge in Beats".into(),
+            })?,
+        };
+
+        let zeilen = crate::uebergang::zeilen(self, griff, beats)?;
+        let mut aus = vec![format!(
+            "uebergang {} über {beats} Beats, {} Zeilen",
+            griff.name(),
+            zeilen.len()
+        )];
+        for z in zeilen {
+            // Durch denselben Weg wie alles andere — nicht an ihm vorbei.
+            let mut sitzung = crate::Sitzung::neu();
+            let antwort = crate::behandle(self, &mut sitzung, &z);
+            aus.push(format!("  {z} → {}", antwort.lines().next().unwrap_or("")));
+        }
+        Ok(aus)
     }
 
     fn aufnehmen(&mut self, pfad: &str) -> Result<Vec<String>, Fehler> {
@@ -1896,6 +1943,7 @@ mod tests {
                 "queue_add" => Some("/musik/vorgemerkt.wav"),
                 "queue_note" => Some("1 passt harmonisch"),
                 "queue_bump" | "queue_drop" => Some("1"),
+                "uebergang" => Some("blende"),
                 _ => None,
             };
 

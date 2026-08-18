@@ -230,9 +230,9 @@ Das ist auch die Stelle, an der Zurückhaltung einprogrammiert gehört. Ein Syst
 das jeden Übergang gleich lang und gleich weich fährt, klingt nach Automat —
 auch wenn jeder einzelne davon sauber ist.
 
-## S4 — Geste statt Rampe
+## S4 — Geste statt Rampe ✅
 
-*Wenn die Struktur steht, lohnt sich die Form.*
+*Gebaut. Formen für Rampen und vier benannte Griffe — siehe [`FAHRPLAN.md`](FAHRPLAN.md#p3--geste-und-repertoire-s4-).*
 
 Zwei Erweiterungen, beide klein:
 

@@ -178,9 +178,9 @@ derselben Phrasengrenze feuern beide.
 **Stufe 2 steht aus:** zwei unabhängige Modelle. Die findet, was Menschen und
 Modelle unterschiedlich verstehen, und das findet man nicht durch Nachdenken.
 
-## P3 — Geste und Repertoire (S4) ◐
+## P3 — Geste und Repertoire (S4) ✅
 
-*Formen gebaut, Repertoire steht aus. Klein, sofort hörbar, seit S1 messbar.*
+*Gebaut. Klein, sofort hörbar, seit S1 messbar.*
 
 Zwei Erweiterungen:
 
@@ -193,10 +193,21 @@ das sind Wächter, keine Behauptungen.
 Offen bleibt die Crossfader-Kurve, die es schon gibt und die im ersten Lauf
 ungenutzt auf weich stand — sie ist kein Code, sondern eine Frage der Benutzung.
 
-**Ein Repertoire statt eines Handgriffs.** Lange Blende, Bass-Swap, harter
-Schnitt auf die Eins, Filter-Sweep, Loop-Ausstieg. Welcher passt, entscheidet
-seit S2 der Kontext: Hat der ausgehende Track ein Outro? Der eingehende ein
-langes Intro? Wie groß ist der Energieunterschied?
+**Ein Repertoire statt eines Handgriffs** ✅. `do master.uebergang
+<blende|bassswap|schnitt|filter> [beats]`. Jeder Griff ist eine Handvoll
+gewöhnlicher Protokollzeilen, die durch denselben Weg laufen wie alles andere —
+also im Plan stehen, in der Mitschrift, bei den Ereignissen, und mit `cancel`
+zurückgehen. Die Antwort nennt jede Zeile: Es gibt nichts, was ein Agent nicht
+auch selbst hätte tippen können.
+
+**Die Anlage wählt dabei nicht aus.** Welcher Griff passt, hängt am Kontext —
+Outro, Intro-Länge, Energieunterschied, und vor allem daran, was vorher schon
+dreimal gefahren wurde. Seit S2 stehen die Zahlen dafür im Steuerraum; die
+Entscheidung gehört dem, der sie begründen kann. Nähme die Anlage sie ab,
+verlöre das Set genau den Teil, um den es diesem Projekt geht.
+
+Offen bleibt der Loop-Ausstieg — er braucht die Schleifen im Zusammenspiel mit
+dem Zeitplan und ist ein eigener Schritt.
 
 Ein DJ, der immer dasselbe macht, ist der langweiligste im Raum — und genau das
 war mein erster Lauf. Der Kritiker misst inzwischen Länge und Form jeder Blende,
@@ -299,7 +310,7 @@ bräuchte es einen zweiten Weg für die Steuerung); MIDI-Controller (Phase 10).
 | --- | --- | --- | --- |
 | P1 ✅ | Prüfstand | Macht jede spätere Zahl prüfbar und deinen Beitrag billig | — |
 | P2 ◐ | Das Team | Der Zweck des Projekts; alles darüber wäre sonst zweimal gebaut | Stufe 2: zwei Modelle |
-| P3 | Geste und Repertoire | Sofort hörbar, seit S1 messbar | — |
+| P3 ✅ | Geste und Repertoire | Sofort hörbar, seit S1 messbar | — |
 | P4 | Der Bogen | Braucht S2; für ein Team der gemeinsame Maßstab | P2 |
 | P5 | Der Raum | Braucht den Bogen, sonst gibt es nichts zu lenken | P4, Quelle |
 | P6 | Stems | Größter Klanggewinn, größtes Risiko, braucht Streaming | — |

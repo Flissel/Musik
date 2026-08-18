@@ -1485,6 +1485,56 @@ mod phrasen_tests {
 #[cfg(test)]
 mod team_tests {
 
+    /// Ein Griff geht durch dasselbe Protokoll wie alles andere: Er landet im
+    /// Plan, die Antwort nennt jede Zeile, und `cancel` nimmt ihn zurück.
+    #[test]
+    fn ein_griff_landet_im_plan_und_nennt_seine_zeilen() {
+        let (mut pult, _runner) = crate::testing::pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "set deck1.play 1");
+
+        let antwort = behandle(&mut pult, &mut s, "do master.uebergang blende");
+        assert!(antwort.contains("uebergang blende"), "{antwort}");
+        // Jede Zeile steht mit ihrer Antwort da — nichts geschieht im
+        // Verborgenen.
+        assert!(
+            antwort.contains("in phrase set deck2.play 1 → ok plan"),
+            "{antwort}"
+        );
+        assert!(antwort.contains("master.crossfader"), "{antwort}");
+
+        let plan = behandle(&mut pult, &mut s, "plan");
+        assert!(plan.contains("ok 2 vorgemerkt"), "{plan}");
+
+        // Und zurücknehmen geht wie bei allem anderen.
+        assert_eq!(behandle(&mut pult, &mut s, "cancel"), "ok 2 gestrichen");
+    }
+
+    /// Ein unbekannter Griff nennt die Auswahl, statt still nichts zu tun.
+    #[test]
+    fn ein_unbekannter_griff_nennt_die_auswahl() {
+        let (mut pult, _runner) = crate::testing::pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        let antwort = behandle(&mut pult, &mut s, "do master.uebergang wumms");
+        assert!(antwort.starts_with("err"), "{antwort}");
+        assert!(antwort.contains("bassswap"), "{antwort}");
+    }
+
+    /// Die Länge lässt sich mitgeben; ohne Angabe nimmt der Griff seine übliche.
+    #[test]
+    fn die_laenge_laesst_sich_mitgeben() {
+        let (mut pult, _runner) = crate::testing::pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "set deck1.play 1");
+
+        let lang = behandle(&mut pult, &mut s, "do master.uebergang blende");
+        assert!(lang.contains("über 32 Beats"), "{lang}");
+        behandle(&mut pult, &mut s, "cancel");
+
+        let kurz = behandle(&mut pult, &mut s, "do master.uebergang blende 8");
+        assert!(kurz.contains("über 8 Beats"), "{kurz}");
+    }
+
     /// Deck und Form stehen hinten, in beliebiger Reihenfolge.
     ///
     /// Eine feste Reihenfolge wäre nur eine Falle für den, der die Form angeben

@@ -771,6 +771,48 @@ ungenutzt auf weich, und der Kritiker hat das Pegelloch in der Mitte prompt
 gefunden. Form und Kurve sind zwei verschiedene Dinge: Die Form verteilt die
 Bewegung über die Zeit, die Kurve übersetzt die Reglerstellung in Lautstärke.
 
+## Ein Repertoire statt eines Handgriffs
+
+Vier benannte Übergänge:
+
+```text
+do master.uebergang bassswap 16
+uebergang bassswap über 16 Beats, 6 Zeilen
+  set channel2.eq_low 0 → ok channel2.eq_low 0
+  in phrase set deck2.play 1 → ok plan 1 in 13.5 Beats: set deck2.play 1
+  in phrase ramp master.crossfader 0 16 weich → ok plan 2 …
+  in phrase+16 ramp channel1.eq_low 0 8 → ok plan 3 …
+  in phrase+16 ramp channel2.eq_low 1 8 → ok plan 4 …
+  in phrase+24 ramp master.crossfader 1 16 weich → ok plan 5 …
+```
+
+| Griff | Was er tut | Üblich |
+| --- | --- | --- |
+| `blende` | lange Blende über den Crossfader, weich verteilt | 32 Beats |
+| `bassswap` | beide laufen in der Mitte, dann tauschen die Bässe | 16 |
+| `schnitt` | auf der Eins umschalten, ohne Übergang | 0 |
+| `filter` | dem Ausgehenden den Boden wegziehen, während der Neue kommt | 16 |
+
+**Es geschieht nichts, was man nicht auch selbst tippen könnte.** Jeder Griff
+ist eine Handvoll gewöhnlicher Zeilen, die durch denselben Weg laufen wie alles
+andere — sie stehen im Plan, in der Mitschrift und bei den Ereignissen, ein
+zweiter Bediener sieht sie kommen, und `cancel` nimmt sie zurück. Die Antwort
+nennt jede davon, damit man sie lesen, ändern und beim nächsten Mal von Hand
+anders setzen kann.
+
+**Die Anlage wählt nicht aus.** Welcher Griff passt, hängt daran, ob der
+ausgehende Track ein Outro hat, der eingehende ein langes Intro, wie groß der
+Energieunterschied ist — und vor allem daran, was vorher schon dreimal gefahren
+wurde. Seit der Gliederung stehen die Zahlen dafür im Steuerraum (`section`,
+`intro_beats`, `beats_to_outro`); die Entscheidung gehört dem, der sie begründen
+kann. Nähme die Anlage sie ab, verlöre das Set genau den Teil, um den es hier
+geht.
+
+Vorausgesetzt wird, dass **genau ein** Deck läuft und auf dem anderen etwas
+liegt. Läuft nichts, gibt es keinen Übergang; laufen beide, ist er im Gange —
+und wer dann gemeint ist, kann niemand wissen. In beiden Fällen sagt die Anlage
+das, statt ein Deck zu wählen.
+
 ## Harmonisch mischen
 
 Tempo ist die halbe Trackauswahl. Zwei Stücke im gleichen Takt können trotzdem

@@ -520,6 +520,13 @@ pub static MASTER: &[Beschreibung] = &[
         "Was der Plan zuletzt gemeldet hat: fertig, abgeloest, abgebrochen, gestrichen. \
 Abonnieren meldet jede Zeile einzeln, mit 'event' davor",
     ),
+    aktion(
+        "uebergang",
+        "<blende|bassswap|schnitt|filter> [beats]",
+        "Einen benannten Übergang vormerken — die Zeilen dafür stehen in der Antwort \
+und im Plan. Die Anlage wählt nicht aus: welcher Griff passt, entscheidet, wer \
+begründen kann warum",
+    ),
     zahl(
         "event_count",
         "",
