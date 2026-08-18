@@ -912,6 +912,35 @@ liegt. Läuft nichts, gibt es keinen Übergang; laufen beide, ist er im Gange �
 und wer dann gemeint ist, kann niemand wissen. In beiden Fällen sagt die Anlage
 das, statt ein Deck zu wählen.
 
+## Ein Set, das sich selbst weiterträgt
+
+Die Teile ergeben zusammen mehr als ihre Summe. Ein Set ist Liste, Laden,
+Griff — und keins davon braucht mehr eine Hand dazwischen:
+
+```text
+do master.queue_add /musik/mitte.wav
+do master.queue_note 1 mehr Druck nach dem Aufbau
+when deck1.beats_left < 200 do master.queue_next
+when deck1.beats_to_outro < 0 do master.uebergang bassswap 16
+```
+
+Die erste Bedingung legt den nächsten Track auf, sobald der laufende sich dem
+Ende nähert — auf dem freien Deck, auf dem ersten Downbeat. Die zweite fährt den
+Übergang, sobald das Outro anfängt. Danach steht das ausgehende Deck, der Plan
+ist leer, und dieselben zwei Zeilen lassen sich für den nächsten Track wieder
+setzen.
+
+**Gewählt hat trotzdem ein Mensch oder ein Agent**, und zwar zweimal: welcher
+Track in die Liste kommt — mit Notiz, warum — und welcher Griff gefahren wird.
+Die Anlage führt aus und begründet, was sie gerade tut; sie entscheidet nicht,
+was als Nächstes gut wäre. `do master.search_next` sortiert dafür die Sammlung,
+`master.why` sagt den Satz dazu, `master.repeats` warnt vor Eintönigkeit.
+
+**Was dabei schiefgehen kann, sagt die Anlage.** Beim ersten selbstausgelösten
+Übergang lief der ausgehende Track mitten im Bass-Swap aus; seitdem bricht der
+Plan ab und meldet `deck1 ist durchgelaufen`, statt mit dem Crossfader in der
+Mitte stehenzubleiben. Gegen den Fall selbst gibt es den Griff `schleife`.
+
 ## Der Bogen: was das Set vorhat
 
 Ein einzelner guter Übergang ist Handwerk. Ein gutes Set ist Architektur —

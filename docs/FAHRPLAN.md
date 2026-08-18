@@ -380,6 +380,30 @@ Plan vorsieht, nicht. Der Abspielpfad ist der einzige Teil mit
 Echtzeitauflagen, und Platten-I/O gehört dort zuletzt hinein — es ist der
 richtige Schritt, aber nicht derselbe wie dieser.
 
+## Was aus alldem zusammen wurde
+
+Die einzelnen Schichten waren je für sich geprüft. Beim ersten Versuch, sie
+hintereinander laufen zu lassen, kamen vier Fehler heraus, die kein Test hätte
+zeigen können — jeder davon erst beim **zweiten** Griff:
+
+1. Der ausgehende Track lief nach dem Griff weiter, und der nächste `uebergang`
+   wurde abgewiesen: „es laufen mehrere Decks".
+2. Getaktet wurde nach dem ersten Deck mit Beatgrid — beim zweiten Griff also
+   dem gerade gestoppten. Ein stehendes Deck hält den Plan an; der Übergang
+   stand still, angenommen und nie gefahren.
+3. Eine Rampe, die im selben Takt endet, in dem ihr Deck stehenbleibt, bekam
+   ihren letzten Schritt nicht mehr und blieb für immer im Plan liegen.
+4. Ein frisch geladenes Deck stand auf Sekunde 0 statt auf dem ersten Downbeat —
+   genau der Fehler, den die Mitschrift ganz am Anfang aufgedeckt hatte. Behoben
+   war bis dahin nur das Werkzeug dagegen, nicht die Ursache.
+
+Und beim ersten Übergang, der sich **selbst** auslöste, kam der fünfte: Der
+ausgehende Track lief mitten im Bass-Swap aus, und der Plan wartete danach für
+immer auf einen Beat, der nicht mehr kam.
+
+Seitdem läuft eine Kette aus Liste, Laden und Griff ohne Handgriff dazwischen —
+und was schiefgeht, steht in `master.events`, statt still zu bleiben.
+
 ## Was an dir hängt
 
 Diese Punkte kann ich nicht abarbeiten. Was ich tun kann, ist sie **billig
