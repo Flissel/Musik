@@ -129,6 +129,16 @@ fn main() -> Result<()> {
         engine.channel(kanal).set_fader(fader);
         state.set_playing(demo);
 
+        // Auf den ersten Downbeat, nicht auf Sekunde 0 — dieselbe Regel wie
+        // beim Laden zur Laufzeit, siehe `sammlung::fertigen`. Im Demobetrieb
+        // nicht: Dort laufen die Decks schon, und ein Sprung mitten hinein
+        // wäre ein Ruckler ohne Grund.
+        if !demo {
+            if let Some(einstieg) = analyse.struktur().and_then(|s| s.einstieg_frames()) {
+                state.seek_frames(einstieg);
+            }
+        }
+
         let mut eintrag = DeckEintrag::neu(Arc::clone(&state), kanal, RATE);
         eintrag.frames = frames;
         eintrag.titel = titel;

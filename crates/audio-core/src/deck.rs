@@ -923,3 +923,61 @@ mod stem_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod einstieg_tests {
+    use super::*;
+    use crate::testing::sine;
+
+    const RATE: u32 = 44_100;
+
+    fn voice(state: &Arc<DeckState>) -> Voice {
+        let track = Arc::new(Track {
+            samples: sine(440.0, RATE, 10.0),
+            sample_rate: RATE,
+            stems: Vec::new(),
+        });
+        Voice::new(Arc::clone(&track), Arc::clone(state))
+    }
+
+    /// **Ein vorgemerkter Sprung gehört der Stimme, die als Nächstes rendert.**
+    ///
+    /// Das klingt selbstverständlich und ist der Grund, warum ein frisch
+    /// geladenes Deck wieder auf Sekunde 0 stand: Der Lade-Arbeiter setzte den
+    /// Sprung auf den ersten Downbeat, während im Mixer noch die *alte* Stimme
+    /// lag. Die hat ihn verbraucht — auf ihrem eigenen Track —, und die neue
+    /// fing bei null an. Am laufenden Programm war der Unterschied
+    /// `beat -1.02` gegen `beat -0.03`.
+    ///
+    /// Deshalb wird jetzt erst getauscht und dann gesprungen. Dieser Test hält
+    /// fest, warum die Reihenfolge nicht beliebig ist.
+    #[test]
+    fn einen_vorgemerkten_sprung_verbraucht_die_stimme_die_gerade_liegt() {
+        let state = Arc::new(DeckState::new());
+        let mut alt = voice(&state);
+        let mut aus = vec![0.0; 256 * CHANNELS];
+
+        // Der Sprung wird gesetzt, während die alte Stimme noch rendert.
+        state.seek_frames(88_200);
+        alt.render_stereo(&mut aus);
+        assert_eq!(
+            state.position_frames(),
+            88_200,
+            "die alte Stimme hat den Sprung nicht genommen"
+        );
+
+        // Die neue Stimme fängt bei null an — der Sprung ist verbraucht.
+        let mut neu = voice(&state);
+        neu.render_stereo(&mut aus);
+        assert_eq!(
+            state.position_frames(),
+            0,
+            "der Sprung überlebt den Stimmentausch — dann wäre die Reihenfolge egal"
+        );
+
+        // Erst nach dem Tausch gesetzt kommt er an.
+        state.seek_frames(88_200);
+        neu.render_stereo(&mut aus);
+        assert_eq!(state.position_frames(), 88_200);
+    }
+}

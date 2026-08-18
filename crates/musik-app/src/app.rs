@@ -224,6 +224,18 @@ impl MusikApp {
                         continue;
                     }
 
+                    // Erst jetzt auf den ersten Downbeat, nachdem die neue
+                    // Stimme im Mixer liegt. Vorher gesetzt verbraucht ihn die
+                    // alte, und das Deck steht danach wieder auf Sekunde 0 —
+                    // genau der Fehler, den die Mitschrift aufgedeckt hat.
+                    //
+                    // Wer von Hand auflegt, cued auf den ersten Schlag. Ein
+                    // Track, der bei Sekunde 0 einsetzt, kommt neben seiner
+                    // eigenen Eins herein, weil vorne Stille steht.
+                    if let (Some(einstieg), Some(d)) = (fertig.einstieg, pult.decks().get(deck)) {
+                        d.state.seek_frames(einstieg);
+                    }
+
                     if let Some(e) = pult.deck_mut(deck) {
                         e.titel = fertig.titel.clone();
                         e.artist = fertig.artist;

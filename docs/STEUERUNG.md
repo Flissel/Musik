@@ -696,6 +696,16 @@ gemessenen Übergang aufgedeckt — Deck 2 setzte fünfzehn Beats neben seiner
 eigenen Eins ein, weil es bei Frame 0 anfing. `do deckN.jump_entry` räumt das
 in einem Griff weg.
 
+**Ein frisch geladenes Deck steht dort inzwischen von selbst.** Wer von Hand
+auflegt, cued auf den ersten Schlag; `do deckN.load` und `do master.queue_next`
+tun jetzt dasselbe. Vorher stand das Deck auf Sekunde 0, und der nächste Griff
+startete es dort — mitten in der Stille vor dem ersten Schlag.
+
+Die Reihenfolge ist dabei nicht beliebig: Der Sprung muss **nach** dem
+Stimmentausch kommen. Vorher gesetzt verbraucht ihn die alte Stimme auf ihrem
+eigenen Track, und die neue fängt wieder bei null an. Gemessen am laufenden
+Programm: `beat -1.02` gegen `beat -0.03`.
+
 Steht der Abspielkopf im Vorlauf, ist `section` **leer**. Das ist keine Lücke,
 sondern die Auskunft: Dort läuft noch kein Abschnitt. Dasselbe gilt für einen
 Track ohne Outro — nicht jede Produktion blendet aus, und `beats_to_outro`

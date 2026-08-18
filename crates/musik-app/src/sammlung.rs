@@ -55,6 +55,14 @@ pub struct Fertig {
     pub struktur: Option<audio_core::Struktur>,
     /// Namen der Einzelspuren, falls der Track welche mitbringt.
     pub stems: Vec<String>,
+    /// Der erste Downbeat in Frames — dorthin gehört das Deck nach dem Laden.
+    ///
+    /// Steht hier und wird nicht im Arbeiter gesprungen: Dort hängt am
+    /// `DeckState` noch die *alte* Stimme, und die verbraucht den Sprung, bevor
+    /// die neue überhaupt eingesetzt ist. Das Deck stand danach wieder auf
+    /// Sekunde 0 — genau der Fehler, den die Mitschrift aufgedeckt hat, nur
+    /// eine Ebene tiefer.
+    pub einstieg: Option<u64>,
 }
 
 /// Die Umsetzung, die das Pult bekommt.
@@ -353,8 +361,8 @@ fn fertigen(auftrag: &Auftrag, store: &Store) -> Result<Fertig, String> {
         .collect::<Vec<_>>();
     let frames = track.frames() as u64;
 
-    // Der neue Track startet gestoppt am Anfang — ein Deck, das beim Laden
-    // losläuft, ist ein Unfall. Auch und gerade, wenn ein Agent geladen hat.
+    // Der neue Track startet gestoppt — ein Deck, das beim Laden losläuft, ist
+    // ein Unfall. Auch und gerade, wenn ein Agent geladen hat.
     auftrag.state.set_playing(false);
     auftrag.state.seek_frames(0);
     auftrag.state.set_loop_active(false);
@@ -386,7 +394,10 @@ fn fertigen(auftrag: &Auftrag, store: &Store) -> Result<Fertig, String> {
         auftrag.state.set_stem_pegel(i, 1.0);
     }
 
+    let einstieg = analyse.struktur().and_then(|s| s.einstieg_frames());
+
     Ok(Fertig {
+        einstieg,
         voice: Voice::new(Arc::new(track), Arc::clone(&auftrag.state)),
         peaks,
         frames,
