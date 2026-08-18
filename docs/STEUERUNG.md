@@ -728,6 +728,49 @@ get master.event_count   → value master.event_count 17
 Springt der Zähler zwischen zwei Blicken um mehr als eins, sind Zeilen
 dazwischen liegengeblieben — und auch das ist besser sichtbar als still.
 
+## Die Form einer Bewegung
+
+Eine Rampe lief bisher immer gerade. Dieselbe Strecke lässt sich aber
+verschieden verteilen, und das hört man:
+
+```text
+ramp master.crossfader 1 32 weich    # langsam los, durchziehen, weich ankommen
+ramp channel1.eq_low 0 8             # ohne Angabe: linear
+ramp channel2.fader 0.9 16 spaet deck1
+```
+
+| Form | Verlauf | Wofür |
+| --- | --- | --- |
+| `linear` | gleichmäßig | Bass-Swaps und alles, was nicht als Geste gemeint ist |
+| `weich` | S-Kurve | lange Blenden — der Anfang unauffällig, die Mitte entschieden |
+| `spaet` | lange fast nichts, dann schnell | hält den ausgehenden Track so lange wie möglich präsent |
+| `frueh` | sofort viel, dann auslaufen | macht den Wechsel zum Ereignis |
+
+**Deck und Form stehen hinten, in beliebiger Reihenfolge.** Erkannt werden sie
+daran, *was* sie sind — die Namen sind disjunkt. Eine feste Reihenfolge wäre nur
+eine Falle für den, der die Form angeben will, aber kein Deck, und das ist der
+häufigere Fall.
+
+Jede Form fängt bei 0 an und kommt bei 1 an, und keine läuft zwischendurch
+zurück; ein Fader, der umkehrt, wäre kaputt und nicht ausdrucksstark. Bei
+`weich` ist die Steigung an beiden Enden null — deshalb kein Ruck beim
+Losfahren und keiner beim Ankommen.
+
+Die Form steht auch im Plan:
+
+```text
+plan 3 ramp master.crossfader -1.0000 → 1.0000 über 32 Beats weich, 12.4 gelaufen (deck1)
+```
+
+Ohne das sähen zwei verschieden gemeinte Bewegungen für einen zweiten Bediener
+gleich aus.
+
+**Daneben gibt es `master.crossfader_curve`** — die Kennlinie des Crossfaders
+selbst, von weich bis Schnitt. Sie stand im ersten automatisch gefahrenen Set
+ungenutzt auf weich, und der Kritiker hat das Pegelloch in der Mitte prompt
+gefunden. Form und Kurve sind zwei verschiedene Dinge: Die Form verteilt die
+Bewegung über die Zeit, die Kurve übersetzt die Reglerstellung in Lautstärke.
+
 ## Harmonisch mischen
 
 Tempo ist die halbe Trackauswahl. Zwei Stücke im gleichen Takt können trotzdem

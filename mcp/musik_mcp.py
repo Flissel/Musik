@@ -381,6 +381,15 @@ class DeckName(str, Enum):
     DECK2 = "deck2"
 
 
+class Form(str, Enum):
+    """Wie sich eine Bewegung über ihre Beats verteilt."""
+
+    linear = "linear"
+    weich = "weich"
+    spaet = "spaet"
+    frueh = "frueh"
+
+
 class RampeEingabe(Basis):
     control: str = Field(
         ...,
@@ -407,6 +416,17 @@ class RampeEingabe(Basis):
             "Auf der nächsten Phrasengrenze losfahren statt sofort. in_beats "
             "zählt dann ab der Grenze. **Das ist fast immer das Richtige** — "
             "ein Übergang beginnt auf der Eins, nicht nach einer runden Zahl."
+        ),
+    )
+    form: Form = Field(
+        default=Form.linear,
+        description=(
+            "Wie sich die Bewegung über die Beats verteilt — dieselbe Strecke, "
+            "andere Wirkung. 'linear' gleichmäßig (unauffällig, für Bass-Swaps); "
+            "'weich' als S-Kurve (langsam los, durchziehen, weich ankommen — für "
+            "lange Blenden); 'spaet' lange fast nichts, dann schnell (hält den "
+            "ausgehenden Track präsent); 'frueh' sofort viel, dann auslaufen "
+            "(macht den Wechsel zum Ereignis)."
         ),
     )
     taktgeber_deck: Optional[DeckName] = Field(
@@ -1311,7 +1331,14 @@ async def musik_ramp(params: RampeEingabe) -> str:
           control='master.crossfader', ziel=1, ueber_beats=32, ab_phrase=true
         - „Nach 16 Beats den Crossfader über 32 rüberziehen" →
           control='master.crossfader', ziel=1, ueber_beats=32, in_beats=16
+        - „Lange Blende, die sich anfühlt wie eine Hand" →
+          control='master.crossfader', ziel=1, ueber_beats=32, ab_phrase=true,
+          form='weich'
         - Nicht dafür: einen Wert sofort setzen → `musik_set`.
+
+    **Die Form ist der Unterschied zwischen Handwerk und Automat.** Vier
+    gleich lange, gleich gerade Blenden hintereinander klingen nach Maschine,
+    auch wenn jede einzelne sauber ist.
     """
     befehl = (
         f"ramp {params.control} {_zahl_als_text(params.ziel)} "
@@ -1319,6 +1346,8 @@ async def musik_ramp(params: RampeEingabe) -> str:
     )
     if params.taktgeber_deck:
         befehl += f" {params.taktgeber_deck.value}"
+    if params.form is not Form.linear:
+        befehl += f" {params.form.value}"
     if params.ab_phrase:
         versatz = params.in_beats or 0
         bezug = "phrase" if versatz == 0 else f"phrase+{_zahl_als_text(versatz)}"

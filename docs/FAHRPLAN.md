@@ -178,16 +178,20 @@ derselben Phrasengrenze feuern beide.
 **Stufe 2 steht aus:** zwei unabhängige Modelle. Die findet, was Menschen und
 Modelle unterschiedlich verstehen, und das findet man nicht durch Nachdenken.
 
-## P3 — Geste und Repertoire (S4)
+## P3 — Geste und Repertoire (S4) ◐
 
-*Klein, sofort hörbar, seit S1 messbar.*
+*Formen gebaut, Repertoire steht aus. Klein, sofort hörbar, seit S1 messbar.*
 
 Zwei Erweiterungen:
 
-**Formen für Rampen.** Derzeit linear. Ein Fader, der anfängt zu ziehen,
-committet und wieder abflacht, klingt anders als eine Gerade — dieselbe Strecke,
-andere Wirkung. Dazu die Crossfader-Kurve, die es schon gibt und die im ersten
-Lauf ungenutzt auf weich stand.
+**Formen für Rampen** ✅. `ramp … weich` verteilt dieselbe Strecke als S-Kurve,
+`spaet` hält den ausgehenden Track präsent, `frueh` macht den Wechsel zum
+Ereignis. Deck und Form stehen hinten in beliebiger Reihenfolge — erkannt wird,
+*was* sie sind. Jede Form fängt bei 0 an, kommt bei 1 an und läuft nie zurück;
+das sind Wächter, keine Behauptungen.
+
+Offen bleibt die Crossfader-Kurve, die es schon gibt und die im ersten Lauf
+ungenutzt auf weich stand — sie ist kein Code, sondern eine Frage der Benutzung.
 
 **Ein Repertoire statt eines Handgriffs.** Lange Blende, Bass-Swap, harter
 Schnitt auf die Eins, Filter-Sweep, Loop-Ausstieg. Welcher passt, entscheidet

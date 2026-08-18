@@ -182,7 +182,8 @@ ok Befehle:
   do <control> [arg]     Aktion auslösen: sync, load, jump_cue, beatjump, search
   sub <control>...       Änderungen melden lassen, statt zu fragen
   unsub [control]...     Abbestellen; ohne Argument alles
-  ramp <control> <ziel> <beats> [deck]   Regler über Beats bewegen
+  ramp <control> <ziel> <beats> [deck] [form]   Regler über Beats bewegen
+  Formen: linear, weich (S-Kurve), spaet (lange nichts), frueh (sofort viel)
   in <beats> <befehl>    Befehl nach so vielen Beats ausführen
   in phrase[+n] <befehl> Befehl auf der nächsten Phrasengrenze ausführen
   when <control> < <wert> <befehl>   Befehl, sobald ein Wert die Schwelle reisst
@@ -197,31 +198,62 @@ ok Befehle:
 /// schlafen — über eine Leitung, die dafür zu ungenau ist.
 fn rampe(pult: &mut Steuerpult, control: Option<&str>, rest: Option<&str>) -> String {
     let Some(control) = control.and_then(Schluessel::parse) else {
-        return "err ramp braucht ein Control: ramp <control> <ziel> <beats> [deck]".into();
+        return "err ramp braucht ein Control: ramp <control> <ziel> <beats> [deck] [form]".into();
     };
     let mut rest = rest.unwrap_or("");
     let ziel = wort(&mut rest);
     let beats = wort(&mut rest);
-    let deck = wort(&mut rest);
 
     let (Ok(ziel), Ok(beats)) = (ziel.parse::<f64>(), beats.parse::<f64>()) else {
         return "err ramp braucht Ziel und Länge in Beats: ramp channel1.fader 0 16".into();
     };
-    let takt_deck = match deck {
-        "" => None,
-        name => match crate::schluessel::Gruppe::parse(name) {
-            Some(crate::schluessel::Gruppe::Deck(i)) => Some(i),
-            _ => return format!("err {name} ist kein Deck"),
-        },
-    };
+
+    // Deck und Form stehen hinten, in beliebiger Reihenfolge. Erkannt werden
+    // sie daran, **was** sie sind, nicht an ihrer Stelle: Die Namen sind
+    // disjunkt, und eine feste Reihenfolge wäre nur eine Falle mehr für den,
+    // der die Form angeben will, aber kein Deck.
+    let mut takt_deck = None;
+    let mut form = crate::zeitplan::Form::default();
+    loop {
+        let angabe = wort(&mut rest);
+        if angabe.is_empty() {
+            break;
+        }
+        if let Some(f) = crate::zeitplan::Form::parse(angabe) {
+            form = f;
+        } else if let Some(crate::schluessel::Gruppe::Deck(i)) =
+            crate::schluessel::Gruppe::parse(angabe)
+        {
+            takt_deck = Some(i);
+        } else {
+            let formen: Vec<&str> = crate::zeitplan::Form::ALLE
+                .iter()
+                .map(|f| f.name())
+                .collect();
+            return format!(
+                "err {angabe} ist weder ein Deck noch eine Form ({})",
+                formen.join(", ")
+            );
+        }
+    }
 
     let mut plan = std::mem::take(&mut pult.plan);
-    let ergebnis =
-        crate::zeitplan::rampe_planen(pult, &mut plan, control.clone(), ziel, beats, takt_deck);
+    let ergebnis = crate::zeitplan::rampe_planen(
+        pult,
+        &mut plan,
+        control.clone(),
+        ziel,
+        beats,
+        takt_deck,
+        form,
+    );
     pult.plan = plan;
 
     match ergebnis {
-        Ok(id) => format!("ok plan {id} ramp {control} nach {ziel} über {beats} Beats"),
+        Ok(id) => format!(
+            "ok plan {id} ramp {control} nach {ziel} über {beats} Beats, {}",
+            form.name()
+        ),
         Err(e) => format!("err {e}"),
     }
 }
@@ -343,12 +375,13 @@ fn plan_zeigen(pult: &Steuerpult) -> String {
         let jetzt = crate::zeitplan::beat_jetzt(pult, a.takt_deck).unwrap_or(a.ab_beat);
         match &a.was {
             crate::zeitplan::Was::Rampe(r) => zeilen.push(format!(
-                "plan {} ramp {} {:.4} → {:.4} über {} Beats, {:.1} gelaufen (deck{})",
+                "plan {} ramp {} {:.4} → {:.4} über {} Beats {}, {:.1} gelaufen (deck{})",
                 a.id,
                 r.control,
                 r.von,
                 r.nach,
                 r.beats,
+                r.form.name(),
                 (jetzt - a.ab_beat).max(0.0),
                 a.takt_deck + 1
             )),
@@ -1451,6 +1484,58 @@ mod phrasen_tests {
 /// Taktgebers ging an einen Aufrufer, der sie wegwarf.
 #[cfg(test)]
 mod team_tests {
+
+    /// Deck und Form stehen hinten, in beliebiger Reihenfolge.
+    ///
+    /// Eine feste Reihenfolge wäre nur eine Falle für den, der die Form angeben
+    /// will, aber kein Deck — und genau das ist der häufigere Fall.
+    #[test]
+    fn deck_und_form_stehen_in_beliebiger_reihenfolge() {
+        for zeile in [
+            "ramp channel1.fader 0 16 weich",
+            "ramp channel1.fader 0 16 deck1 weich",
+            "ramp channel1.fader 0 16 weich deck1",
+        ] {
+            let (mut pult, _runner) = crate::testing::pult_mit_zwei_decks();
+            let mut s = Sitzung::neu();
+            let antwort = behandle(&mut pult, &mut s, zeile);
+            assert!(antwort.contains("weich"), "{zeile}: {antwort}");
+            assert_eq!(pult.plan.auftraege().len(), 1, "{zeile}");
+        }
+    }
+
+    /// Ohne Angabe bleibt es linear — die Form ist eine Zutat, keine Pflicht.
+    #[test]
+    fn ohne_angabe_bleibt_die_rampe_linear() {
+        let (mut pult, _runner) = crate::testing::pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        let antwort = behandle(&mut pult, &mut s, "ramp channel1.fader 0 16");
+        assert!(antwort.contains("linear"), "{antwort}");
+    }
+
+    /// Ein Tippfehler wird gemeldet und nennt, was es gäbe — statt still
+    /// linear zu fahren, was ja auch „funktioniert" hätte.
+    #[test]
+    fn eine_unbekannte_form_wird_gemeldet_statt_verschluckt() {
+        let (mut pult, _runner) = crate::testing::pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        let antwort = behandle(&mut pult, &mut s, "ramp channel1.fader 0 16 sanft");
+        assert!(antwort.starts_with("err"), "{antwort}");
+        assert!(antwort.contains("weich"), "die Auswahl fehlt: {antwort}");
+        assert!(pult.plan.ist_leer(), "die Rampe wurde trotzdem vorgemerkt");
+    }
+
+    /// Und die Form steht im Plan — sonst sähen zwei verschieden gemeinte
+    /// Bewegungen für einen zweiten Bediener gleich aus.
+    #[test]
+    fn die_form_steht_im_plan() {
+        let (mut pult, _runner) = crate::testing::pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        behandle(&mut pult, &mut s, "ramp channel1.fader 0 16 spaet");
+        let plan = behandle(&mut pult, &mut s, "plan");
+        assert!(plan.contains("spaet"), "{plan}");
+    }
+
     use super::*;
     use crate::testing::{pult_mit_zwei_decks, rendern, RATE};
     use crate::zeitplan::takt;

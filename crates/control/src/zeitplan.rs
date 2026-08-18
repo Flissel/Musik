@@ -99,6 +99,78 @@ impl Vergleich {
     }
 }
 
+/// Wie sich eine Rampe über ihre Strecke verteilt.
+///
+/// **Dieselbe Strecke, andere Wirkung.** Ein Fader, der gleichmäßig wandert,
+/// klingt nach Automat; einer, der anfängt zu ziehen, durchzieht und wieder
+/// abflacht, klingt nach einer Hand. Der Weg ist in beiden Fällen derselbe —
+/// nur die Verteilung über die Beats ist eine andere, und die hört man.
+///
+/// Die Namen sagen, **wann** die Bewegung passiert, nicht welche Kurve
+/// dahintersteckt: Danach fragt man beim Auflegen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Form {
+    /// Gleichmäßig. Ehrlich, unauffällig, für Bass-Swaps und alles, was nicht
+    /// als Geste gemeint ist.
+    #[default]
+    Linear,
+    /// Langsam los, durchziehen, weich ankommen — die S-Kurve.
+    ///
+    /// Für lange Blenden die Voreinstellung von Hand: Der Anfang bleibt
+    /// unauffällig, die Mitte ist entschieden, das Ende schleicht sich nicht
+    /// an, sondern legt sich hin.
+    Weich,
+    /// Lange fast nichts, dann schnell.
+    ///
+    /// Hält den ausgehenden Track so lange wie möglich präsent. Wer ein Outro
+    /// auskosten will und trotzdem pünktlich fertig sein muss, nimmt das.
+    Spaet,
+    /// Sofort viel, dann auslaufen.
+    ///
+    /// Bringt den eingehenden Track schnell in den Raum und lässt den Rest
+    /// nachlaufen — für einen Wechsel, der als Ereignis gemeint ist.
+    Frueh,
+}
+
+impl Form {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Form::Linear => "linear",
+            Form::Weich => "weich",
+            Form::Spaet => "spaet",
+            Form::Frueh => "frueh",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Form> {
+        match text {
+            "linear" => Some(Form::Linear),
+            "weich" => Some(Form::Weich),
+            "spaet" => Some(Form::Spaet),
+            "frueh" => Some(Form::Frueh),
+            _ => None,
+        }
+    }
+
+    pub const ALLE: [Form; 4] = [Form::Linear, Form::Weich, Form::Spaet, Form::Frueh];
+
+    /// Bildet den Anteil der Strecke auf den Anteil des Weges ab.
+    ///
+    /// Beide zwischen 0 und 1, und **jede Form muss 0 auf 0 und 1 auf 1
+    /// abbilden**: Sonst spränge der Regler beim Anfang oder käme nicht an.
+    pub fn anwenden(&self, t: f64) -> f64 {
+        let t = t.clamp(0.0, 1.0);
+        match self {
+            Form::Linear => t,
+            // Smoothstep. Die Ableitung ist an beiden Enden null — deshalb
+            // kein hörbarer Ruck beim Losfahren und keiner beim Ankommen.
+            Form::Weich => t * t * (3.0 - 2.0 * t),
+            Form::Spaet => t * t,
+            Form::Frueh => 1.0 - (1.0 - t) * (1.0 - t),
+        }
+    }
+}
+
 /// Eine Bewegung eines Reglers über Beats.
 ///
 /// **Sie gibt auf, sobald jemand anders denselben Regler anfasst.** Ohne das
@@ -116,6 +188,8 @@ pub struct Rampe {
     pub beats: f64,
     /// Was zuletzt geschrieben wurde — der Prüfstein für fremde Eingriffe.
     pub zuletzt: f64,
+    /// Wie sich die Bewegung über die Beats verteilt.
+    pub form: Form,
 }
 
 /// Was mit einem Auftrag beim Takt geschah — nur für die Meldung nach außen.
@@ -333,7 +407,7 @@ fn rampe_schritt(pult: &mut Steuerpult, rampe: &mut Rampe, ab: f64, jetzt: f64) 
     } else {
         1.0
     };
-    let wert = rampe.von + (rampe.nach - rampe.von) * anteil;
+    let wert = rampe.von + (rampe.nach - rampe.von) * rampe.form.anwenden(anteil);
 
     if pult.schreibe(&rampe.control, Wert::Zahl(wert)).is_err() {
         return Ausgang::Haltlos;
@@ -360,6 +434,7 @@ pub fn rampe_planen(
     nach: f64,
     beats: f64,
     takt_deck: Option<usize>,
+    form: Form,
 ) -> Result<u64, Fehler> {
     if beats < 0.0 {
         return Err(Fehler::Argument {
@@ -390,6 +465,7 @@ pub fn rampe_planen(
             nach,
             beats,
             zuletzt: von,
+            form,
         }),
     ))
 }
@@ -560,7 +636,16 @@ mod tests {
         pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
             .unwrap();
 
-        rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, 8.0, None).expect("planen");
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("channel1.fader"),
+            0.0,
+            8.0,
+            None,
+            Form::Linear,
+        )
+        .expect("planen");
 
         // Bei 128 BPM sind acht Beats 3,75 s. Erst die Hälfte.
         laufen(
@@ -607,7 +692,16 @@ mod tests {
         pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
             .unwrap();
 
-        rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, 32.0, None).expect("planen");
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("channel1.fader"),
+            0.0,
+            32.0,
+            None,
+            Form::Linear,
+        )
+        .expect("planen");
         laufen(&mut pult, &mut plan, &mut runner, RATE as usize);
         assert!(!plan.ist_leer(), "die Rampe sollte noch laufen");
 
@@ -637,7 +731,16 @@ mod tests {
             .unwrap();
         // deck1 bleibt stehen.
 
-        rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, 4.0, None).expect("planen");
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("channel1.fader"),
+            0.0,
+            4.0,
+            None,
+            Form::Linear,
+        )
+        .expect("planen");
         laufen(&mut pult, &mut plan, &mut runner, RATE as usize * 3);
 
         assert!(!plan.ist_leer(), "die Rampe lief ohne laufendes Deck");
@@ -687,9 +790,27 @@ mod tests {
         let mut plan = Zeitplan::neu();
 
         // Ein Schalter ist keine Bewegung.
-        assert!(rampe_planen(&pult, &mut plan, k("deck1.play"), 1.0, 8.0, None).is_err());
+        assert!(rampe_planen(
+            &pult,
+            &mut plan,
+            k("deck1.play"),
+            1.0,
+            8.0,
+            None,
+            Form::Linear
+        )
+        .is_err());
         // Negative Längen ergeben keinen Sinn.
-        assert!(rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, -4.0, None).is_err());
+        assert!(rampe_planen(
+            &pult,
+            &mut plan,
+            k("channel1.fader"),
+            0.0,
+            -4.0,
+            None,
+            Form::Linear
+        )
+        .is_err());
         assert!(plan.ist_leer());
     }
 
@@ -708,7 +829,16 @@ mod tests {
             .unwrap();
 
         // Ein langer Läufer, der die 1 belegt und belegt bleibt.
-        rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, 512.0, None).unwrap();
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("channel1.fader"),
+            0.0,
+            512.0,
+            None,
+            Form::Linear,
+        )
+        .unwrap();
         // Und ein Befehl, der sofort fällig ist und selbst etwas vormerkt.
         spaeter_planen(
             &pult,
@@ -747,8 +877,26 @@ mod tests {
         let (pult, _runner) = pult_mit_zwei_decks();
         let mut plan = Zeitplan::neu();
 
-        let a = rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, 8.0, None).unwrap();
-        rampe_planen(&pult, &mut plan, k("channel2.fader"), 0.0, 8.0, None).unwrap();
+        let a = rampe_planen(
+            &pult,
+            &mut plan,
+            k("channel1.fader"),
+            0.0,
+            8.0,
+            None,
+            Form::Linear,
+        )
+        .unwrap();
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("channel2.fader"),
+            0.0,
+            8.0,
+            None,
+            Form::Linear,
+        )
+        .unwrap();
 
         assert_eq!(plan.streichen(Some(a)), 1);
         assert_eq!(plan.auftraege().len(), 1);
@@ -778,7 +926,16 @@ mod tests {
 
         let mut plan = Zeitplan::neu();
         // Acht Beats bei 128 BPM sind 3,75 s.
-        rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, 8.0, None).expect("planen");
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("channel1.fader"),
+            0.0,
+            8.0,
+            None,
+            Form::Linear,
+        )
+        .expect("planen");
         laufen(&mut pult, &mut plan, &mut runner, RATE as usize * 4);
 
         let p = crate::mitschrift::lesen(&neben).expect("lesbar");
@@ -802,5 +959,112 @@ mod tests {
             .expect("Stop");
         let _ = std::fs::remove_file(&wav);
         let _ = std::fs::remove_file(&neben);
+    }
+}
+
+/// Die Formen: dieselbe Strecke, andere Verteilung.
+#[cfg(test)]
+mod form_tests {
+    use super::*;
+    use crate::testing::{pult_mit_zwei_decks, rendern, RATE};
+    use crate::wert::Wert;
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    /// **Jede Form muss 0 auf 0 und 1 auf 1 abbilden.** Sonst spränge der
+    /// Regler beim Losfahren oder käme am Ende nicht an — und das wäre kein
+    /// Geschmack, sondern ein Fehler.
+    #[test]
+    fn jede_form_faengt_bei_null_an_und_kommt_bei_eins_an() {
+        for f in Form::ALLE {
+            assert_eq!(f.anwenden(0.0), 0.0, "{}", f.name());
+            assert_eq!(f.anwenden(1.0), 1.0, "{}", f.name());
+            // Und außerhalb wird begrenzt, statt über das Ziel hinauszulaufen.
+            assert_eq!(f.anwenden(-1.0), 0.0, "{}", f.name());
+            assert_eq!(f.anwenden(2.0), 1.0, "{}", f.name());
+        }
+    }
+
+    /// Keine Form darf rückwärtslaufen: Ein Fader, der zwischendurch umkehrt,
+    /// ist kaputt und nicht ausdrucksstark.
+    #[test]
+    fn keine_form_laeuft_rueckwaerts() {
+        for f in Form::ALLE {
+            let mut vorher = 0.0;
+            for i in 0..=100 {
+                let jetzt = f.anwenden(i as f64 / 100.0);
+                assert!(
+                    jetzt >= vorher - 1e-9,
+                    "{} läuft bei {i} % zurück: {vorher} → {jetzt}",
+                    f.name()
+                );
+                vorher = jetzt;
+            }
+        }
+    }
+
+    /// Der Unterschied, um den es geht: Auf halber Strecke stehen die Formen
+    /// woanders. `spaet` hat noch kaum etwas getan, `frueh` schon fast alles.
+    #[test]
+    fn auf_halber_strecke_stehen_sie_woanders() {
+        assert_eq!(Form::Linear.anwenden(0.5), 0.5);
+        assert_eq!(
+            Form::Weich.anwenden(0.5),
+            0.5,
+            "die S-Kurve ist symmetrisch"
+        );
+        assert_eq!(Form::Spaet.anwenden(0.5), 0.25);
+        assert_eq!(Form::Frueh.anwenden(0.5), 0.75);
+
+        // Nach einem Viertel: der Unterschied ist am größten, wo er zählt.
+        assert!(Form::Spaet.anwenden(0.25) < 0.1, "spaet zieht zu früh los");
+        assert!(Form::Frueh.anwenden(0.25) > 0.4, "frueh zögert");
+    }
+
+    /// Und das Ganze am laufenden Regler, nicht nur in der Rechnung.
+    #[test]
+    fn eine_weiche_rampe_haengt_in_der_mitte_der_linearen_nach_oder_vor() {
+        for (form, erwartet) in [
+            (Form::Spaet, 0.25f64),
+            (Form::Linear, 0.5),
+            (Form::Frueh, 0.75),
+        ] {
+            let (mut pult, mut runner) = pult_mit_zwei_decks();
+            let mut plan = Zeitplan::neu();
+            pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+                .unwrap();
+            pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+                .unwrap();
+            rampe_planen(&pult, &mut plan, k("channel1.fader"), 0.0, 8.0, None, form)
+                .expect("planen");
+
+            // Acht Beats bei 128 BPM sind 3,75 s — die Hälfte davon.
+            for _ in 0..20 {
+                rendern(&mut runner, (RATE as f64 * 1.875 / 20.0) as usize);
+                takt(&mut pult, &mut plan, &mut |_, _| String::new());
+            }
+
+            let Wert::Zahl(steht) = pult.lies(&k("channel1.fader")).unwrap() else {
+                panic!()
+            };
+            // Der Fader läuft von 1 nach 0, der Anteil also andersherum.
+            let gefahren = 1.0 - steht;
+            assert!(
+                (gefahren - erwartet).abs() < 0.12,
+                "{}: nach der Hälfte sind {gefahren:.2} gefahren, erwartet {erwartet}",
+                form.name()
+            );
+        }
+    }
+
+    #[test]
+    fn jede_form_ueberlebt_ihren_namen() {
+        for f in Form::ALLE {
+            assert_eq!(Form::parse(f.name()), Some(f));
+        }
+        assert_eq!(Form::parse("sanft"), None);
+        assert_eq!(Form::default(), Form::Linear);
     }
 }
