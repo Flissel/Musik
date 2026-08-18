@@ -840,6 +840,33 @@ dieser Griff gerade vermeiden soll. Deshalb wird sie am Ende auch wieder
 **gelöst**: Ein Deck, das im Hintergrund weiterschleift, ist beim nächsten Griff
 eine Überraschung.
 
+**Jeder Griff endet damit, dass das ausgehende Deck steht.** Das klang zuerst
+nach einer Kleinigkeit und ist die Stelle, an der aus einem Übergang ein *Set*
+wird: Bis dahin lief der ausgehende Track nach der Blende weiter — unhörbar
+hinter dem geschlossenen Crossfader, aber laufend —, und der nächste
+`uebergang` wurde deshalb abgewiesen: „es laufen mehrere Decks". Beim ersten
+Griff fällt das nicht auf, beim zweiten sofort.
+
+**Getaktet wird nach dem ausgehenden Deck.** Ohne Angabe nimmt `in` das erste
+Deck mit Beatgrid — beim zweiten Griff also ausgerechnet das gerade gestoppte.
+Ein stehendes Deck hält den Plan an, und der ganze Übergang stand still:
+angenommen, eingetragen, nie gefahren. Das ausgehende Deck läuft dagegen per
+Definition, solange der Griff dauert.
+
+**Und keine Bewegung endet im selben Takt, in dem ihr Deck stehenbleibt.** Sonst
+bekommt sie ihren letzten Schritt nicht mehr: Der Regler steht am Ziel, der
+Auftrag aber für immer im Plan — sichtbar für jeden zweiten Bediener und nicht
+mehr wegzubekommen, weil das Deck nicht mehr läuft. Deshalb ein Beat Nachlauf,
+den niemand hört.
+
+Drei Griffe hintereinander am laufenden Programm, ohne Handgriff dazwischen
+außer Laden und `jump_entry`:
+
+```text
+get master.transitions → value master.transitions blende, bassswap, schleife
+plan                   → ok 0 vorgemerkt
+```
+
 **Es geschieht nichts, was man nicht auch selbst tippen könnte.** Jeder Griff
 ist eine Handvoll gewöhnlicher Zeilen, die durch denselben Weg laufen wie alles
 andere — sie stehen im Plan, in der Mitschrift und bei den Ereignissen, ein

@@ -21,6 +21,28 @@
 //! Nähme die Anlage ihm das ab, verlöre das Set genau den Teil, um den es
 //! diesem Projekt geht.
 //!
+//! # Jeder Griff endet damit, dass das ausgehende Deck steht
+//!
+//! Das klang zuerst nach einer Kleinigkeit und war die Stelle, an der aus
+//! einem Übergang ein *Set* wird. Bis dahin lief der ausgehende Track nach der
+//! Blende weiter — unhörbar hinter dem geschlossenen Crossfader, aber laufend.
+//! Der nächste `uebergang` wurde deshalb abgewiesen: „es laufen mehrere Decks",
+//! und wer aus- und wer eingeht, kann dann niemand wissen.
+//!
+//! Am laufenden Programm fiel das beim zweiten Griff auf, nicht beim ersten.
+//! Ein einzelner Übergang war nie das Ziel.
+//!
+//! # Getaktet wird nach dem ausgehenden Deck
+//!
+//! Ohne Angabe nimmt `in` das erste Deck mit Beatgrid — und das ist beim
+//! zweiten Griff eines Sets ausgerechnet das gerade gestoppte. Ein stehendes
+//! Deck hält den Plan an, also stand der ganze Übergang still: angenommen,
+//! eingetragen, nie gefahren. Das ausgehende Deck läuft dagegen per
+//! Definition, solange der Griff dauert.
+//!
+//! Aufgefallen ist auch das erst beim zweiten Griff am laufenden Programm.
+//! Beim ersten läuft zufällig das richtige Deck.
+//!
 //! # Warum die Griffe in Protokollzeilen gebaut sind
 //!
 //! Jeder Griff ist eine Handvoll gewöhnlicher Zeilen — `in phrase …`,
@@ -34,6 +56,19 @@
 //! anders setzen kann.
 
 use crate::pult::{Fehler, Steuerpult};
+
+/// Wie viele Beats zwischen dem Ende einer Bewegung und dem Stoppen des
+/// ausgehenden Decks liegen.
+///
+/// Ein Beat, und der ist nötig. Endet eine Rampe genau in dem Takt, in dem ihr
+/// Taktgeber-Deck stehenbleibt, bekommt sie ihren letzten Schritt nicht mehr:
+/// Der Regler steht zwar am Ziel, aber der Auftrag bleibt für immer im Plan
+/// stehen — sichtbar für jeden zweiten Bediener, und nicht mehr wegzubekommen,
+/// weil das Deck nicht mehr läuft. Am laufenden Programm sah man ihn nach dem
+/// zweiten Griff dort liegen.
+///
+/// Hörbar ist der eine Beat nicht: Der Crossfader ist längst drüben.
+const NACHLAUF: f64 = 1.0;
 
 /// Ein benannter Übergang.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,8 +228,12 @@ pub fn zeilen(pult: &Steuerpult, griff: Griff, beats: f64) -> Result<Vec<String>
 
     Ok(match griff {
         Griff::Blende => vec![
-            format!("in phrase set deck{dein}.play 1"),
-            format!("in phrase ramp master.crossfader {ziel} {beats} weich"),
+            format!("in deck{daus} phrase set deck{dein}.play 1"),
+            format!("in deck{daus} phrase ramp master.crossfader {ziel} {beats} weich deck{daus}"),
+            format!(
+                "in deck{daus} phrase+{} set deck{daus}.play 0",
+                beats + NACHLAUF
+            ),
         ],
         Griff::Bassswap => {
             // Erst der Bass des Eingehenden weg, dann beide in die Mitte, dort
@@ -202,27 +241,44 @@ pub fn zeilen(pult: &Steuerpult, griff: Griff, beats: f64) -> Result<Vec<String>
             let halb = (beats / 2.0).max(1.0);
             vec![
                 format!("set channel{kein}.eq_low 0"),
-                format!("in phrase set deck{dein}.play 1"),
-                format!("in phrase ramp master.crossfader 0 {beats} weich"),
-                format!("in phrase+{beats} ramp channel{kaus}.eq_low 0 {halb}"),
-                format!("in phrase+{beats} ramp channel{kein}.eq_low 1 {halb}"),
+                format!("in deck{daus} phrase set deck{dein}.play 1"),
+                format!("in deck{daus} phrase ramp master.crossfader 0 {beats} weich deck{daus}"),
+                format!("in deck{daus} phrase+{beats} ramp channel{kaus}.eq_low 0 {halb} deck{daus}"),
+                format!("in deck{daus} phrase+{beats} ramp channel{kein}.eq_low 1 {halb} deck{daus}"),
                 format!(
-                    "in phrase+{} ramp master.crossfader {ziel} {beats} weich",
+                    "in deck{daus} phrase+{} ramp master.crossfader {ziel} {beats} weich deck{daus}",
                     beats + halb
+                ),
+                format!(
+                    "in deck{daus} phrase+{} set deck{daus}.play 0",
+                    beats + halb + beats + NACHLAUF
                 ),
             ]
         }
         Griff::Schnitt => vec![
-            format!("in phrase set deck{dein}.play 1"),
-            format!("in phrase set master.crossfader {ziel}"),
+            format!("in deck{daus} phrase set deck{dein}.play 1"),
+            format!("in deck{daus} phrase set master.crossfader {ziel}"),
+            format!("in deck{daus} phrase set deck{daus}.play 0"),
         ],
         Griff::Filter => vec![
-            format!("in phrase set deck{dein}.play 1"),
-            format!("in phrase ramp master.crossfader {ziel} {beats} frueh"),
+            format!("in deck{daus} phrase set deck{dein}.play 1"),
+            format!("in deck{daus} phrase ramp master.crossfader {ziel} {beats} frueh deck{daus}"),
             // Hochpass auf dem Ausgehenden: Der Boden geht weg, während der
             // Neue ihn übernimmt. `spaet`, damit es erst spürbar wird, wenn
             // der andere schon trägt.
-            format!("in phrase ramp channel{kaus}.filter 1 {beats} spaet"),
+            format!("in deck{daus} phrase ramp channel{kaus}.filter 1 {beats} spaet deck{daus}"),
+            format!(
+                "in deck{daus} phrase+{} set deck{daus}.play 0",
+                beats + NACHLAUF
+            ),
+            // Der Hochpass geht mit dem Deck wieder auf. Ein Kanalzug, der
+            // beim nächsten Track noch gefiltert dasteht, ist eine
+            // Überraschung, die niemand bestellt hat — und man sucht sie
+            // lange, weil man den Regler nicht angefasst hat.
+            format!(
+                "in deck{daus} phrase+{} set channel{kaus}.filter 0",
+                beats + NACHLAUF
+            ),
         ],
         Griff::Schleife => {
             // Die Schleife wird auf der Phrasengrenze gesetzt und ist genau so
@@ -231,21 +287,29 @@ pub fn zeilen(pult: &Steuerpult, griff: Griff, beats: f64) -> Result<Vec<String>
             // Schleife, die länger steht als der Übergang, wiederholt hörbar —
             // und das ist der Fehler, den dieser Griff gerade vermeiden soll.
             //
-            // **Alles danach hängt am eingehenden Deck.** Der Beat des
+            // **Alles nach dem Setzen hängt am eingehenden Deck.** Der Beat des
             // ausgehenden wiederholt sich ja gerade — daran getaktet fing die
             // Blende bei jedem Schleifendurchlauf von vorn an, und die
             // Auflösung der Schleife kam nie, weil ihr Beat nie über das Ende
             // der Schleife hinauskam. Am laufenden Programm sah man den
             // Crossfader sieben Mal hin und her fahren.
+            //
+            // Das setzt voraus, dass der Eingehende auf einer Phrasengrenze
+            // steht — `do deckN.jump_entry` sorgt dafür, und wer von Hand
+            // irgendwohin springt, sollte es hier ohnehin nicht tun.
             vec![
-                format!("in phrase set deck{daus}.loop_beats {beats}"),
-                format!("in phrase set deck{dein}.play 1"),
+                format!("in deck{daus} phrase set deck{daus}.loop_beats {beats}"),
+                format!("in deck{daus} phrase set deck{dein}.play 1"),
                 format!(
                     "in deck{dein} phrase ramp master.crossfader {ziel} {beats} weich deck{dein}"
                 ),
                 // Gelöst, nicht vergessen: Ein Deck, das im Hintergrund
                 // weiterschleift, ist beim nächsten Griff eine Überraschung.
                 format!("in deck{dein} phrase+{beats} set deck{daus}.loop_active 0"),
+                format!(
+                    "in deck{dein} phrase+{} set deck{daus}.play 0",
+                    beats + NACHLAUF
+                ),
             ]
         }
     })
@@ -305,10 +369,37 @@ mod tests {
             let zeilen =
                 zeilen(&pult, g, g.beats()).unwrap_or_else(|e| panic!("{}: {e}", g.name()));
             assert!(
-                zeilen.iter().any(|z| z.starts_with("in phrase")),
+                zeilen
+                    .iter()
+                    .any(|z| z.starts_with("in deck") && z.contains(" phrase")),
                 "{}: keine Zeile auf der Phrase: {zeilen:?}",
                 g.name()
             );
+        }
+    }
+
+    /// **Getaktet wird nach dem ausgehenden Deck, nie „nach dem ersten mit
+    /// Grid".**
+    ///
+    /// Ohne Angabe nimmt `in` das erste Deck mit Beatgrid — beim zweiten Griff
+    /// eines Sets also das gerade gestoppte. Ein stehendes Deck hält den Plan
+    /// an, und der ganze Übergang stand still: angenommen, eingetragen, nie
+    /// gefahren. Am laufenden Programm fiel das beim zweiten Griff auf, beim
+    /// ersten läuft zufällig das richtige Deck.
+    #[test]
+    fn keine_zeile_haengt_am_ersten_deck_mit_grid() {
+        let (pult, _runner) = laufend();
+        for g in Griff::ALLE {
+            for zeile in zeilen(&pult, g, g.beats()).expect("Zeilen") {
+                if !zeile.starts_with("in ") {
+                    continue;
+                }
+                assert!(
+                    zeile.starts_with("in deck"),
+                    "{} überlässt den Takt dem Zufall: {zeile}",
+                    g.name()
+                );
+            }
         }
     }
 
@@ -362,6 +453,85 @@ mod tests {
     }
 
     /// Ein Schnitt ist keine Blende: kein `ramp`, nur ein Umlegen.
+    /// **Jeder Griff endet damit, dass das ausgehende Deck steht.**
+    ///
+    /// Das ist die Stelle, an der aus einem Übergang ein *Set* wird. Bis dahin
+    /// lief der ausgehende Track weiter — unhörbar hinter dem geschlossenen
+    /// Crossfader, aber laufend —, und der nächste `uebergang` wurde deshalb
+    /// abgewiesen: „es laufen mehrere Decks". Am laufenden Programm fiel das
+    /// beim zweiten Griff auf, nicht beim ersten.
+    #[test]
+    fn jeder_griff_stoppt_das_ausgehende_deck() {
+        let (pult, _runner) = laufend();
+        for griff in Griff::ALLE {
+            let zeilen = zeilen(&pult, griff, 16.0).expect("Zeilen");
+            assert!(
+                zeilen.iter().any(|z| z.ends_with("set deck1.play 0")),
+                "{} lässt das ausgehende Deck laufen: {zeilen:?}",
+                griff.name()
+            );
+            // Und zwar nicht sofort, sondern erst wenn der Wechsel durch ist —
+            // ein Schnitt ausgenommen, der hat keine Strecke.
+            let stopp = zeilen
+                .iter()
+                .find(|z| z.ends_with("set deck1.play 0"))
+                .unwrap();
+            if griff != Griff::Schnitt {
+                assert!(
+                    stopp.contains("phrase+"),
+                    "{} stoppt zu früh: {stopp}",
+                    griff.name()
+                );
+            }
+        }
+    }
+
+    /// **Keine Bewegung endet im selben Takt, in dem ihr Deck stehenbleibt.**
+    ///
+    /// Sonst bekommt sie ihren letzten Schritt nicht mehr: Der Regler steht am
+    /// Ziel, der Auftrag aber für immer im Plan — sichtbar für jeden zweiten
+    /// Bediener und nicht mehr wegzubekommen, weil das Deck nicht mehr läuft.
+    /// Am laufenden Programm lag er nach dem zweiten Griff dort.
+    #[test]
+    fn keine_bewegung_endet_im_takt_des_stopps() {
+        let (pult, _runner) = laufend();
+        for griff in Griff::ALLE {
+            let beats = 16.0;
+            let zeilen = zeilen(&pult, griff, beats).expect("Zeilen");
+
+            let Some(stopp) = zeilen.iter().find(|z| z.ends_with(".play 0")) else {
+                panic!("{} stoppt nicht: {zeilen:?}", griff.name());
+            };
+            let bei = versatz(stopp);
+
+            for zeile in &zeilen {
+                let Some(rest) = zeile.split(" ramp ").nth(1) else {
+                    continue;
+                };
+                // `ramp <control> <ziel> <beats> …`
+                let laenge: f64 = rest.split_whitespace().nth(2).unwrap().parse().unwrap();
+                let ende = versatz(zeile) + laenge;
+                assert!(
+                    ende + 1e-9 < bei,
+                    "{}: Rampe endet bei {ende}, gestoppt wird bei {bei} — {zeile}",
+                    griff.name()
+                );
+            }
+        }
+    }
+
+    /// Liest das `phrase+n` einer Zeile; ohne Versatz null.
+    fn versatz(zeile: &str) -> f64 {
+        match zeile.split("phrase+").nth(1) {
+            Some(rest) => rest
+                .split_whitespace()
+                .next()
+                .and_then(|z| z.parse().ok())
+                .unwrap_or(0.0),
+            None => 0.0,
+        }
+    }
+
     /// **Der einzige Griff, der dem Ausgehenden Zeit gibt.**
     ///
     /// Die Schleife liegt genau so lang wie die Blende darüber: Der Ausgehende
@@ -376,7 +546,7 @@ mod tests {
         assert!(
             zeilen
                 .iter()
-                .any(|z| z == "in phrase set deck1.loop_beats 16"),
+                .any(|z| z == "in deck1 phrase set deck1.loop_beats 16"),
             "die Schleife wird nicht gesetzt: {zeilen:?}"
         );
         assert!(

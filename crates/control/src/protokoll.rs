@@ -1518,16 +1518,18 @@ mod team_tests {
         // Jede Zeile steht mit ihrer Antwort da — nichts geschieht im
         // Verborgenen.
         assert!(
-            antwort.contains("in phrase set deck2.play 1 → ok plan"),
+            antwort.contains("in deck1 phrase set deck2.play 1 → ok plan"),
             "{antwort}"
         );
         assert!(antwort.contains("master.crossfader"), "{antwort}");
 
         let plan = behandle(&mut pult, &mut s, "plan");
-        assert!(plan.contains("ok 2 vorgemerkt"), "{plan}");
+        // Drei: Deck starten, blenden, und am Ende das ausgehende Deck
+        // stoppen. Ohne das letzte wäre der nächste Griff nicht möglich.
+        assert!(plan.contains("ok 3 vorgemerkt"), "{plan}");
 
         // Und zurücknehmen geht wie bei allem anderen.
-        assert_eq!(behandle(&mut pult, &mut s, "cancel"), "ok 2 gestrichen");
+        assert_eq!(behandle(&mut pult, &mut s, "cancel"), "ok 3 gestrichen");
     }
 
     /// Ein unbekannter Griff nennt die Auswahl, statt still nichts zu tun.
