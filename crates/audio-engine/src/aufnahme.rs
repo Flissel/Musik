@@ -67,8 +67,19 @@ impl Mitschnitt {
 }
 
 enum Befehl {
-    Start { pfad: PathBuf, sample_rate: u32 },
-    Stop,
+    Start {
+        pfad: PathBuf,
+        sample_rate: u32,
+    },
+    /// Schluss — und wie viele Frames noch in diese Datei gehören.
+    ///
+    /// Die Zahl kommt von der Seite, die aufnimmt, und ist die einzige, mit der
+    /// sich die Grenze zwischen zwei Mitschnitten bestimmen lässt. Ohne sie
+    /// müsste der Schreiber „alles, was noch im Ring liegt" nehmen — und darin
+    /// steckt womöglich schon der Anfang des nächsten.
+    Stop {
+        frames: u64,
+    },
     Ende,
 }
 
@@ -140,7 +151,9 @@ impl Aufnahme {
         // Erst der Audio-Thread, dann der Schreiber: Was noch im Ring liegt,
         // soll er zu Ende schreiben.
         self.aktiv.store(false, Ordering::Relaxed);
-        let _ = self.befehle.send(Befehl::Stop);
+        let _ = self.befehle.send(Befehl::Stop {
+            frames: self.geschrieben.load(Ordering::Relaxed),
+        });
         self.pfad.take()
     }
 
@@ -228,66 +241,85 @@ pub fn mitschnitt(sample_rate: u32) -> (Mitschnitt, Aufnahme) {
 /// dieser Thread bekommt den Befehl erst, wenn er das nächste Mal an der Reihe
 /// ist. Auf einem ausgelasteten Rechner liegen dann schon Samples im Ring, und
 /// ein Leeren an dieser Stelle würfe genau den Anfang des Mitschnitts weg.
-/// Nötig ist es auch nicht: Nach dem Schließen ist der Ring leer, und außerhalb
-/// einer laufenden Aufnahme legt niemand etwas hinein.
+///
+/// # Befehle werden der Reihe nach ausgeführt
+///
+/// Er holt sich seine Befehle in Häppchen ab, und in einem Häppchen können
+/// `Stop` und der nächste `Start` zusammen liegen — zwischen zwei Stücken tut
+/// das jeder. Sie zu Merkern zusammenzufassen und erst danach zu handeln war
+/// falsch: Dann öffnete der `Start` die neue Datei, und der `Stop` schrieb den
+/// *alten* Mitschnitt hinein und schloss sie. Die erste Datei blieb bei 44
+/// Bytes, die zweite bekam fremdes Material, und der zweite Mitschnitt landete
+/// nirgends.
+///
+/// Aufgefallen ist das nicht hier, sondern in der CI: Auf einem freien Rechner
+/// kommt der Schreiber zwischen Stopp und Start dran, auf einem ausgelasteten
+/// nicht.
+///
+/// # Wo ein Mitschnitt aufhört
+///
+/// Der `Stop` bringt die Zahl der Frames mit, die die aufnehmende Seite
+/// abgelegt hat. Der Schreiber füllt bis dorthin und lässt liegen, was danach
+/// kommt — das gehört schon zum nächsten. „Alles, was noch im Ring ist" wäre
+/// die naheliegende Regel und die falsche: Genau darin steckt der Anfang des
+/// nächsten Mitschnitts.
 fn schreiben(mut rx: rtrb::Consumer<f32>, befehle: Receiver<Befehl>) {
     const TAKT: std::time::Duration = std::time::Duration::from_millis(20);
     let mut datei: Option<WavDatei> = None;
+    let mut frames: u64 = 0;
     let mut block: Vec<f32> = Vec::with_capacity(8_192);
+
+    /// Holt bis zu `hoechstens` Frames aus dem Ring.
+    fn holen(rx: &mut rtrb::Consumer<f32>, block: &mut Vec<f32>, hoechstens: u64) {
+        block.clear();
+        let grenze = hoechstens.saturating_mul(CHANNELS as u64).min(8_192) as usize;
+        while block.len() < grenze {
+            match rx.pop() {
+                Ok(sample) => block.push(sample),
+                Err(_) => break,
+            }
+        }
+    }
 
     loop {
         let mut beenden = false;
-        let mut schliessen = false;
 
         while let Ok(befehl) = befehle.try_recv() {
             match befehl {
                 Befehl::Start { pfad, sample_rate } => {
+                    // Eine noch offene Datei zuerst ordentlich schließen. Ohne
+                    // das bliebe ihr Kopf ungeschrieben, und eine WAV-Datei mit
+                    // falschem Kopf lesen manche Programme gar nicht.
+                    if let Some(mut d) = datei.take() {
+                        let _ = d.abschliessen();
+                    }
+                    frames = 0;
                     match WavDatei::anlegen(&pfad, sample_rate) {
                         Ok(d) => datei = Some(d),
                         Err(e) => eprintln!("Mitschnitt: {e}"),
                     }
                 }
-                Befehl::Stop => schliessen = true,
+                Befehl::Stop { frames: soll } => {
+                    abschliessen(&mut rx, &mut datei, &mut block, soll.saturating_sub(frames));
+                    frames = 0;
+                }
                 Befehl::Ende => {
-                    schliessen = true;
+                    // Beim Beenden gibt es kein Danach — alles, was noch da
+                    // ist, gehört in diese Datei.
+                    abschliessen(&mut rx, &mut datei, &mut block, u64::MAX);
                     beenden = true;
                 }
             }
         }
 
-        block.clear();
-        while let Ok(sample) = rx.pop() {
-            block.push(sample);
-            if block.len() >= 8_192 {
-                break;
-            }
-        }
-
+        holen(&mut rx, &mut block, u64::MAX);
         if let Some(d) = datei.as_mut() {
             if !block.is_empty() {
                 if let Err(e) = d.schreiben(&block) {
                     eprintln!("Mitschnitt: {e}");
                 }
+                frames += (block.len() / CHANNELS) as u64;
             }
-        }
-
-        if schliessen {
-            // Was noch im Ring liegt, gehört noch in die Datei.
-            block.clear();
-            while let Ok(sample) = rx.pop() {
-                block.push(sample);
-            }
-            if let Some(mut d) = datei.take() {
-                if !block.is_empty() {
-                    let _ = d.schreiben(&block);
-                }
-                if let Err(e) = d.abschliessen() {
-                    eprintln!("Mitschnitt: {e}");
-                }
-            }
-            // Ab hier ist der Ring leer — darauf verlässt sich der nächste
-            // Start, statt selbst zu leeren.
-            while rx.pop().is_ok() {}
         }
 
         if beenden {
@@ -296,6 +328,42 @@ fn schreiben(mut rx: rtrb::Consumer<f32>, befehle: Receiver<Befehl>) {
         if block.is_empty() {
             std::thread::sleep(TAKT);
         }
+    }
+}
+
+/// Schreibt den Rest eines Mitschnitts und schließt die Datei.
+///
+/// `rest` ist, wie viele Frames noch fehlen. Alles darüber bleibt im Ring: Es
+/// gehört zum nächsten Mitschnitt.
+fn abschliessen(
+    rx: &mut rtrb::Consumer<f32>,
+    datei: &mut Option<WavDatei>,
+    block: &mut Vec<f32>,
+    rest: u64,
+) {
+    let Some(mut d) = datei.take() else {
+        return;
+    };
+    let mut offen = rest;
+    while offen > 0 {
+        block.clear();
+        let grenze = offen.saturating_mul(CHANNELS as u64).min(8_192) as usize;
+        while block.len() < grenze {
+            match rx.pop() {
+                Ok(sample) => block.push(sample),
+                Err(_) => break,
+            }
+        }
+        if block.is_empty() {
+            break;
+        }
+        if let Err(e) = d.schreiben(block) {
+            eprintln!("Mitschnitt: {e}");
+        }
+        offen = offen.saturating_sub((block.len() / CHANNELS) as u64);
+    }
+    if let Err(e) = d.abschliessen() {
+        eprintln!("Mitschnitt: {e}");
     }
 }
 
@@ -489,6 +557,56 @@ mod tests {
                 .map(|m| m.len() == erwartet)
                 .unwrap_or(false)),
             "der zweite hat {:?} statt {erwartet} Bytes",
+            std::fs::metadata(&zweiter).map(|m| m.len())
+        );
+
+        let _ = std::fs::remove_file(&erster);
+        let _ = std::fs::remove_file(&zweiter);
+    }
+
+    /// **Stopp und Start ohne Pause dazwischen.**
+    ///
+    /// Zwischen zwei Stücken tut das jeder: `record_stop`, dann sofort
+    /// `record naechstes.wav`. Der Schreiber holt sich seine Befehle in
+    /// Häppchen ab, und wenn beide im selben Häppchen liegen, muss er sie
+    /// trotzdem der Reihe nach ausführen — sonst landet der erste Mitschnitt
+    /// in der zweiten Datei und der zweite nirgends.
+    ///
+    /// Der Test wartet ausdrücklich **nicht** zwischen den Aufnahmen. Genau
+    /// dieses Warten hat den Fehler bisher versteckt: Auf einem freien Rechner
+    /// kommt der Schreiber zwischendurch dran, auf einem ausgelasteten nicht.
+    /// Aufgefallen ist er auch nicht hier, sondern in der CI.
+    #[test]
+    fn stopp_und_start_ohne_pause_landen_in_zwei_dateien() {
+        let erster = scratch("hektik1");
+        let zweiter = scratch("hektik2");
+        let (mut tap, mut aufnahme) = mitschnitt(RATE);
+
+        let eins: Vec<f32> = (0..1_000).flat_map(|_| [0.5f32, -0.5]).collect();
+        let zwei: Vec<f32> = (0..300).flat_map(|_| [0.25f32, -0.25]).collect();
+
+        aufnahme.starten(&erster).unwrap();
+        tap.nimm_auf(&eins);
+        aufnahme.stoppen();
+        // Kein Warten — das ist der Punkt.
+        aufnahme.starten(&zweiter).unwrap();
+        tap.nimm_auf(&zwei);
+        aufnahme.stoppen();
+
+        let soll_eins = KOPF_BYTES as u64 + eins.len() as u64 * 2;
+        let soll_zwei = KOPF_BYTES as u64 + zwei.len() as u64 * 2;
+        assert!(
+            warte_bis(|| std::fs::metadata(&erster)
+                .map(|m| m.len() == soll_eins)
+                .unwrap_or(false)),
+            "der erste hat {:?} statt {soll_eins} Bytes",
+            std::fs::metadata(&erster).map(|m| m.len())
+        );
+        assert!(
+            warte_bis(|| std::fs::metadata(&zweiter)
+                .map(|m| m.len() == soll_zwei)
+                .unwrap_or(false)),
+            "der zweite hat {:?} statt {soll_zwei} Bytes",
             std::fs::metadata(&zweiter).map(|m| m.len())
         );
 
