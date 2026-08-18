@@ -564,6 +564,37 @@ der ist auf den Track selbst bezogen und über Tracks hinweg nicht vergleichbar"
         "Soll minus Ist. Positiv heißt: der Bogen will mehr, als gerade läuft — \
 die Zahl, nach der der nächste Track gewählt wird",
     ),
+    zahl(
+        "arc_curve",
+        "KURVE",
+        0.0,
+        1.0,
+        Einheit::Keine,
+        false,
+        "Was die geschriebene Kurve hier vorsieht — ungebeugt. \
+Der Vergleich zu arc_target zeigt, wieviel davon der Raum ist",
+    ),
+    // Der Raum: was draußen geschieht, verschiebt das Ziel — siehe `crate::raum`.
+    text_schreibbar(
+        "room",
+        "Welches Signal den Bogen beugt und wie stark: 'signal1 0.3'. \
+Gebeugt wird nach dem Trend, nicht nach dem Wert, und höchstens um 0.25. \
+'-' oder 'aus' schaltet es ab. Schreibbar",
+    ),
+    zahl(
+        "room_bend",
+        "BEUGUNG",
+        -1.0,
+        1.0,
+        Einheit::Keine,
+        false,
+        "Wie weit der Raum das Ziel gerade verschiebt; leer ohne Raum oder ohne Trend",
+    ),
+    text_feld(
+        "why",
+        "In einem Satz, warum als Nächstes das kommen soll, was kommen soll: \
+Raum, Ziel, Ist-Energie, Lücke — und ob zu oft dasselbe gefahren wurde",
+    ),
     text_feld(
         "arc_trend",
         "Wohin der Bogen als Nächstes will: steigt, haelt oder faellt",
@@ -641,6 +672,13 @@ hat man dazwischen welche verpasst — für alle, die fragen statt zu abonnieren
         "search_mixable",
         "<bpm>",
         "Tracks suchen, die tempomäßig zu diesem Wert passen",
+    ),
+    aktion(
+        "search_next",
+        "",
+        "Was als Nächstes passt: nach Tempo des laufenden Decks, nach Tonart und \
+nach dem, was Bogen und Raum gerade wollen. Jede Zeile sagt, warum sie dort steht. \
+Ausgewählt wird nicht — die Anlage sortiert, entschieden wird woanders",
     ),
     aktion(
         "search_harmonic",

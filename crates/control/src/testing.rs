@@ -107,6 +107,9 @@ pub struct TestSammlung {
 
 impl Sammlung for TestSammlung {
     fn suchen(&self, text: &str, grenze: usize) -> Vec<Treffer> {
+        // Ein Spektrum von ruhig bis heftig, und einer ohne Analyse: Die
+        // Auswahl nach Energie muss sich an beidem prüfen lassen.
+        const ENERGIEN: [Option<f64>; 3] = [Some(0.2), Some(0.55), None];
         (0..3.min(grenze))
             .map(|i| Treffer {
                 pfad: format!("/musik/{text}-{i}.wav"),
@@ -114,6 +117,7 @@ impl Sammlung for TestSammlung {
                 artist: None,
                 bpm: Some(128.0 + i as f32),
                 tonart: audio_core::Tonart::parse("Am"),
+                energie: ENERGIEN[i],
             })
             .collect()
     }

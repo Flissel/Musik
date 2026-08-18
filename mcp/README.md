@@ -46,11 +46,13 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
 | `musik_status` | Momentaufnahme: Decks, Kanalzüge, Summe, Mitschnitt, Plan |
 | `musik_list_controls` | Was es gibt — mit Bereich, Einheit und Bedeutung |
 | `musik_get` | Einen Wert lesen |
+| `musik_next` | Was als Nächstes passt — sortiert nach dem, was das Set will, mit Begründung |
 | `musik_search` | Sammlung durchsuchen, nach Text, Tempo oder Tonart |
 | `musik_set` | Einen Wert setzen |
 | `musik_do` | Eine Aktion auslösen: laden, syncen, Cue, Mitschnitt |
 | `musik_ramp` | Einen Regler über Beats bewegen — eine Blende |
 | `musik_schedule` | Eine Aktion oder einen Wert auf einen späteren Beat legen |
+| `musik_uebergang` | Einen benannten Griff vormerken — blende, bassswap, schnitt, filter |
 | `musik_cancel` | Vorgemerktes zurücknehmen |
 | `musik_when` | Einen Befehl an eine Schwelle hängen — „wenn noch 32 Beats" |
 | `musik_signal` | Etwas aus dem Raum melden — Energie, Andrang, Stimmung |
@@ -58,11 +60,11 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
 | `musik_queue_add` | Einen Track vormerken |
 | `musik_queue_next` | Den vordersten auflegen |
 
-Vierzehn statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
+Sechzehn statt zweihundert. Ein Werkzeug je Control wäre die naheliegende
 Übersetzung und die schlechtere: Der Steuerraum hat über zweihundert Einträge,
 und ein Agent, der sie alle als Werkzeuge sieht, findet keins davon.
-`musik_set` und `musik_do` erreichen alles, `musik_status` und `musik_search`
-sparen die Wege, die man sonst am häufigsten doppelt ginge.
+`musik_set` und `musik_do` erreichen alles, `musik_status`, `musik_search` und
+`musik_next` sparen die Wege, die man sonst am häufigsten doppelt ginge.
 
 ## Warum es Zeit-Werkzeuge braucht
 

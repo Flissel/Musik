@@ -34,6 +34,7 @@ pub mod katalog;
 pub mod mitschrift;
 pub mod protokoll;
 pub mod pult;
+pub mod raum;
 pub mod schluessel;
 pub mod server;
 pub mod signal;
@@ -56,6 +57,7 @@ pub use pult::{
     assign_aus_name, assign_name, DeckEintrag, Fehler, KanalSpiegel, MasterSpiegel, Sammlung,
     Steuerpult, Treffer,
 };
+pub use raum::Raum;
 pub use schluessel::{Gruppe, Schluessel};
 pub use server::{Server, ServerFehler};
 pub use signal::Signal;

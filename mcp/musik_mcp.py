@@ -658,6 +658,11 @@ class VormerkenEingabe(Basis):
         return _pruefe_einzeilig(v, "Argument")
 
 
+class NaechstesEingabe(Basis):
+    limit: int = Field(default=10, description="Höchstzahl der Vorschläge", ge=1, le=200)
+    response_format: Format = Field(default=Format.MARKDOWN, description="Ausgabeform")
+
+
 class AuflegenEingabe(Basis):
     deck: Optional[DeckName] = Field(
         default=None,
@@ -861,6 +866,12 @@ async def _status(form: Format) -> str:
         # Repertoire machen Abwechslung möglich, nicht selbstverständlich.
         "repeats",
         "transitions",
+        # Der Raum: was draußen geschieht, verschiebt das Ziel. Ohne
+        # `arc_curve` daneben wäre nicht zu sehen, wieviel davon der Raum ist.
+        "arc_curve",
+        "room",
+        "room_bend",
+        "why",
     ]
 
     gefragt = (
@@ -920,6 +931,10 @@ async def _status(form: Format) -> str:
             "arc_actual": _als_zahl(roh.get("master.arc_actual", "-")),
             "arc_gap": _als_zahl(roh.get("master.arc_gap", "-")),
             "arc_trend": _als_text(roh.get("master.arc_trend", "-")),
+            "arc_curve": _als_zahl(roh.get("master.arc_curve", "-")),
+            "room": _als_text(roh.get("master.room", "-")),
+            "room_bend": _als_zahl(roh.get("master.room_bend", "-")),
+            "why": _als_text(roh.get("master.why", "-")),
             "repeats": int(_als_zahl(roh.get("master.repeats", "-")) or 0),
             "transitions": _als_text(roh.get("master.transitions", "-")),
             "last_event": _als_text(roh.get("master.events", "-")),
@@ -993,11 +1008,21 @@ async def _status(form: Format) -> str:
             + ("mehr Energie gesucht" if m["arc_gap"] > 0.05 else
                "weniger gesucht" if m["arc_gap"] < -0.05 else "passt")
         )
+        raum = ""
+        if m["room_bend"] is not None and m["arc_curve"] is not None:
+            raum = (
+                f"\n\nDer Raum ({m['room']}) beugt das Ziel um "
+                f"**{m['room_bend']:+.2f}** — die Kurve selbst sagt "
+                f"{m['arc_curve']:.2f}."
+            )
         zeilen.append(
             f"\n## Bogen\nBei {m['arc_minutes']:.0f} min: soll "
             f"{m['arc_target']:.2f}, ist {m['arc_actual']:.2f}, Lücke {fehlt}"
             + (f" · {richtung} in den nächsten Minuten" if richtung else "")
+            + raum
         )
+    if m["why"]:
+        zeilen.append(f"\n**Warum:** {m['why']}")
 
     if m["transitions"]:
         zeile = f"\n## Übergänge\n{m['transitions']}"
@@ -1170,6 +1195,103 @@ async def musik_get(params: ControlEingabe) -> str:
         return f"Fehler: {fehler}. `musik_list_controls` zeigt, was es gibt."
     zeile = zeilen[-1] if zeilen else ""
     return zeile.split(" ", 2)[2] if zeile.startswith("value ") else "-"
+
+
+@mcp.tool(
+    name="musik_next",
+    annotations={"title": "Was als Nächstes passt", **NUR_LESEN},
+)
+async def musik_next(params: NaechstesEingabe) -> str:
+    """Was als Nächstes passt — nach Tempo, Tonart und dem, was das Set will.
+
+    Anders als `musik_search` ist das nicht eine Suche, sondern eine
+    **Reihenfolge mit Begründung**: sortiert nach dem Abstand zur Energie, die
+    Bogen und Raum gerade anstreben, und jede Zeile sagt, warum sie dort steht.
+
+    Braucht ein laufendes Deck und einen laufenden Bogen (`musik_set('master.arc',
+    ...)` und `musik_do('master.arc_start')`). Ohne die kommt ein Fehler statt
+    einer Liste, die nach nichts sortiert ist.
+
+    **Ausgewählt wird nicht.** Die Anlage sortiert; welcher Track es wird,
+    entscheidet, wer es begründen kann.
+
+    Args:
+        params (NaechstesEingabe):
+            - limit (int): 1–200, Standard 10
+            - response_format: 'markdown' oder 'json'
+
+    Returns:
+        str: Markdown oder JSON:
+        {"reason": str, "count": int, "truncated": bool,
+         "tracks": [{"bpm": float|null, "key": str|null, "path": str,
+                     "title": str, "why": str}]}
+
+    Beispiele:
+        - „Was soll ich als Nächstes auflegen?" → musik_next()
+        - Nicht dafür: einen bestimmten Track finden → `musik_search`.
+    """
+    try:
+        zeilen = await eine_antwort("do master.search_next")
+    except NichtErreichbar as fehler:
+        return f"Fehler: {fehler}"
+    if fehler := _fehlerzeile(zeilen):
+        return f"Fehler: {fehler}"
+
+    grund = ""
+    treffer: list[dict[str, Any]] = []
+    begrenzt = False
+    for zeile in zeilen:
+        if zeile.startswith("weil "):
+            grund = zeile[5:]
+            continue
+        if zeile.startswith("hinweis "):
+            begrenzt = True
+            continue
+        if not zeile.startswith("track "):
+            continue
+        teile = zeile.split(" ", 3)
+        if len(teile) < 4:
+            continue
+        # `track <bpm> <key> <pfad> <titel> — <grund>`. Erst den Grund
+        # abtrennen, sonst landet er im Titel.
+        rest, _, warum = teile[3].partition(" — ")
+        pfad, titel = _pfad_und_titel(rest)
+        treffer.append(
+            {
+                "bpm": _als_zahl(teile[1]),
+                "key": None if teile[2] == "-" else teile[2],
+                "path": pfad,
+                "title": titel,
+                "why": warum,
+            }
+        )
+
+    treffer = treffer[: params.limit]
+    if params.response_format is Format.JSON:
+        return json.dumps(
+            {
+                "reason": grund,
+                "count": len(treffer),
+                "truncated": begrenzt,
+                "tracks": treffer,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+
+    zeilen_aus = [f"# Als Nächstes\n\n{grund}" if grund else "# Als Nächstes", ""]
+    if not treffer:
+        zeilen_aus.append("Nichts in der Sammlung, das dazu passt.")
+        return "\n".join(zeilen_aus)
+    for t in treffer:
+        tempo = f"{t['bpm']:.2f} BPM" if t["bpm"] else "kein Tempo"
+        key = f", {t['key']}" if t["key"] else ""
+        zeilen_aus.append(
+            f"- **{t['title']}** — {tempo}{key}\n  {t['why']}\n  `{t['path']}`"
+        )
+    if begrenzt:
+        zeilen_aus.append("\nDie Liste ist begrenzt; es gibt mehr.")
+    return "\n".join(zeilen_aus)
 
 
 @mcp.tool(

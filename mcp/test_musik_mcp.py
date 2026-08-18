@@ -33,11 +33,13 @@ ERWARTETE_WERKZEUGE = {
     "musik_status",
     "musik_list_controls",
     "musik_get",
+    "musik_next",
     "musik_search",
     "musik_set",
     "musik_do",
     "musik_ramp",
     "musik_schedule",
+    "musik_uebergang",
     "musik_cancel",
     "musik_queue",
     "musik_queue_add",
@@ -432,6 +434,67 @@ async def hauptteil() -> int:
         )
         nummer = int(bedingung.split(" ", 3)[2])
         await client.call_tool("musik_cancel", {"params": {"plan_id": nummer}})
+
+        # ------------------------------------------------------------------
+        # Der Raum steuert die Auswahl
+        # ------------------------------------------------------------------
+
+        # Ein Raum, der nur eine Zahl bewegt, ist Deko. Geprüft wird deshalb,
+        # ob er die *Reihenfolge* verschiebt — und ob dabei dasteht, warum.
+        vorher_raum = text_von(
+            await client.call_tool("musik_get", {"params": {"control": "master.room"}})
+        ).strip()
+        await client.call_tool(
+            "musik_set",
+            {"params": {"control": "master.room", "wert": f"signal{platz} 0.5"}},
+        )
+        kurve = text_von(
+            await client.call_tool(
+                "musik_get", {"params": {"control": "master.arc_curve"}}
+            )
+        ).strip()
+        beugung = text_von(
+            await client.call_tool(
+                "musik_get", {"params": {"control": "master.room_bend"}}
+            )
+        ).strip()
+        pruefe(
+            beugung not in ("", "-"),
+            f"der Raum beugt das Ziel ({beugung}, Kurve {kurve})",
+        )
+
+        roh_next = text_von(
+            await client.call_tool(
+                "musik_next",
+                {"params": {"limit": 5, "response_format": "json"}},
+            )
+        ).strip()
+        # Wie überall in der Brücke kommt ein Fehler als Satz, nicht als JSON.
+        vorschlaege = {} if roh_next.startswith("Fehler:") else json.loads(roh_next)
+        if not vorschlaege.get("tracks"):
+            ausgelassen("musik_next", roh_next[:80] or "keine Vorschläge")
+        else:
+            pruefe(
+                bool(vorschlaege.get("reason")),
+                f"musik_next sagt, warum ({vorschlaege.get('reason')})",
+            )
+            pruefe(
+                all(t["why"] for t in vorschlaege["tracks"]),
+                "und jede Zeile trägt ihren Grund",
+            )
+
+        # Nur zurücknehmen, was hier gesetzt wurde.
+        await client.call_tool(
+            "musik_set",
+            {
+                "params": {
+                    "control": "master.room",
+                    # `-` und nicht leer: `musik_set` verlangt mindestens ein
+                    # Zeichen, und beides heißt am Pult dasselbe.
+                    "wert": "-" if vorher_raum in ("", "-") else vorher_raum,
+                }
+            },
+        )
 
         # Aufräumen: nur den eigenen Platz, nie fremde.
         if marke not in vorher_signale:

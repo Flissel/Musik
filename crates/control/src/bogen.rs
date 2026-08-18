@@ -54,6 +54,43 @@ pub fn energie(art: Art) -> f64 {
     }
 }
 
+/// Wie viel Energie ein ganzer Track trägt.
+///
+/// Der Mittelwert über die Abschnitte, **nach Länge gewichtet**: Ein Track mit
+/// einem kurzen Drop und langem Outro ist ruhiger als einer, bei dem es
+/// umgekehrt ist, und ein ungewichteter Mittelwert könnte beide nicht
+/// unterscheiden.
+///
+/// # Was diese Zahl **nicht** ist
+///
+/// Sie ist **kein Maß für Lautstärke oder Härte.** Die Abschnittsarten werden
+/// je Track gegen dessen *eigene* Quantile benannt — der Drop eines leisen
+/// Stücks heißt genauso „Drop" wie der eines lauten. Was hier herauskommt, ist
+/// deshalb: *wie viel seiner Länge ein Track auf seinem eigenen Höhepunkt
+/// verbringt.*
+///
+/// Das ist trotzdem über Tracks hinweg vergleichbar und für den Aufbau eines
+/// Sets die brauchbarere Größe: Ein Peak-Track sitzt die meiste Zeit oben, ein
+/// Warmup-Track baut die meiste Zeit auf. Wer aber „welches Stück ist
+/// härter?" fragt, bekommt hier keine Antwort — und soll auch keine bekommen,
+/// statt einer erfundenen.
+///
+/// `None` bei einer Gliederung ohne Abschnitte — dann ist über den Track
+/// nichts bekannt, und das ist etwas anderes als „mittlere Energie".
+pub fn energie_des_tracks(struktur: &audio_core::struktur::Struktur) -> Option<f64> {
+    let mut summe = 0.0;
+    let mut laenge = 0.0;
+    for a in &struktur.abschnitte {
+        let frames = a.bis_frames.saturating_sub(a.von_frames) as f64;
+        if frames <= 0.0 {
+            continue;
+        }
+        summe += energie(a.art) * frames;
+        laenge += frames;
+    }
+    (laenge > 0.0).then(|| summe / laenge)
+}
+
 /// Ein Stützpunkt: zu dieser Minute so viel Energie.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Punkt {

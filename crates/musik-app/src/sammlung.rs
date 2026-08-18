@@ -61,6 +61,9 @@ pub struct AppSammlung {
     auftraege: Sender<Auftrag>,
     /// Deck-Zustände, damit ein Auftrag weiß, worauf er wirkt.
     decks: Vec<(Arc<DeckState>, u32)>,
+    /// Die Sidecar-Ablage — dort liegt die Gliederung, aus der sich die
+    /// Energie eines Tracks ergibt, ohne dass sie in der Datenbank stünde.
+    store: Store,
 }
 
 impl AppSammlung {
@@ -99,6 +102,7 @@ impl AppSammlung {
         let (auftraege, eingang) = std::sync::mpsc::channel::<Auftrag>();
         let (ausgang, ergebnisse) = std::sync::mpsc::channel::<Ergebnis>();
 
+        let store = Store::new(&cache);
         std::thread::Builder::new()
             .name("lader".into())
             .spawn(move || arbeiten(eingang, ausgang, cache))
@@ -109,6 +113,7 @@ impl AppSammlung {
                 library,
                 auftraege,
                 decks,
+                store,
             },
             ergebnisse,
         )
@@ -131,7 +136,7 @@ impl Sammlung for AppSammlung {
         lib.search(&query)
             .unwrap_or_default()
             .into_iter()
-            .map(treffer_aus)
+            .map(|e| treffer_aus(&self.store, e))
             .collect()
     }
 
@@ -145,7 +150,7 @@ impl Sammlung for AppSammlung {
         lib.search(&query)
             .unwrap_or_default()
             .into_iter()
-            .map(treffer_aus)
+            .map(|e| treffer_aus(&self.store, e))
             .collect()
     }
 
@@ -159,7 +164,7 @@ impl Sammlung for AppSammlung {
         lib.search(&query)
             .unwrap_or_default()
             .into_iter()
-            .map(treffer_aus)
+            .map(|e| treffer_aus(&self.store, e))
             .collect()
     }
 
@@ -189,7 +194,7 @@ impl Sammlung for AppSammlung {
             .unwrap_or_default()
             .into_iter()
             .take(grenze)
-            .map(treffer_aus)
+            .map(|e| treffer_aus(&self.store, e))
             .collect()
     }
 
@@ -277,7 +282,19 @@ pub fn anzeigename(eintrag: &TrackRecord) -> String {
         .unwrap_or_else(|| eintrag.path.clone())
 }
 
-fn treffer_aus(eintrag: TrackRecord) -> Treffer {
+fn treffer_aus(store: &Store, eintrag: TrackRecord) -> Treffer {
+    // Die Energie steht nicht in der Datenbank, sondern in der Gliederung
+    // neben der Datei. Das ist Absicht: Sie hängt am *Inhalt* und nicht am
+    // Eintrag, und ein neu analysierter Track soll sie mitbringen, ohne dass
+    // jemand die Sammlung nachpflegt. Fehlt die Analyse, bleibt sie leer —
+    // eine erfundene mittlere Energie wäre schlimmer als keine.
+    let energie = eintrag
+        .fingerprint
+        .as_deref()
+        .and_then(|f| store.load(f))
+        .and_then(|a| a.struktur())
+        .and_then(|s| control::bogen::energie_des_tracks(&s));
+
     Treffer {
         titel: anzeigename(&eintrag),
         artist: eintrag.artist,
@@ -285,6 +302,7 @@ fn treffer_aus(eintrag: TrackRecord) -> Treffer {
         // Was sich nicht lesen lässt, wird nicht gezeigt — eine falsch
         // gedeutete Tonart wäre schlimmer als eine fehlende.
         tonart: eintrag.musical_key.as_deref().and_then(Tonart::parse),
+        energie,
         pfad: eintrag.path,
     }
 }

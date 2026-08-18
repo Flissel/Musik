@@ -864,6 +864,83 @@ eine will Druck, der andere Luft, und beide haben recht, weil es keinen Satz
 gibt, gegen den sich das prüfen ließe. Mit ihm heißt die Frage nicht mehr
 „welcher Track ist gut", sondern „was fehlt hier gerade".
 
+## Der Raum: was draußen geschieht, verschiebt das Ziel
+
+Die vier Signalplätze gab es lange, aber sie waren Deko — Werte gingen hinein,
+und nichts hat darauf reagiert. Ein Bogen, der von der ersten Minute an
+feststeht, ist ein Abspielplan.
+
+```text
+set master.signal1_name Andrang
+set master.room signal1 0.5
+set master.signal1 0.6            # und später wieder, und wieder
+
+get master.arc_curve  → value master.arc_curve 0.700000
+get master.room_bend  → value master.room_bend -0.200000
+get master.arc_target → value master.arc_target 0.500000
+```
+
+| Control | Was |
+| --- | --- |
+| `room` | welches Signal den Bogen beugt und wie stark, schreibbar; `-` schaltet ab |
+| `room_bend` | wie weit der Raum das Ziel gerade verschiebt |
+| `arc_curve` | was die geschriebene Kurve hier vorsieht — ungebeugt |
+| `arc_target` | was gerade angestrebt wird: Kurve **plus** Raum |
+| `why` | in einem Satz, woraus das gerechnet wurde |
+
+**Der Raum verschiebt das Ziel, nicht die Kurve.** Das ist der ganze
+Unterschied zwischen „der Raum redet mit" und „der Raum schreibt um": Am Ende
+des Abends steht in `arc` immer noch der Plan, gegen den sich vergleichen
+lässt, was tatsächlich geschehen ist. Gebeugt wird `arc_target` und damit
+`arc_gap` — die Zahl, nach der gewählt wird.
+
+**Gebeugt wird nach dem Trend, nicht nach dem Wert.** Die Höhe eines Signals
+ist nichts Vergleichbares: Was „0,6 Andrang" bedeutet, weiß nur, wer den Sender
+geschrieben hat, und eine Anlage, die diese Zahl direkt gegen die Energie des
+Bogens rechnet, addiert Äpfel — derselbe Fehler, der beim Ist-Wert schon einmal
+auffiel. Eine *Änderung* ist dagegen eine Aussage über denselben Sender: „seit
+drei Minuten fallend" heißt dasselbe, egal wie die Skala gemeint war.
+
+**Höchstens 0,25.** Ohne Deckel könnte ein hängender oder falsch skalierter
+Sender das Set übernehmen, und das wäre schlimmer als ein Set, das den Raum
+ignoriert. Wer mehr Wirkung will, sagt das über das Gewicht; über die Grenze
+kommt er trotzdem nicht.
+
+### Und was daraus folgt
+
+```text
+do master.search_next
+weil Andrang fällt (-0.40/min), Ziel 0.70 → 0.50; es läuft 0.90, weniger gesucht (-0.40)
+track 126.00 8A /musik/blaue-stunde.wav Blaue Stunde — Energie 0.48 (-0.02 zum Ziel 0.50), harmonisch
+track 128.00 9A /musik/kellerlicht.wav Kellerlicht — Energie 0.61 (+0.11 zum Ziel 0.50), harmonisch
+track 127.00 3A /musik/nachtschicht.wav Nachtschicht — Energie 0.88 (+0.38 zum Ziel 0.50), tonartfremd
+```
+
+Bis hierher konnte der Raum ein Ziel verschieben, aber gewählt wurde weiter nach
+Tempo und Tonart allein — zwei Größen, die nichts darüber sagen, ob es gerade
+lauter oder ruhiger werden soll. `search_next` sortiert nach dem Abstand zum
+gebeugten Ziel und sagt je Zeile, warum sie dort steht.
+
+Die Energie eines Tracks kommt aus seiner **Gliederung**, nach Länge gewichtet:
+Ein Stück mit kurzem Drop und langem Outro ist ruhiger als eines, bei dem es
+umgekehrt ist. Sie steht nicht in der Datenbank, sondern in der Analyse-Datei
+neben dem Track — sie hängt am Inhalt, nicht am Eintrag. **Ein nicht
+analysierter Track steht hinten und sagt das**, statt sich mit einer erfundenen
+mittleren Energie in die Mitte zu mogeln.
+
+**Diese Zahl misst keine Lautstärke und keine Härte.** Die Abschnittsarten
+werden je Track gegen dessen *eigene* Quantile benannt — der Drop eines leisen
+Stücks heißt genauso „Drop" wie der eines lauten. Was herauskommt, ist: wie viel
+seiner Länge ein Track auf seinem eigenen Höhepunkt verbringt. Für den Aufbau
+eines Sets ist das die brauchbarere Größe — ein Peak-Track sitzt die meiste Zeit
+oben, ein Warmup-Track baut die meiste Zeit auf. Auf die Frage „welches Stück
+ist härter?" antwortet sie nicht, und das ist besser, als sie falsch zu
+beantworten.
+
+**Ausgewählt wird trotzdem nicht.** Die Anlage sortiert; welcher Track es wird,
+entscheidet, wer es begründen kann. Ein `search_next`, das selbst lädt, wäre
+etwas anderes — und genau das, was hier nicht gebaut wird.
+
 ## Zurückhaltung: ob immer dasselbe gefahren wird
 
 Das Repertoire macht Abwechslung **möglich**. Es erzwingt sie nicht — und ein

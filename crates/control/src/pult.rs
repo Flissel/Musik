@@ -35,6 +35,13 @@ pub struct Treffer {
     pub bpm: Option<f32>,
     /// Tonart, wie sie in der Sammlung steht — `None`, wenn keine bekannt ist.
     pub tonart: Option<Tonart>,
+    /// Wie viel Energie der Track trägt, 0 bis 1 — aus seiner Gliederung.
+    ///
+    /// `None`, solange er nicht analysiert ist. Das ist keine mittlere Energie
+    /// und darf auch nicht als eine behandelt werden: Ein Track, über den
+    /// nichts bekannt ist, taucht bei der Auswahl nach Energie hinten auf und
+    /// sagt warum, statt sich in die Mitte zu mogeln.
+    pub energie: Option<f64>,
 }
 
 /// Was das Pult nicht selbst kann: suchen und laden.
@@ -256,6 +263,9 @@ pub struct Steuerpult {
     pub bogen: crate::bogen::Bogen,
     /// Was zuletzt gefahren wurde — siehe [`crate::vielfalt`].
     pub vielfalt: crate::vielfalt::Vielfalt,
+    /// Welches Signal den Bogen beugt — siehe [`crate::raum`]. `None` heißt:
+    /// Der Raum wird gehört, aber es folgt nichts daraus.
+    pub raum: Option<crate::raum::Raum>,
     /// Wie die Rampe heißt, die gerade schreibt; sonst `None`.
     ///
     /// Der letzte Schritt einer Blende und ein Schnitt schreiben denselben
@@ -287,6 +297,7 @@ impl Steuerpult {
             bogen: crate::bogen::Bogen::neu(),
             vielfalt: crate::vielfalt::Vielfalt::neu(),
             rampe_am_werk: None,
+            raum: None,
             set_start: None,
             decks: Vec::new(),
             kanaele: Vec::new(),
@@ -610,6 +621,103 @@ impl Steuerpult {
             .max_by(f64::total_cmp)
     }
 
+    /// Wie weit der Raum das Ziel gerade verschiebt.
+    ///
+    /// `None`, wenn kein Raum gesetzt ist oder das Signal noch keinen Trend
+    /// hat — beides heißt „keine Beugung", aber aus verschiedenen Gründen, und
+    /// die Zahl 0 zu behaupten wäre in beiden Fällen mehr, als man weiß.
+    pub fn beugung(&self) -> Option<f64> {
+        let raum = self.raum.as_ref()?;
+        let signal = self.signale.get(raum.platz)?;
+        raum.beugung(signal.trend(std::time::Instant::now()))
+    }
+
+    /// Was der Bogen laut Kurve vorsieht — ungebeugt.
+    pub fn soll_kurve(&self) -> Option<f64> {
+        self.set_minuten().and_then(|m| self.bogen.soll(m))
+    }
+
+    /// Was gerade angestrebt wird: die Kurve, um die Wirkung des Raums gebeugt.
+    ///
+    /// Begrenzt auf die Energieskala: Ein Ziel über 1 oder unter 0 wäre keins.
+    pub fn soll_ziel(&self) -> Option<f64> {
+        let kurve = self.soll_kurve()?;
+        Some((kurve + self.beugung().unwrap_or(0.0)).clamp(0.0, 1.0))
+    }
+
+    /// Warum als Nächstes das kommen soll, was kommen soll — in einem Satz.
+    ///
+    /// Der Satz ist der eigentliche Zweck des Raums. Eine Anlage, die ihr Ziel
+    /// still verschiebt, ist für ein Team unbrauchbar: Der Nächste sieht eine
+    /// Zahl, die nicht in der Kurve steht, und muss raten, ob ein Sender
+    /// gesprochen hat oder jemand die Kurve überschrieben hat. Deshalb steht
+    /// hier, was gerechnet wurde und woraus.
+    ///
+    /// Er behauptet nie mehr, als bekannt ist: Ohne Bogen sagt er, dass keiner
+    /// da ist; ohne Start, dass die Uhr fehlt; ohne Gliederung, dass die
+    /// Ist-Energie unbekannt ist.
+    pub fn begruendung(&self) -> String {
+        if self.bogen.ist_leer() {
+            return "kein Bogen gesetzt — ohne ihn ist der nächste Track Geschmackssache".into();
+        }
+        let Some(minuten) = self.set_minuten() else {
+            return "Bogen steht, aber das Set hat nicht begonnen — es fehlt do master.arc_start"
+                .into();
+        };
+        let Some(kurve) = self.soll_kurve() else {
+            return format!("bei {minuten:.0} min endet der Bogen — er sagt nichts mehr");
+        };
+
+        let mut satz = String::new();
+
+        // Was der Raum dazu sagt, wenn er etwas sagt.
+        if let (Some(raum), Some(beugung)) = (self.raum.as_ref(), self.beugung()) {
+            let signal = &self.signale[raum.platz];
+            let name = if signal.name.is_empty() {
+                format!("signal{}", raum.platz + 1)
+            } else {
+                signal.name.clone()
+            };
+            let trend = signal.trend(std::time::Instant::now()).unwrap_or(0.0);
+            let richtung = if trend > 0.0 { "steigt" } else { "fällt" };
+            satz.push_str(&format!("{name} {richtung} ({trend:+.2}/min), "));
+            if beugung.abs() >= 0.005 {
+                satz.push_str(&format!(
+                    "Ziel {kurve:.2} → {:.2}; ",
+                    self.soll_ziel().unwrap_or(kurve)
+                ));
+            } else {
+                satz.push_str(&format!("Ziel bleibt {kurve:.2}; "));
+            }
+        } else {
+            satz.push_str(&format!("bei {minuten:.0} min will der Bogen {kurve:.2}; "));
+        }
+
+        match self.ist_energie() {
+            None => satz.push_str("was läuft, ist unbekannt — kein Deck mit Gliederung"),
+            Some(ist) => {
+                let luecke = self.soll_ziel().unwrap_or(kurve) - ist;
+                satz.push_str(&format!("es läuft {ist:.2}, "));
+                satz.push_str(match luecke {
+                    l if l > 0.05 => "mehr Energie gesucht",
+                    l if l < -0.05 => "weniger gesucht",
+                    _ => "es passt",
+                });
+                satz.push_str(&format!(" ({luecke:+.2})"));
+            }
+        }
+
+        // Wer viermal dasselbe gefahren hat, soll es hier lesen und nicht erst
+        // im Mitschnitt hören.
+        let wiederholung = self.vielfalt.wiederholung();
+        if wiederholung >= 3 {
+            satz.push_str(&format!(
+                " — und {wiederholung}× hintereinander derselbe Griff"
+            ));
+        }
+        satz
+    }
+
     /// Der Abschnitt, in dem ein Deck gerade steht.
     pub fn abschnitt(&self, deck: usize) -> Option<audio_core::Abschnitt> {
         let d = self.decks.get(deck)?;
@@ -721,12 +829,34 @@ impl Steuerpult {
                     None => Wert::Leer,
                 });
             }
+            // Das Ziel ist die Kurve **plus** dem, was der Raum sagt. Die
+            // Kurve selbst bleibt unter `arc_curve` stehen: Am Ende des Abends
+            // soll noch vergleichbar sein, was geplant war und was geschah.
             "arc_target" => {
-                return Some(match self.set_minuten().and_then(|m| self.bogen.soll(m)) {
+                return Some(match self.soll_ziel() {
                     Some(e) => Wert::Zahl(e),
                     None => Wert::Leer,
                 });
             }
+            "arc_curve" => {
+                return Some(match self.soll_kurve() {
+                    Some(e) => Wert::Zahl(e),
+                    None => Wert::Leer,
+                });
+            }
+            "room" => {
+                return Some(match &self.raum {
+                    Some(r) => Wert::Text(r.text()),
+                    None => Wert::Leer,
+                });
+            }
+            "room_bend" => {
+                return Some(match self.beugung() {
+                    Some(b) => Wert::Zahl(b),
+                    None => Wert::Leer,
+                });
+            }
+            "why" => return Some(Wert::Text(self.begruendung())),
             "arc_actual" => {
                 return Some(match self.ist_energie() {
                     Some(e) => Wert::Zahl(e),
@@ -736,7 +866,7 @@ impl Steuerpult {
             // Die Zahl, nach der gehandelt wird: positiv heißt, der Bogen will
             // mehr, als gerade läuft.
             "arc_gap" => {
-                let soll = self.set_minuten().and_then(|m| self.bogen.soll(m));
+                let soll = self.soll_ziel();
                 return Some(match (soll, self.ist_energie()) {
                     (Some(s), Some(i)) => Wert::Zahl(s - i),
                     _ => Wert::Leer,
@@ -876,6 +1006,7 @@ impl Steuerpult {
                 let treffer = self.suche_harmonisch(tonart);
                 Ok(treffer_zeilen(&treffer))
             }
+            (Gruppe::Master, "search_next") => self.search_next(),
             (Gruppe::Master, "queue") => Ok(self.listen_zeilen()),
             (Gruppe::Master, "queue_add") => {
                 let pfad = argument.ok_or_else(fehlt)?;
@@ -1308,6 +1439,90 @@ impl Steuerpult {
         }
     }
 
+    /// Was als Nächstes passt — nach Tempo, Tonart **und** dem, was der Bogen
+    /// und der Raum gerade wollen.
+    ///
+    /// Das ist die Stelle, an der sich die Schleife schließt: Bis hierher
+    /// konnte der Raum ein Ziel verschieben, aber die Auswahl lief weiter über
+    /// Tempo und Tonart allein — zwei Größen, die nichts darüber sagen, ob es
+    /// gerade lauter oder ruhiger werden soll.
+    ///
+    /// **Ausgewählt wird trotzdem nicht.** Die Liste ist sortiert und jede
+    /// Zeile sagt, warum sie dort steht; welcher Track es wird, entscheidet,
+    /// wer es begründen kann. Ein `do master.search_next`, das selbst lädt,
+    /// wäre etwas anderes — und genau das, was dieses Projekt nicht baut.
+    fn search_next(&self) -> Result<Vec<String>, Fehler> {
+        let Some(deck) = (0..self.decks.len()).find(|i| self.decks[*i].state.is_playing()) else {
+            return Err(Fehler::Gescheitert(
+                "kein Deck läuft — ohne Tempo gibt es nichts zu vergleichen".into(),
+            ));
+        };
+        let Some(bpm) = self.decks[deck].state.effective_bpm() else {
+            return Err(Fehler::Gescheitert(format!(
+                "deck{} hat kein Tempo — ohne das gibt es nichts zu vergleichen",
+                deck + 1
+            )));
+        };
+        let Some(ziel) = self.soll_ziel() else {
+            return Err(Fehler::Gescheitert(
+                "kein laufender Bogen — ohne Ziel ist die Reihenfolge Geschmackssache. \
+set master.arc und do master.arc_start"
+                    .into(),
+            ));
+        };
+
+        let tonart = self.decks[deck].tonart;
+        let mut treffer = self.suche_mischbar(bpm);
+        // Erst das Ziel, dann die Harmonie. Andersherum wäre die Liste eine
+        // harmonische mit Energie-Beiwerk, und die gibt es schon.
+        treffer.sort_by(|a, b| {
+            let d = |t: &Treffer| t.energie.map(|e| (e - ziel).abs());
+            match (d(a), d(b)) {
+                (Some(x), Some(y)) if (x - y).abs() > 0.02 => x.total_cmp(&y),
+                // Ohne Analyse ans Ende: Ein Track, über den nichts bekannt
+                // ist, soll sich nicht in die Mitte mogeln.
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                _ => {
+                    let passt = |t: &Treffer| match (tonart, t.tonart) {
+                        (Some(a), Some(b)) => !a.passt_zu(&b),
+                        _ => true,
+                    };
+                    passt(a).cmp(&passt(b))
+                }
+            }
+        });
+
+        let mut zeilen = vec![format!("weil {}", self.begruendung())];
+        for t in treffer.iter().take(GRENZE) {
+            let bpm_text = match t.bpm {
+                Some(b) => format!("{b:.2}"),
+                None => "-".into(),
+            };
+            let key = match t.tonart {
+                Some(k) => k.camelot(),
+                None => "-".into(),
+            };
+            let grund = match t.energie {
+                Some(e) => format!("Energie {e:.2} ({:+.2} zum Ziel {ziel:.2})", e - ziel),
+                None => "nicht analysiert — Energie unbekannt".into(),
+            };
+            let harmonie = match (tonart, t.tonart) {
+                (Some(a), Some(b)) if a.passt_zu(&b) => ", harmonisch",
+                (Some(_), Some(_)) => ", tonartfremd",
+                _ => "",
+            };
+            zeilen.push(format!(
+                "track {bpm_text} {key} {} {} — {grund}{harmonie}",
+                t.pfad, t.titel
+            ));
+        }
+        if treffer.len() >= GRENZE {
+            zeilen.push(format!("hinweis auf {GRENZE} Treffer begrenzt"));
+        }
+        Ok(zeilen)
+    }
+
     /// Tonart eines Decks — der übliche Ausgangspunkt für die harmonische
     /// Suche.
     pub fn deck_tonart(&self, deck: usize) -> Option<Tonart> {
@@ -1715,6 +1930,35 @@ impl Steuerpult {
             return Ok(());
         }
 
+        if k.element == "room" {
+            let Wert::Text(text) = wert else {
+                return Err(Fehler::FalscherTyp {
+                    control: k.to_string(),
+                    erwartet: crate::wert::Art::Text,
+                });
+            };
+            // Abschalten muss sagbar sein, sonst bliebe ein einmal gesetzter
+            // Sender bis zum Neustart am Ruder. Nicht nur leer: Über MCP kommt
+            // eine leere Zeichenkette gar nicht erst an — das Werkzeug verlangt
+            // mindestens ein Zeichen. Ein Weg, den nur der Socket kennt, ist
+            // für ein Team von Agenten keiner.
+            if matches!(text.trim(), "" | "-" | "aus") {
+                self.raum = None;
+                return Ok(());
+            }
+            // Ein Platz, den es nicht gibt, wird abgewiesen statt auf einen
+            // anderen umgebogen — derselbe Grund wie beim Bogen.
+            let raum =
+                crate::raum::Raum::parse(&text, crate::signal::SIGNALE).ok_or_else(|| {
+                    Fehler::Gescheitert(format!(
+                        "unlesbar: erwartet 'signalN [gewicht]', N von 1 bis {}",
+                        crate::signal::SIGNALE
+                    ))
+                })?;
+            self.raum = Some(raum);
+            return Ok(());
+        }
+
         let v = Self::zahl(b, k, &wert)?;
 
         let befehl = match k.element.as_str() {
@@ -2059,6 +2303,7 @@ mod tests {
                 // gemerkt hat, ist der Punkt — ein Feld, das Text *annimmt*,
                 // ist nicht dasselbe wie eines, das jeden Text annimmt.
                 Art::Text if schluessel.element == "arc" => Wert::Text("0 0.3, 60 0.9".into()),
+                Art::Text if schluessel.element == "room" => Wert::Text("signal1 0.3".into()),
                 Art::Text => Wert::Text("Probe".into()),
                 _ => Wert::Zahl(b.aus_normiert(0.5)),
             };
@@ -3280,5 +3525,317 @@ mod bogen_tests {
             pult.lies(&k("master.arc_trend")).unwrap(),
             Wert::Text("haelt".into())
         );
+    }
+}
+
+#[cfg(test)]
+mod raum_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+    use audio_core::struktur::{Abschnitt, Art, Struktur};
+    use std::time::{Duration, Instant};
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    fn abschnitt(art: Art) -> Struktur {
+        Struktur {
+            phrase_beats: PHRASE_BEATS,
+            abschnitte: vec![Abschnitt {
+                von_frames: 0,
+                bis_frames: u64::MAX,
+                von_beat: 0.0,
+                bis_beat: 1e9,
+                art,
+                pegel: 0.5,
+                bass: 0.5,
+                dichte: 0.5,
+            }],
+        }
+    }
+
+    /// Trägt einen Verlauf in einen Signalplatz ein, rückwärts von jetzt.
+    ///
+    /// Direkt statt über `schreibe`, weil dort die Uhr von außen nicht zu
+    /// setzen ist: Zwei Schreibvorgänge hintereinander liegen Mikrosekunden
+    /// auseinander, und daraus wird jeder Trend zur Behauptung.
+    fn verlauf(pult: &mut Steuerpult, platz: usize, proben: &[(u64, f64)]) {
+        let jetzt = Instant::now();
+        for (sek_her, wert) in proben {
+            pult.signale[platz].setzen(*wert, jetzt - Duration::from_secs(*sek_her));
+        }
+    }
+
+    fn zahl(pult: &Steuerpult, control: &str) -> f64 {
+        match pult.lies(&k(control)).unwrap() {
+            Wert::Zahl(z) => z,
+            anderes => panic!("{control} ist {anderes:?}, keine Zahl"),
+        }
+    }
+
+    fn text(pult: &Steuerpult, control: &str) -> String {
+        match pult.lies(&k(control)).unwrap() {
+            Wert::Text(t) => t,
+            anderes => panic!("{control} ist {anderes:?}, kein Text"),
+        }
+    }
+
+    /// **Der Raum verschiebt das Ziel, nicht die Kurve.**
+    ///
+    /// Das ist der ganze Unterschied zwischen „der Raum redet mit" und „der
+    /// Raum schreibt um": Am Ende des Abends steht in `arc` noch der Plan, an
+    /// dem sich messen lässt, was tatsächlich geschah.
+    #[test]
+    fn der_raum_beugt_das_ziel_aber_nicht_die_kurve() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.5, 60 0.5".into()))
+            .unwrap();
+        pult.ausloesen(&k("master.arc_start"), None).unwrap();
+        assert_eq!(pult.lies(&k("master.room_bend")).unwrap(), Wert::Leer);
+        assert_eq!(zahl(&pult, "master.arc_target"), 0.5);
+
+        pult.schreibe(&k("master.signal1_name"), Wert::Text("Andrang".into()))
+            .unwrap();
+        pult.schreibe(&k("master.room"), Wert::Text("signal1 0.5".into()))
+            .unwrap();
+        // Von 0,2 auf 0,6 in einer Minute: Trend +0,4, mit Gewicht 0,5 also
+        // eine Beugung von +0,2.
+        verlauf(&mut pult, 0, &[(60, 0.2), (40, 0.33), (20, 0.47), (0, 0.6)]);
+
+        let beugung = zahl(&pult, "master.room_bend");
+        assert!((beugung - 0.2).abs() < 0.02, "Beugung {beugung:.3}");
+        assert!(
+            (zahl(&pult, "master.arc_target") - 0.7).abs() < 0.02,
+            "Ziel {}",
+            zahl(&pult, "master.arc_target")
+        );
+        // Die Kurve steht unverändert da.
+        assert_eq!(zahl(&pult, "master.arc_curve"), 0.5);
+        let Wert::Text(kurve) = pult.lies(&k("master.arc")).unwrap() else {
+            panic!()
+        };
+        assert!(kurve.starts_with("0:00 0.50"), "{kurve}");
+    }
+
+    /// Die Lücke ist die Zahl, nach der gewählt wird — sie muss dem gebeugten
+    /// Ziel folgen, sonst redet der Raum mit und niemand hört zu.
+    #[test]
+    fn die_luecke_folgt_dem_gebeugten_ziel() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.5, 60 0.5".into()))
+            .unwrap();
+        pult.ausloesen(&k("master.arc_start"), None).unwrap();
+        pult.deck_mut(0).unwrap().struktur = Some(abschnitt(Art::Aufbau));
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        let ist = crate::bogen::energie(Art::Aufbau);
+        assert!((zahl(&pult, "master.arc_gap") - (0.5 - ist)).abs() < 1e-9);
+
+        // Der Raum fällt: Das Ziel sinkt, und damit die Lücke.
+        pult.schreibe(&k("master.room"), Wert::Text("signal1".into()))
+            .unwrap();
+        verlauf(&mut pult, 0, &[(60, 0.8), (0, 0.6)]);
+        let luecke = zahl(&pult, "master.arc_gap");
+        assert!(
+            (luecke - (0.3 - ist)).abs() < 0.02,
+            "Lücke {luecke:.3}, erwartet {:.3}",
+            0.3 - ist
+        );
+    }
+
+    /// Ein Sender, der ausrastet, übernimmt das Set nicht.
+    #[test]
+    fn die_grenze_haelt_auch_am_pult() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.5, 60 0.5".into()))
+            .unwrap();
+        pult.ausloesen(&k("master.arc_start"), None).unwrap();
+        pult.schreibe(&k("master.room"), Wert::Text("signal1 10".into()))
+            .unwrap();
+        verlauf(&mut pult, 0, &[(60, 0.0), (0, 1.0)]);
+
+        assert_eq!(zahl(&pult, "master.room_bend"), crate::raum::GRENZE);
+        assert!((zahl(&pult, "master.arc_target") - 0.75).abs() < 1e-9);
+    }
+
+    /// Ein Platz, den es nicht gibt, wird abgewiesen — und leer schreiben
+    /// schaltet den Raum ab. Ohne das bliebe ein einmal gesetzter Sender bis
+    /// zum Neustart am Ruder.
+    #[test]
+    fn der_raum_laesst_sich_abweisen_und_abschalten() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("master.room"), Wert::Text("signal2 0.4".into()))
+            .expect("gültig");
+        assert_eq!(text(&pult, "master.room"), "signal2 0.4");
+
+        for unsinn in ["signal9", "Andrang", "signal1 -1"] {
+            assert!(
+                pult.schreibe(&k("master.room"), Wert::Text(unsinn.into()))
+                    .is_err(),
+                "{unsinn} wurde angenommen"
+            );
+        }
+        // Und der alte steht noch.
+        assert_eq!(text(&pult, "master.room"), "signal2 0.4");
+
+        // Drei Wege, ihn abzuschalten. Der leere ist über MCP nicht erreichbar
+        // — dort verlangt `musik_set` mindestens ein Zeichen —, und ein Weg,
+        // den nur der Socket kennt, wäre für ein Team von Agenten keiner.
+        for aus in ["", "-", "aus"] {
+            pult.schreibe(&k("master.room"), Wert::Text("signal2 0.4".into()))
+                .unwrap();
+            pult.schreibe(&k("master.room"), Wert::Text(aus.into()))
+                .unwrap_or_else(|e| panic!("{aus:?} schaltet nicht ab: {e:?}"));
+            assert_eq!(pult.lies(&k("master.room")).unwrap(), Wert::Leer, "{aus:?}");
+            assert_eq!(pult.lies(&k("master.room_bend")).unwrap(), Wert::Leer);
+        }
+    }
+
+    /// **Der Satz ist der Zweck.** Eine Anlage, die ihr Ziel still verschiebt,
+    /// ist für ein Team unbrauchbar: Der Nächste sieht eine Zahl, die nicht in
+    /// der Kurve steht, und muss raten, woher sie kommt.
+    #[test]
+    fn der_satz_sagt_woraus_gerechnet_wurde() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        assert!(
+            text(&pult, "master.why").contains("kein Bogen"),
+            "{}",
+            text(&pult, "master.why")
+        );
+
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.7, 60 0.7".into()))
+            .unwrap();
+        assert!(
+            text(&pult, "master.why").contains("arc_start"),
+            "{}",
+            text(&pult, "master.why")
+        );
+
+        pult.ausloesen(&k("master.arc_start"), None).unwrap();
+        pult.deck_mut(0).unwrap().struktur = Some(abschnitt(Art::Drop));
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        pult.schreibe(&k("master.signal1_name"), Wert::Text("Andrang".into()))
+            .unwrap();
+        pult.schreibe(&k("master.room"), Wert::Text("signal1 0.5".into()))
+            .unwrap();
+        verlauf(&mut pult, 0, &[(60, 0.8), (0, 0.4)]);
+
+        let satz = text(&pult, "master.why");
+        assert!(satz.contains("Andrang"), "{satz}");
+        assert!(satz.contains("fällt"), "{satz}");
+        // Kurve 0,70 minus Beugung 0,20 ergibt 0,50; es läuft ein Drop mit 0,90.
+        assert!(satz.contains("0.70 → 0.50"), "{satz}");
+        assert!(satz.contains("weniger gesucht"), "{satz}");
+    }
+}
+
+#[cfg(test)]
+mod auswahl_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+    use audio_core::struktur::{Abschnitt, Art, Struktur};
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    fn abschnitt(art: Art) -> Struktur {
+        Struktur {
+            phrase_beats: PHRASE_BEATS,
+            abschnitte: vec![Abschnitt {
+                von_frames: 0,
+                bis_frames: u64::MAX,
+                von_beat: 0.0,
+                bis_beat: 1e9,
+                art,
+                pegel: 0.5,
+                bass: 0.5,
+                dichte: 0.5,
+            }],
+        }
+    }
+
+    /// Ein laufendes Deck mit Tempo und Gliederung, dazu ein Bogen.
+    fn aufgelegt(pult: &mut Steuerpult, kurve: &str) {
+        pult.deck_mut(0).unwrap().struktur = Some(abschnitt(Art::Aufbau));
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        pult.schreibe(&k("master.arc"), Wert::Text(kurve.into()))
+            .unwrap();
+        pult.ausloesen(&k("master.arc_start"), None).unwrap();
+    }
+
+    /// **Die Zeile, um die es geht.** Sortiert wird nach dem Abstand zum Ziel,
+    /// und was das Ziel ist, hat der Raum mitbestimmt.
+    #[test]
+    fn was_als_naechstes_passt_steht_oben_und_sagt_warum() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        aufgelegt(&mut pult, "0 0.5, 60 0.5");
+
+        let zeilen = pult
+            .ausloesen(&k("master.search_next"), None)
+            .expect("Auswahl");
+
+        // Erste Zeile ist der Grund, nicht ein Treffer.
+        assert!(zeilen[0].starts_with("weil "), "{:?}", zeilen[0]);
+
+        let tracks: Vec<&String> = zeilen.iter().filter(|z| z.starts_with("track ")).collect();
+        assert_eq!(tracks.len(), 3, "{zeilen:?}");
+        // Die Testsammlung liefert 0.20, 0.55 und einen ohne Analyse. Ziel
+        // 0.50 — also gehört der mittlere nach oben.
+        assert!(tracks[0].contains("Energie 0.55"), "{}", tracks[0]);
+        assert!(tracks[1].contains("Energie 0.20"), "{}", tracks[1]);
+        // Wer nicht analysiert ist, steht hinten und sagt es.
+        assert!(tracks[2].contains("nicht analysiert"), "{}", tracks[2]);
+        // Und jede Zeile trägt ihren Grund.
+        assert!(tracks[0].contains("+0.05 zum Ziel 0.50"), "{}", tracks[0]);
+    }
+
+    /// **Der Raum verschiebt die Reihenfolge, nicht nur eine Zahl.** Das ist
+    /// der Punkt, an dem die Schleife sich schließt — vorher konnte ein Signal
+    /// ein Ziel bewegen, aber gewählt wurde weiter nach Tempo und Tonart.
+    #[test]
+    fn der_raum_verschiebt_die_reihenfolge() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        aufgelegt(&mut pult, "0 0.5, 60 0.5");
+        pult.schreibe(&k("master.room"), Wert::Text("signal1".into()))
+            .unwrap();
+        // Der Andrang fällt deutlich: Das Ziel sinkt von 0,50 auf 0,25, und
+        // damit ist der ruhige Track der passende.
+        let jetzt = std::time::Instant::now();
+        pult.signale[0].setzen(0.9, jetzt - std::time::Duration::from_secs(60));
+        pult.signale[0].setzen(0.5, jetzt);
+
+        let zeilen = pult
+            .ausloesen(&k("master.search_next"), None)
+            .expect("Auswahl");
+        let tracks: Vec<&String> = zeilen.iter().filter(|z| z.starts_with("track ")).collect();
+        assert!(
+            tracks[0].contains("Energie 0.20"),
+            "jetzt sollte der ruhige oben stehen: {tracks:?}"
+        );
+        assert!(zeilen[0].contains("fällt"), "{:?}", zeilen[0]);
+    }
+
+    /// Ohne Bogen wird nicht sortiert, sondern gesagt, dass die Grundlage
+    /// fehlt. Eine nach nichts sortierte Liste, die aussieht wie eine
+    /// sortierte, wäre schlimmer als ein Fehler.
+    #[test]
+    fn ohne_bogen_wird_nicht_geraten() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+
+        let fehler = pult.ausloesen(&k("master.search_next"), None);
+        assert!(fehler.is_err(), "ohne Bogen wurde sortiert");
+
+        // Und ohne laufendes Deck erst recht nicht.
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        aufgelegt(&mut pult, "0 0.5, 60 0.5");
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(false))
+            .unwrap();
+        assert!(pult.ausloesen(&k("master.search_next"), None).is_err());
     }
 }

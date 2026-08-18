@@ -133,7 +133,7 @@ pub fn analysiere(
     let grenzen = grenzen(&neuheit, fenster.len());
 
     let mut abschnitte = zusammenfassen(&fenster, &merkmale, &grenzen, sample_rate, grid);
-    benennen(&mut abschnitte, &merkmale);
+    benennen(&mut abschnitte);
 
     Some(Struktur {
         abschnitte,
@@ -378,15 +378,33 @@ fn zusammenfassen(
 /// Alle Schwellen sind **Quantile des Tracks selbst**. Eine absolute Zahl wäre
 /// eine Behauptung über alle Musik; ein Quantil ist eine über diesen Track, und
 /// die lässt sich wenigstens einhalten.
-fn benennen(abschnitte: &mut [Abschnitt], m: &Merkmale) {
+/// Gibt den Abschnitten ihre Namen.
+///
+/// **Die Quantile werden über die Abschnitte gebildet, nicht über die
+/// Phrasen.** Das klingt nach einer Feinheit und ist keine: Verglichen wird ein
+/// Abschnitts*mittel*, und ein Mittel liegt immer unter der lautesten Phrase
+/// darin. Bei einem Track, der die meiste Zeit oben ist, rutscht der
+/// Phrasen-Median damit fast auf die Spitze — und *jeder* Abschnitt fällt
+/// darunter. Ein Stück mit 90 Sekunden Vollgas wurde so zu „Intro, Break,
+/// Outro": als wäre es durchweg leise gewesen.
+///
+/// Gefunden beim ersten Lauf gegen ein Stück ohne inneren Kontrast, nicht im
+/// Test — dieselbe Falle wie schon dreimal: eine Schwelle, geeicht an Material,
+/// das zufällig die richtige Verteilung hatte.
+fn benennen(abschnitte: &mut [Abschnitt]) {
     let q = |werte: &[f32], anteil: f32| {
         let mut s = werte.to_vec();
         s.sort_by(f32::total_cmp);
         let spitze = s.last().copied().unwrap_or(1.0).max(1e-9);
         s[((s.len() - 1) as f32 * anteil) as usize] / spitze
     };
-    let p50 = q(&m.pegel, 0.5);
-    let b75 = q(&m.bass, 0.75);
+    let pegel: Vec<f32> = abschnitte.iter().map(|a| a.pegel).collect();
+    let bass: Vec<f32> = abschnitte.iter().map(|a| a.bass).collect();
+    if pegel.is_empty() {
+        return;
+    }
+    let p50 = q(&pegel, 0.5);
+    let b75 = q(&bass, 0.75);
 
     let letzter = abschnitte.len().saturating_sub(1);
     for (i, a) in abschnitte.iter_mut().enumerate() {
@@ -576,6 +594,58 @@ mod tests {
             ende as usize,
             samples.len() / CHANNELS,
             "der Schwanz des Tracks fehlt in der Gliederung"
+        );
+    }
+
+    /// **Ein Track, der die meiste Zeit oben ist, ist nicht durchweg leise.**
+    ///
+    /// Gefunden beim ersten Lauf gegen so ein Stück, nicht im Test: Ein kurzes
+    /// Intro, sechs Phrasen Vollgas, ein kurzes Outro — und die Mitte hieß
+    /// `break`. Der Grund war, dass die Quantile über *Phrasen* gebildet
+    /// wurden, verglichen aber mit Abschnitts*mitteln*. Ein Mittel liegt immer
+    /// unter der lautesten Phrase darin; ist die Mehrheit der Phrasen laut,
+    /// liegt der Median fast auf der Spitze, und dann fällt jeder Abschnitt
+    /// darunter.
+    ///
+    /// Das ist beim gebauten Prüfmaterial nie aufgefallen, weil dort laute und
+    /// leise Teile sich abwechseln und der Median genau dazwischen landet —
+    /// dieselbe Falle wie bei der Tempo-Schwelle an Klick-Tracks.
+    #[test]
+    fn ein_stueck_das_meist_oben_ist_heisst_nicht_break() {
+        // Kurzes Intro, sechs Phrasen laut, kurzes Outro. **Die lauten Teile
+        // sind nicht exakt gleich laut** — bei perfekt gleichen Phrasen fällt
+        // der Fehler nicht auf, weil das Abschnittsmittel dann genau auf dem
+        // Median liegt und die Prüfung `>=` gerade noch hält. Genau daran ist
+        // der erste Anlauf dieses Tests vorbeigelaufen.
+        let s = gliedern(&bauen(&[
+            (false, false, 0.20),
+            (true, true, 0.34),
+            (true, true, 0.28),
+            (true, true, 0.31),
+            (true, true, 0.29),
+            (true, true, 0.33),
+            (true, true, 0.30),
+            (false, false, 0.20),
+        ]));
+
+        let mitte: Vec<Art> = s
+            .abschnitte
+            .iter()
+            .filter(|a| a.pegel > 0.8)
+            .map(|a| a.art)
+            .collect();
+        assert!(
+            !mitte.is_empty(),
+            "kein lauter Abschnitt: {:?}",
+            s.abschnitte
+        );
+        assert!(
+            mitte.iter().all(|a| *a == Art::Drop),
+            "der laute Teil heißt {mitte:?}, nicht Drop: {:?}",
+            s.abschnitte
+                .iter()
+                .map(|a| (a.art, a.pegel, a.bass))
+                .collect::<Vec<_>>()
         );
     }
 

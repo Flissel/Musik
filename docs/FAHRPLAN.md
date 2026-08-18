@@ -284,21 +284,55 @@ Falsches zu sagen.
 Für ein Team ist der Bogen zugleich das, worüber man sich einig sein muss: Ohne
 ihn verhandeln zwei Agenten über den nächsten Track ohne gemeinsamen Maßstab.
 
-## P5 — Der Raum schließt die Schleife (S6)
+## P5 — Der Raum schließt die Schleife (S6) ✅
 
-*Braucht P4, sonst gibt es nichts zu lenken.*
+*Brauchte P4, sonst gäbe es nichts zu lenken.*
 
-Die vier Signalplätze existieren, aber im ersten Lauf war der Raum Deko: Werte
+Die vier Signalplätze existierten, aber im ersten Lauf war der Raum Deko: Werte
 gingen hinein, und nichts hat darauf reagiert. Das Set war durchprogrammiert.
 
-Die Schleife schließt sich, wenn der **Trend** eines Signals die Auswahl und den
-Bogen verändert, nicht nur einen Regler — und wenn das System dabei sagt, warum:
-„Andrang fällt seit drei Minuten, ich nehme den ruhigeren mit dem langen Intro
-statt des Peaks."
+Jetzt beugt der **Trend** eines Signals das Ziel des Bogens (`master.room`,
+`master.room_bend`) und damit `arc_gap` — und `do master.search_next` sortiert
+die Sammlung danach, mit einem Grund je Zeile:
 
-Offen bleibt dabei die Quelle. Ein Mikrofonpegel, eine Umfrage auf dem Handy,
-ein Mensch, der im Chat „wird voller" tippt — das ist eine Entscheidung über den
-Aufbau im Raum und keine Softwarefrage.
+```text
+weil Andrang fällt (-0.40/min), Ziel 0.70 → 0.50; es läuft 0.90, weniger gesucht (-0.40)
+track 126.00 8A /musik/blaue-stunde.wav Blaue Stunde — Energie 0.48 (-0.02 zum Ziel 0.50), harmonisch
+```
+
+Drei Entscheidungen tragen das:
+
+**Der Raum verschiebt das Ziel, nicht die Kurve.** `master.arc` bleibt, was
+jemand aufgeschrieben hat; `arc_curve` zeigt es unverändert. Am Ende des Abends
+lässt sich so vergleichen, was geplant war und was geschah — eine Anlage, die
+ihren eigenen Plan überschreibt, hat nichts mehr, woran sie sich messen ließe.
+
+**Gebeugt wird nach dem Trend, nicht nach dem Wert.** Die Höhe eines Signals ist
+nichts Vergleichbares: Was „0,6 Andrang" bedeutet, weiß nur, wer den Sender
+geschrieben hat. Eine Änderung ist dagegen eine Aussage über denselben Sender.
+Das ist derselbe Fehler, der beim Ist-Wert des Bogens schon einmal auffiel —
+zweimal fast hineingelaufen, zweimal an derselben Stelle.
+
+**Höchstens 0,25 Beugung.** Ein hängender oder falsch skalierter Sender darf das
+Set nicht übernehmen; das wäre schlimmer als ein Set, das den Raum ignoriert.
+
+Die Energie eines Tracks kommt aus seiner Gliederung, nach Länge gewichtet, und
+liegt in der Analyse-Datei neben dem Track statt in der Datenbank — sie hängt am
+Inhalt, nicht am Eintrag, und ein neu analysierter Track bringt sie mit, ohne
+dass jemand die Sammlung nachpflegt. **Ein nicht analysierter Track steht hinten
+und sagt das.**
+
+**Und sie misst keine Lautstärke.** Die Abschnittsarten werden je Track gegen
+dessen eigene Quantile benannt; der Drop eines leisen Stücks heißt genauso
+„Drop". Was herauskommt, ist, wie viel seiner Länge ein Track auf seinem eigenen
+Höhepunkt verbringt — für den Aufbau eines Sets die brauchbarere Größe, für die
+Frage „welches Stück ist härter?" die falsche. Das steht so im Modul, weil genau
+diese Verwechslung in diesem Projekt schon zweimal ein Fehler war.
+
+Offen bleibt die Quelle. Ein Mikrofonpegel, eine Umfrage auf dem Handy, ein
+Mensch, der im Chat „wird voller" tippt — das ist eine Entscheidung über den
+Aufbau im Raum und keine Softwarefrage. Bis dahin ist die Schleife gebaut und
+läuft mit der Hand am Regler.
 
 ## P6 — Stems (S5)
 
@@ -367,7 +401,7 @@ bräuchte es einen zweiten Weg für die Steuerung); MIDI-Controller (Phase 10).
 | P2 ◐ | Das Team | Der Zweck des Projekts; alles darüber wäre sonst zweimal gebaut | Stufe 2: zwei Modelle |
 | P3 ✅ | Geste und Repertoire | Sofort hörbar, seit S1 messbar | — |
 | P4 ✅ | Der Bogen | Braucht S2; für ein Team der gemeinsame Maßstab | P2 |
-| P5 | Der Raum | Braucht den Bogen, sonst gibt es nichts zu lenken | P4, Quelle |
+| P5 ✅ | Der Raum | Braucht den Bogen, sonst gibt es nichts zu lenken | P4, Quelle |
 | P6 | Stems | Größter Klanggewinn, größtes Risiko, braucht Streaming | — |
 | M1–M6 | Musik, Gerät, Ohren | Nicht von hier aus zu erledigen | dir |
 | N1–N3 | Nachweise | Läuft nebenher | P1 |
