@@ -65,6 +65,31 @@ impl Wsola {
     /// `ratio` das Tempoverhältnis (1.0 = Original). Gibt `false` zurück, wenn
     /// die Quelle erschöpft ist; der Rest von `out` ist dann Stille.
     pub fn render(&mut self, src: &[f32], ratio: f64, pos: &mut f64, out: &mut [f32]) -> bool {
+        self.render_gemischt(src, std::slice::from_ref(&src), &[1.0], ratio, pos, out)
+    }
+
+    /// Dasselbe aus mehreren Spuren, jede mit ihrem Pegel.
+    ///
+    /// **Gesucht wird auf der Summe, angewandt auf jede Spur.** Das ist der
+    /// Kern: Die Zeitstreckung sucht sich in jedem Hop die Stelle, an der die
+    /// Wellenform am besten anschließt. Liefe diese Suche je Spur getrennt,
+    /// fände jede eine andere — vier Spuren desselben Stücks liefen um
+    /// Millisekunden auseinander, und was vorher zusammen klang, klänge
+    /// verwaschen. Eine Entscheidung für alle, und `referenz` ist die Summe,
+    /// die ohnehin schon dasteht.
+    ///
+    /// Gemischt wird beim Lesen und nicht danach. Das ist dasselbe Ergebnis —
+    /// dieselbe Stelle, dasselbe Fenster —, kostet aber einen statt vier
+    /// Akkumulatoren, und im Audio-Callback zählt das.
+    pub fn render_gemischt(
+        &mut self,
+        referenz: &[f32],
+        spuren: &[&[f32]],
+        pegel: &[f32],
+        ratio: f64,
+        pos: &mut f64,
+        out: &mut [f32],
+    ) -> bool {
         let mut written = 0;
 
         while written < out.len() {
@@ -77,7 +102,7 @@ impl Wsola {
                 continue;
             }
 
-            if !self.produce_hop(src, ratio, pos) {
+            if !self.produce_hop(referenz, spuren, pegel, ratio, pos) {
                 out[written..].fill(0.0);
                 return false;
             }
@@ -87,8 +112,20 @@ impl Wsola {
     }
 
     /// Erzeugt genau einen Hop Ausgangsmaterial in den FIFO.
-    fn produce_hop(&mut self, src: &[f32], ratio: f64, pos: &mut f64) -> bool {
-        let src_frames = src.len() / CHANNELS;
+    fn produce_hop(
+        &mut self,
+        referenz: &[f32],
+        spuren: &[&[f32]],
+        pegel: &[f32],
+        ratio: f64,
+        pos: &mut f64,
+    ) -> bool {
+        let src_frames = spuren
+            .iter()
+            .map(|s| s.len() / CHANNELS)
+            .chain(std::iter::once(referenz.len() / CHANNELS))
+            .min()
+            .unwrap_or(0);
         if src_frames < FRAME {
             return false;
         }
@@ -102,14 +139,18 @@ impl Wsola {
             return false;
         }
 
-        let start = self.best_offset(src, ideal as usize, max_start);
+        let start = self.best_offset(referenz, ideal as usize, max_start);
 
         for i in 0..FRAME {
             let w = self.window[i];
             let s = (start + i) * CHANNELS;
             let a = i * CHANNELS;
             for c in 0..CHANNELS {
-                self.accum[a + c] += src[s + c] * w;
+                let mut summe = 0.0;
+                for (spur, p) in spuren.iter().zip(pegel) {
+                    summe += spur[s + c] * p;
+                }
+                self.accum[a + c] += summe * w;
             }
         }
 

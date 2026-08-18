@@ -270,6 +270,17 @@ pub static DECK: &[Beschreibung] = &[
         false,
         "Beats bis zur nächsten Phrasengrenze — dort setzt man ein, nicht irgendwo",
     ),
+    // Einzelspuren (P6). Ohne sie lässt sich „zwei Stimmen gleichzeitig" nur
+    // vermeiden, indem man gar nicht überlagert.
+    zahl(
+        "stems",
+        "",
+        0.0,
+        4.0,
+        Einheit::Keine,
+        false,
+        "Wie viele Einzelspuren der geladene Track hat; 0 heißt: keine",
+    ),
     schalter("loop_active", "LOOP", true, "Läuft gerade eine Schleife"),
     zahl(
         "loop_beats",
@@ -399,6 +410,48 @@ pub fn hot_cue_beschreibung(index: usize) -> Option<Beschreibung> {
 static HOT_CUE_NAMEN: [&str; HOT_CUES] = [
     "cue1", "cue2", "cue3", "cue4", "cue5", "cue6", "cue7", "cue8",
 ];
+
+/// Wie viele Einzelspuren ein Deck führt. Muss zu `audio_core::MAX_STEMS`
+/// passen.
+pub const MAX_STEMS: usize = audio_core::MAX_STEMS;
+
+/// Einzelspuren heißen `stem1_level` bis `stem4_name` — aus demselben Grund
+/// wie die Hot Cues zur Laufzeit gebaut statt achtmal hingeschrieben.
+pub fn stem_beschreibung(index: usize, feld: &str) -> Option<Beschreibung> {
+    if index >= MAX_STEMS {
+        return None;
+    }
+    Some(match feld {
+        "name" => Beschreibung {
+            element: STEM_NAMEN[index],
+            kurz: "",
+            art: Art::Text,
+            bereich: None,
+            einheit: Einheit::Keine,
+            auswahl: &[],
+            schreibbar: false,
+            argument: "",
+            text: "Wie die Einzelspur heißt — kommt aus dem Dateinamen. \
+Leer, wenn der Track so viele Spuren nicht hat",
+        },
+        "level" => Beschreibung {
+            element: STEM_PEGEL[index],
+            kurz: "STEM",
+            art: Art::Zahl,
+            bereich: Some((0.0, 1.0)),
+            einheit: Einheit::Keine,
+            auswahl: &[],
+            schreibbar: true,
+            argument: "",
+            text: "Pegel dieser Einzelspur. 0 nimmt sie heraus — damit lässt \
+sich die Stimme des ausgehenden Tracks wegnehmen, während der neue kommt",
+        },
+        _ => return None,
+    })
+}
+
+static STEM_NAMEN: [&str; MAX_STEMS] = ["stem1_name", "stem2_name", "stem3_name", "stem4_name"];
+static STEM_PEGEL: [&str; MAX_STEMS] = ["stem1_level", "stem2_level", "stem3_level", "stem4_level"];
 
 /// Ein Kanalzug, in der Reihenfolge, in der er am Gerät steht.
 ///

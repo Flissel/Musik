@@ -85,6 +85,7 @@ mod tests {
         Track {
             samples: click_track(bpm, 44_100, secs, 0.0),
             sample_rate: 44_100,
+            stems: Vec::new(),
         }
     }
 
@@ -111,6 +112,7 @@ mod tests {
         let t = Track {
             samples: akkordfolge(0, false),
             sample_rate: 44_100,
+            stems: Vec::new(),
         };
         let a = analyze(&t);
 
@@ -141,6 +143,7 @@ mod tests {
         let t = Track {
             samples,
             sample_rate: 44_100,
+            stems: Vec::new(),
         };
 
         let a = analyze(&t);

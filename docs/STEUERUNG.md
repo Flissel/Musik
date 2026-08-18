@@ -911,6 +911,58 @@ eine will Druck, der andere Luft, und beide haben recht, weil es keinen Satz
 gibt, gegen den sich das prüfen ließe. Mit ihm heißt die Frage nicht mehr
 „welcher Track ist gut", sondern „was fehlt hier gerade".
 
+## Einzelspuren: die Stimme wegnehmen
+
+Zwei Stimmen gleichzeitig sind der hörbarste Mixfehler überhaupt, und ohne
+Trennung lässt er sich nur vermeiden, indem man gar nicht überlagert.
+
+```text
+get deck1.stems        → value deck1.stems 3
+get deck1.stem3_name   → value deck1.stem3_name vocals
+set deck1.stem3_level 0
+```
+
+| Control | Was |
+| --- | --- |
+| `stems` | wie viele Einzelspuren der geladene Track hat |
+| `stemN_name` | wie die Spur heißt — aus dem Dateinamen |
+| `stemN_level` | ihr Pegel, 0 bis 1; schreibbar |
+
+**Wo die Spuren liegen:** neben der Datei in einem Ordner gleichen Namens mit
+der Endung `.stems` — zu `nachtschicht.wav` also `nachtschicht.stems/` mit
+`vocals.wav`, `drums.wav`, `bass.wav`, `other.wav`. Kein neues Dateiformat,
+keine neue Abhängigkeit, und genau die Form, in der die gängigen Trennwerkzeuge
+ihr Ergebnis ablegen. Ein eigenes Stem-Format zu lesen wäre die Alternative
+gewesen: eine MP4-Datei mit fünf AAC-Spuren, die einem Hersteller gehört. Ein
+Ordner mit vier WAV-Dateien gehört niemandem.
+
+**Getrennt wird hier nicht.** Eine Stimme aus einer Mischung zu lösen ist Arbeit
+für ein neuronales Netz, ein eigenes Werkzeug und eine eigene Lizenzfrage.
+Gelesen wird, was jemand anders getrennt hat. Ohne Ordner verhält sich alles wie
+vorher — kein Sonderweg, den jemand einschalten müsste.
+
+**Die Zeitstreckung entscheidet einmal für alle Spuren.** Sie sucht sich in
+jedem Hop die Stelle, an der die Wellenform am besten anschließt; liefe diese
+Suche je Spur getrennt, fände jede eine andere, und was vorher zusammen klang,
+klänge verwaschen. Gesucht wird deshalb auf der Summe, angewandt auf jede Spur.
+Ein Wächter misst das: Mit vollen Pegeln muss dasselbe herauskommen wie beim
+Strecken der Summe, Ton für Ton.
+
+Gemessen am laufenden Programm, zwei Mitschnitte desselben Stücks:
+
+| | Energie bei 1500 Hz | Gesamtpegel |
+| --- | --- | --- |
+| mit Stimme | 9,8 · 10⁻⁵ | 0,061 |
+| ohne Stimme | 4,9 · 10⁻⁹ | 0,039 |
+
+Die Stimme ist um den Faktor 20 000 weg, Drums und Bass stehen.
+
+**Was noch fehlt: Streaming von Platte.** Vier Spuren kosten das Fünffache eines
+Tracks, weil die Summe daneben stehen bleibt — rund 500 MB je Deck bei fünf
+Minuten. Für zwei Decks geht das; für die vier, die der Plan vorsieht, braucht
+es Streaming. Das steht bewusst noch aus: Der Abspielpfad ist der einzige Teil
+mit Echtzeitauflagen, und Platten-I/O gehört dort zuletzt hinein.
+
 ## Der Raum: was draußen geschieht, verschiebt das Ziel
 
 Die vier Signalplätze gab es lange, aber sie waren Deko — Werte gingen hinein,

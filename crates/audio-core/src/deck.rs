@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 
 use crate::grid::Beatgrid;
 use crate::stretch::Wsola;
-use crate::track::{CHANNELS, Track};
+use crate::track::{CHANNELS, MAX_STEMS, Track};
 
 /// Unterhalb dieser Abweichung von 1.0 wird direkt kopiert statt gestreckt.
 const TEMPO_EPS: f64 = 1e-4;
@@ -41,6 +41,12 @@ pub struct DeckState {
     loop_start: AtomicI64,
     loop_end: AtomicI64,
     loop_active: AtomicBool,
+
+    /// Pegel je Einzelspur, 0 bis 1. Ohne Stems ohne Wirkung.
+    ///
+    /// Als Atomics und nicht hinter einem Lock, aus demselben Grund wie das
+    /// Grid: Der Audio-Thread liest sie in jedem Block.
+    stem_pegel: [AtomicU32; MAX_STEMS],
 }
 
 impl Default for DeckState {
@@ -64,6 +70,23 @@ impl DeckState {
             loop_start: AtomicI64::new(-1),
             loop_end: AtomicI64::new(-1),
             loop_active: AtomicBool::new(false),
+            // Voll auf: Ein frisch geladener Track klingt mit Stems genauso
+            // wie ohne, bis jemand etwas wegnimmt.
+            stem_pegel: std::array::from_fn(|_| AtomicU32::new(1.0f32.to_bits())),
+        }
+    }
+
+    /// Pegel einer Einzelspur, 0 bis 1.
+    pub fn stem_pegel(&self, i: usize) -> f32 {
+        self.stem_pegel
+            .get(i)
+            .map(|p| f32::from_bits(p.load(Ordering::Relaxed)))
+            .unwrap_or(0.0)
+    }
+
+    pub fn set_stem_pegel(&self, i: usize, wert: f32) {
+        if let Some(p) = self.stem_pegel.get(i) {
+            p.store(wert.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         }
     }
 
@@ -329,11 +352,45 @@ impl Voice {
             let len = chunk.max(1) * CHANNELS;
             let len = len.min(rest.len());
 
+            // Die Felder einzeln ausleihen: `track` liest, `wsola` und `pos`
+            // schreiben. Ohne das Zerlegen hielte `self` beides zugleich.
+            let Voice {
+                track,
+                state,
+                wsola,
+                pos,
+                ..
+            } = self;
+
+            // Auf dem Stapel, nicht im Vec: Eine Speicheranforderung je Block
+            // wäre die eine Sache, die im Audio-Callback nie passieren darf.
+            let mut spuren: [&[f32]; MAX_STEMS] = [&[]; MAX_STEMS];
+            let mut pegel: [f32; MAX_STEMS] = [0.0; MAX_STEMS];
+            let mut n = 0;
+            for (i, stem) in track.stems.iter().enumerate().take(MAX_STEMS) {
+                spuren[i] = &stem.samples;
+                pegel[i] = state.stem_pegel(i);
+                n = i + 1;
+            }
+            // Ohne Stems die Summe als einzige Spur — derselbe Weg, dieselbe
+            // Rechnung, damit es nur eine Stelle gibt, die stimmen muss.
+            if n == 0 {
+                spuren[0] = &track.samples;
+                pegel[0] = 1.0;
+                n = 1;
+            }
+
             alive = if want_stretch {
-                self.wsola
-                    .render(&self.track.samples, tempo, &mut self.pos, &mut rest[..len])
+                wsola.render_gemischt(
+                    &track.samples,
+                    &spuren[..n],
+                    &pegel[..n],
+                    tempo,
+                    pos,
+                    &mut rest[..len],
+                )
             } else {
-                varispeed(&self.track.samples, tempo, &mut self.pos, &mut rest[..len])
+                varispeed_gemischt(&spuren[..n], &pegel[..n], tempo, pos, &mut rest[..len])
             };
 
             written += len;
@@ -409,8 +466,27 @@ impl Voice {
 
 /// Abspielen mit veränderter Rate — Tempo *und* Tonhöhe wandern mit, wie beim
 /// Pitchfader eines Plattenspielers. Das ist der Modus ohne Keylock.
+/// Eine einzelne Spur — der Weg, wenn ein Track keine Einzelspuren hat.
+#[cfg(test)]
 fn varispeed(src: &[f32], ratio: f64, pos: &mut f64, out: &mut [f32]) -> bool {
-    let frames = src.len() / CHANNELS;
+    varispeed_gemischt(std::slice::from_ref(&src), &[1.0], ratio, pos, out)
+}
+
+/// Dasselbe aus mehreren Spuren, jede mit ihrem Pegel.
+///
+/// Die Spuren werden an *derselben* Position gelesen und dort summiert. Das ist
+/// nicht nur billiger als vier getrennte Durchläufe, es ist auch der einzige
+/// Weg, der stimmt: Vier Spuren, die jede für sich interpoliert würden, blieben
+/// zwar synchron, aber jede Abweichung im Zeitverhalten wäre hörbar als
+/// Verwaschen — und beim Zeitstrecken wird genau daraus ein Problem.
+fn varispeed_gemischt(
+    spuren: &[&[f32]],
+    pegel: &[f32],
+    ratio: f64,
+    pos: &mut f64,
+    out: &mut [f32],
+) -> bool {
+    let frames = spuren.iter().map(|s| s.len() / CHANNELS).min().unwrap_or(0);
     if frames < 2 {
         out.fill(0.0);
         return false;
@@ -427,9 +503,13 @@ fn varispeed(src: &[f32], ratio: f64, pos: &mut f64, out: &mut [f32]) -> bool {
         let frac = (*pos - idx as f64) as f32;
 
         for c in 0..CHANNELS {
-            let a = src[idx * CHANNELS + c];
-            let b = src[(idx + 1) * CHANNELS + c];
-            out[i * CHANNELS + c] = a + (b - a) * frac;
+            let mut summe = 0.0;
+            for (spur, p) in spuren.iter().zip(pegel) {
+                let a = spur[idx * CHANNELS + c];
+                let b = spur[(idx + 1) * CHANNELS + c];
+                summe += (a + (b - a) * frac) * p;
+            }
+            out[i * CHANNELS + c] = summe;
         }
 
         *pos += ratio;
@@ -490,6 +570,7 @@ mod tests {
         let track = Arc::new(Track {
             samples: sine(440.0, RATE, secs),
             sample_rate: RATE,
+            stems: Vec::new(),
         });
         let state = Arc::new(DeckState::new());
         state.set_playing(true);
@@ -532,6 +613,7 @@ mod tests {
         let track = Arc::new(Track {
             samples: sine(220.0, RATE, 10.0),
             sample_rate: RATE,
+            stems: Vec::new(),
         });
         let mut neu = Voice::new(track, Arc::clone(&state));
         neu.render_stereo(&mut aus);
@@ -698,5 +780,146 @@ mod tests {
 
         assert!(!state.is_finished());
         assert!(state.is_playing());
+    }
+}
+
+#[cfg(test)]
+mod stem_tests {
+    use super::*;
+    use crate::testing::{dominant_freq, sine};
+    use crate::track::Stem;
+
+    const RATE: u32 = 44_100;
+
+    /// Zwei Spuren mit verschiedenen Tönen, dazu die Summe.
+    fn track_mit_zwei_stems(secs: f32) -> Arc<Track> {
+        let tief = sine(220.0, RATE, secs);
+        let hoch = sine(880.0, RATE, secs);
+        let summe: Vec<f32> = tief.iter().zip(&hoch).map(|(a, b)| a + b).collect();
+        Arc::new(Track {
+            samples: summe,
+            sample_rate: RATE,
+            stems: vec![
+                Stem {
+                    name: "tief".into(),
+                    samples: tief,
+                },
+                Stem {
+                    name: "hoch".into(),
+                    samples: hoch,
+                },
+            ],
+        })
+    }
+
+    fn spielen(track: Arc<Track>, state: Arc<DeckState>, secs: f32) -> Vec<f32> {
+        let mut voice = Voice::new(track, state);
+        let mut aus = vec![0.0; (RATE as f32 * secs) as usize * CHANNELS];
+        voice.render_stereo(&mut aus);
+        aus
+    }
+
+    /// **Der Zweck der ganzen Übung:** eine Spur wegnehmen, der Rest bleibt.
+    ///
+    /// Zwei Stimmen gleichzeitig sind der hörbarste Mixfehler überhaupt. Ohne
+    /// Trennung lässt er sich nur vermeiden, indem man gar nicht überlagert.
+    #[test]
+    fn eine_spur_laesst_sich_wegnehmen() {
+        let state = Arc::new(DeckState::new());
+        state.set_playing(true);
+        state.set_keylock(false);
+
+        // Beide offen: Man hört beides.
+        let beide = spielen(track_mit_zwei_stems(4.0), Arc::clone(&state), 2.0);
+        let pegel_beide = beide.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
+        assert!(pegel_beide > 1.5, "beide Spuren fehlen: {pegel_beide:.3}");
+
+        // Die hohe zu: Es bleibt die tiefe, und man erkennt sie an ihrem Ton.
+        state.set_stem_pegel(1, 0.0);
+        let nur_tief = spielen(track_mit_zwei_stems(4.0), Arc::clone(&state), 2.0);
+        let freq = dominant_freq(&nur_tief, RATE);
+        assert!(
+            (freq - 220.0).abs() < 6.0,
+            "ohne die hohe Spur sollten 220 Hz übrig bleiben, gemessen {freq:.1} Hz"
+        );
+
+        // Und umgekehrt.
+        state.set_stem_pegel(1, 1.0);
+        state.set_stem_pegel(0, 0.0);
+        let nur_hoch = spielen(track_mit_zwei_stems(4.0), Arc::clone(&state), 2.0);
+        let freq = dominant_freq(&nur_hoch, RATE);
+        assert!(
+            (freq - 880.0).abs() < 12.0,
+            "ohne die tiefe Spur sollten 880 Hz übrig bleiben, gemessen {freq:.1} Hz"
+        );
+    }
+
+    /// Ein Track ohne Stems klingt genau wie vorher — und einer mit Stems, bei
+    /// dem alles offen steht, klingt wie seine Summe.
+    #[test]
+    fn voll_aufgedrehte_stems_klingen_wie_die_summe() {
+        let state = Arc::new(DeckState::new());
+        state.set_playing(true);
+        state.set_keylock(false);
+        let mit = spielen(track_mit_zwei_stems(4.0), Arc::clone(&state), 1.0);
+
+        let track = track_mit_zwei_stems(4.0);
+        let ohne = Arc::new(Track {
+            samples: track.samples.clone(),
+            sample_rate: RATE,
+            stems: Vec::new(),
+        });
+        let state2 = Arc::new(DeckState::new());
+        state2.set_playing(true);
+        state2.set_keylock(false);
+        let ohne = spielen(ohne, state2, 1.0);
+
+        let groesster: f32 = mit
+            .iter()
+            .zip(&ohne)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
+        assert!(
+            groesster < 1e-6,
+            "Stems und Summe klingen verschieden, größter Unterschied {groesster:.2e}"
+        );
+    }
+
+    /// **Die Zeitstreckung entscheidet einmal für alle Spuren.**
+    ///
+    /// Sie sucht sich in jedem Hop die Stelle, an der die Wellenform am besten
+    /// anschließt. Liefe diese Suche je Spur getrennt, fände jede eine andere,
+    /// und was vorher zusammen klang, klänge verwaschen. Geprüft wird das am
+    /// Ergebnis: Mit Keylock und vollen Pegeln muss dasselbe herauskommen wie
+    /// beim Strecken der Summe — Ton für Ton.
+    #[test]
+    fn die_zeitstreckung_entscheidet_einmal_fuer_alle_spuren() {
+        let state = Arc::new(DeckState::new());
+        state.set_playing(true);
+        state.set_keylock(true);
+        state.set_tempo(1.06);
+        let mit = spielen(track_mit_zwei_stems(6.0), Arc::clone(&state), 2.0);
+
+        let track = track_mit_zwei_stems(6.0);
+        let ohne = Arc::new(Track {
+            samples: track.samples.clone(),
+            sample_rate: RATE,
+            stems: Vec::new(),
+        });
+        let state2 = Arc::new(DeckState::new());
+        state2.set_playing(true);
+        state2.set_keylock(true);
+        state2.set_tempo(1.06);
+        let ohne = spielen(ohne, state2, 2.0);
+
+        let groesster: f32 = mit
+            .iter()
+            .zip(&ohne)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f32::max);
+        assert!(
+            groesster < 1e-5,
+            "gestreckte Stems weichen von der gestreckten Summe ab, größter Unterschied {groesster:.2e}"
+        );
     }
 }

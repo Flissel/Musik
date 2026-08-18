@@ -287,6 +287,7 @@ fn lade_oder_synthetisiere(
                 Track {
                     samples,
                     sample_rate: rate,
+                    stems: Vec::new(),
                 },
                 Some(bpm),
             )

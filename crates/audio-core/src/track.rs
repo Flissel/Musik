@@ -17,9 +17,28 @@ use crate::error::{AudioError, Result};
 pub struct Track {
     pub samples: Vec<f32>,
     pub sample_rate: u32,
+    /// Die Einzelspuren, falls es welche gibt — siehe [`Track::mit_stems`].
+    ///
+    /// `samples` bleibt die Summe. Das kostet Speicher und ist es wert: Analyse,
+    /// Wellenform und die Suche der Zeitstreckung arbeiten weiter auf einer
+    /// einzigen Spur, und ein Deck ohne Stems ändert sich überhaupt nicht.
+    pub stems: Vec<Stem>,
+}
+
+/// Eine Einzelspur — Stimme, Drums, Bass, Rest.
+pub struct Stem {
+    pub name: String,
+    pub samples: Vec<f32>,
 }
 
 pub const CHANNELS: usize = 2;
+
+/// Wie viele Einzelspuren ein Deck höchstens führt.
+///
+/// Vier ist die übliche Aufteilung (Stimme, Drums, Bass, Rest) und zugleich
+/// die Grenze, die den Steuerraum statisch hält — dieselbe Entscheidung wie
+/// bei den Hot Cues und den Signalplätzen.
+pub const MAX_STEMS: usize = 4;
 
 impl Track {
     pub fn frames(&self) -> usize {
@@ -95,7 +114,85 @@ impl Track {
         Ok(Track {
             samples,
             sample_rate,
+            stems: Vec::new(),
         })
+    }
+
+    /// Lädt einen Track samt seiner Einzelspuren.
+    ///
+    /// # Wo die Stems liegen
+    ///
+    /// Neben der Datei in einem Ordner gleichen Namens mit der Endung
+    /// `.stems`: zu `nachtschicht.wav` also `nachtschicht.stems/` mit
+    /// `vocals.wav`, `drums.wav`, `bass.wav`, `other.wav`. Kein neues
+    /// Dateiformat, keine neue Abhängigkeit — und genau die Form, in der die
+    /// gängigen Trennwerkzeuge ihr Ergebnis ablegen.
+    ///
+    /// Ein eigenes Stem-Format zu lesen wäre die Alternative gewesen. Es ist
+    /// eine MP4-Datei mit fünf AAC-Spuren und gehört einem Hersteller; ein
+    /// Ordner mit vier WAV-Dateien gehört niemandem.
+    ///
+    /// # Was hier *nicht* passiert
+    ///
+    /// **Getrennt wird nicht.** Eine Stimme aus einer Mischung zu lösen ist
+    /// Arbeit für ein neuronales Netz, ein eigenes Werkzeug und eine eigene
+    /// Lizenzfrage. Hier wird gelesen, was jemand anders getrennt hat.
+    ///
+    /// Ohne Ordner ist das Ergebnis dasselbe wie [`Track::decode_file`] — kein
+    /// Fehler, sondern der Normalfall.
+    ///
+    /// # Speicher
+    ///
+    /// Vier Stems kosten das Fünffache eines Tracks, weil die Summe daneben
+    /// stehen bleibt: rund 500 MB je Deck bei fünf Minuten. Für zwei Decks
+    /// geht das; für die vier Decks, die der Plan vorsieht, braucht es
+    /// Streaming von Platte. Das steht bewusst noch aus — der Abspielpfad ist
+    /// der einzige Teil mit Echtzeitauflagen, und Platten-I/O gehört dort
+    /// zuletzt hinein.
+    pub fn decode_mit_stems(path: &Path) -> Result<Track> {
+        let mut track = Track::decode_file(path)?;
+        let ordner = stem_ordner(path);
+        if !ordner.is_dir() {
+            return Ok(track);
+        }
+
+        let mut dateien: Vec<std::path::PathBuf> = std::fs::read_dir(&ordner)
+            .map(|d| {
+                d.flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Nach Namen, damit die Reihenfolge der Spuren reproduzierbar ist:
+        // `stem2_level` soll morgen dieselbe Spur meinen wie heute.
+        dateien.sort();
+
+        for datei in dateien.into_iter().take(MAX_STEMS) {
+            let Ok(stem) = Track::decode_file(&datei) else {
+                continue;
+            };
+            let stem = if stem.sample_rate == track.sample_rate {
+                stem
+            } else {
+                stem.resampled_to(track.sample_rate)
+            };
+            let name = datei
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            track.stems.push(Stem {
+                name,
+                samples: stem.samples,
+            });
+        }
+
+        // Eine einzelne Spur ist keine Trennung — sie zu führen kostete
+        // Speicher und brächte nichts, was `samples` nicht schon kann.
+        if track.stems.len() < 2 {
+            track.stems.clear();
+        }
+        Ok(track)
     }
 
     /// Bringt den Track auf die Rate des Ausgabegeräts.
@@ -110,26 +207,64 @@ impl Track {
 
         let ratio = self.sample_rate as f64 / target_rate as f64;
         let src_frames = self.frames();
-        let dst_frames = ((src_frames as f64) / ratio).floor() as usize;
-        let mut out = vec![0.0f32; dst_frames * CHANNELS];
 
-        for i in 0..dst_frames {
-            let pos = i as f64 * ratio;
-            let idx = pos.floor() as usize;
-            let frac = (pos - idx as f64) as f32;
-            let next = (idx + 1).min(src_frames - 1);
-            for c in 0..CHANNELS {
-                let a = self.samples[idx * CHANNELS + c];
-                let b = self.samples[next * CHANNELS + c];
-                out[i * CHANNELS + c] = a + (b - a) * frac;
-            }
-        }
+        // Die Einzelspuren müssen mit. Sie hier fallen zu lassen wäre der
+        // stillste denkbare Fehler: Der Track klänge richtig, nur ließe sich
+        // nichts mehr herausnehmen — und zwar genau auf den Geräten, deren
+        // Rate nicht zur Datei passt.
+        let stems = self
+            .stems
+            .iter()
+            .map(|stem| Stem {
+                name: stem.name.clone(),
+                samples: umrechnen(&stem.samples, ratio, src_frames),
+            })
+            .collect();
 
         Track {
-            samples: out,
+            samples: umrechnen(&self.samples, ratio, src_frames),
             sample_rate: target_rate,
+            stems,
         }
     }
+}
+
+/// Rechnet eine Spur auf eine andere Rate um, linear interpoliert.
+///
+/// `src_frames` ist die Länge der *Summe*: Alle Spuren eines Tracks werden auf
+/// dieselbe Länge gebracht, auch wenn eine Datei ein paar Frames länger ist als
+/// die andere. Sonst liefen sie am Ende auseinander.
+fn umrechnen(samples: &[f32], ratio: f64, src_frames: usize) -> Vec<f32> {
+    let eigene = samples.len() / CHANNELS;
+    let dst_frames = ((src_frames as f64) / ratio).floor() as usize;
+    let mut out = vec![0.0f32; dst_frames * CHANNELS];
+    if eigene == 0 {
+        return out;
+    }
+
+    for i in 0..dst_frames {
+        let pos = i as f64 * ratio;
+        let idx = (pos.floor() as usize).min(eigene - 1);
+        let frac = (pos - idx as f64) as f32;
+        let next = (idx + 1).min(eigene - 1);
+        for c in 0..CHANNELS {
+            let a = samples[idx * CHANNELS + c];
+            let b = samples[next * CHANNELS + c];
+            out[i * CHANNELS + c] = a + (b - a) * frac;
+        }
+    }
+    out
+}
+
+/// Wo die Einzelspuren zu einer Datei liegen: `nachtschicht.wav` →
+/// `nachtschicht.stems/`.
+pub fn stem_ordner(pfad: &Path) -> std::path::PathBuf {
+    let mut name = pfad
+        .file_stem()
+        .map(|s| s.to_os_string())
+        .unwrap_or_default();
+    name.push(".stems");
+    pfad.with_file_name(name)
 }
 
 /// Hängt einen dekodierten Block als Stereo an. Mono wird dupliziert, bei mehr
@@ -149,6 +284,65 @@ fn append_as_stereo(dst: &mut Vec<f32>, src: &[f32], src_channels: usize, frames
                 dst.push(src[i * n + 1]);
             }
         }
+    }
+}
+
+/// Ein Umrechnen, das die Einzelspuren fallen ließe, wäre der stillste
+/// denkbare Fehler: Der Track klänge richtig, nur ließe sich nichts mehr
+/// herausnehmen — und zwar genau auf den Geräten, deren Rate nicht zur Datei
+/// passt.
+#[cfg(test)]
+mod stem_tests {
+    use super::*;
+
+    fn spur(wert: f32, frames: usize) -> Vec<f32> {
+        vec![wert; frames * CHANNELS]
+    }
+
+    #[test]
+    fn beim_umrechnen_kommen_die_spuren_mit() {
+        let track = Track {
+            samples: spur(0.5, 1_000),
+            sample_rate: 44_100,
+            stems: vec![
+                Stem {
+                    name: "vocals".into(),
+                    samples: spur(0.2, 1_000),
+                },
+                Stem {
+                    name: "drums".into(),
+                    samples: spur(0.3, 1_000),
+                },
+            ],
+        };
+
+        let neu = track.resampled_to(48_000);
+        assert_eq!(neu.stems.len(), 2, "die Spuren sind weg");
+        assert_eq!(neu.stems[0].name, "vocals");
+        // Gleiche Länge wie die Summe — sonst laufen sie am Ende auseinander.
+        for stem in &neu.stems {
+            assert_eq!(
+                stem.samples.len(),
+                neu.samples.len(),
+                "{} ist anders lang als die Summe",
+                stem.name
+            );
+        }
+        assert!((neu.stems[1].samples[0] - 0.3).abs() < 1e-6);
+    }
+
+    /// Der Ordner heißt wie die Datei, nur mit `.stems` — und liegt daneben,
+    /// nicht darin.
+    #[test]
+    fn der_stem_ordner_liegt_neben_der_datei() {
+        assert_eq!(
+            stem_ordner(Path::new("/musik/nachtschicht.wav")),
+            Path::new("/musik/nachtschicht.stems")
+        );
+        assert_eq!(
+            stem_ordner(Path::new("nachtschicht.mp3")),
+            Path::new("nachtschicht.stems")
+        );
     }
 }
 

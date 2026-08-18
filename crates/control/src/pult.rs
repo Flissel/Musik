@@ -160,6 +160,11 @@ pub struct DeckEintrag {
     /// Stück in Achtergruppen und eines in Sechzehnern liegen gleichzeitig auf
     /// den Decks.
     pub phrase_beats: f64,
+    /// Namen der Einzelspuren, in der Reihenfolge, in der sie liegen.
+    ///
+    /// Leer heißt: Der Track hat keine. Die Pegel dazu stehen im `DeckState`,
+    /// weil der Audio-Thread sie in jedem Block liest — die Namen nie.
+    pub stems: Vec<String>,
 }
 
 pub use audio_core::struktur::PHRASE_BEATS;
@@ -185,6 +190,7 @@ impl DeckEintrag {
             pfad: String::new(),
             lade_status: "bereit".into(),
             phrase_beats: PHRASE_BEATS,
+            stems: Vec::new(),
         }
     }
 }
@@ -368,6 +374,13 @@ impl Steuerpult {
                     aus.push((Schluessel::neu(Gruppe::Deck(i), b.element), b));
                 }
             }
+            for stelle in 0..katalog::MAX_STEMS {
+                for feld in ["name", "level"] {
+                    if let Some(b) = katalog::stem_beschreibung(stelle, feld) {
+                        aus.push((Schluessel::neu(Gruppe::Deck(i), b.element), b));
+                    }
+                }
+            }
         }
 
         for (i, _) in self.kanaele.iter().enumerate() {
@@ -393,6 +406,10 @@ impl Steuerpult {
                 .or_else(|| {
                     self.hot_cue_index(&k.element)
                         .and_then(katalog::hot_cue_beschreibung)
+                })
+                .or_else(|| {
+                    Self::stem_teile(&k.element)
+                        .and_then(|(platz, feld)| katalog::stem_beschreibung(platz, feld))
                 }),
             Gruppe::Kanal(i) if i < self.kanaele.len() => katalog::KANAL
                 .iter()
@@ -482,8 +499,36 @@ impl Steuerpult {
         }
     }
 
+    /// Zerlegt `stem2_level` in Platz und Feld.
+    fn stem_teile(element: &str) -> Option<(usize, &'static str)> {
+        let rest = element.strip_prefix("stem")?;
+        let (nummer, feld) = match rest.split_once('_') {
+            Some((n, "name")) => (n, "name"),
+            Some((n, "level")) => (n, "level"),
+            _ => return None,
+        };
+        let nummer: usize = nummer.parse().ok()?;
+        if nummer == 0 || nummer > audio_core::MAX_STEMS {
+            return None;
+        }
+        Some((nummer - 1, feld))
+    }
+
     fn lies_deck(&self, i: usize, element: &str) -> Option<Wert> {
         let d = self.decks.get(i)?;
+
+        // Ein Platz ohne Spur behauptet nichts. `Leer` und nicht 0: Ein Pegel
+        // von 0 hieße „zugedreht", und das ist etwas anderes als „da ist
+        // nichts".
+        if let Some((platz, feld)) = Self::stem_teile(element) {
+            if platz >= d.stems.len() {
+                return Some(Wert::Leer);
+            }
+            return Some(match feld {
+                "name" => Wert::Text(d.stems[platz].clone()),
+                _ => Wert::Zahl(d.state.stem_pegel(platz) as f64),
+            });
+        }
         let rate = d.sample_rate as f64;
         let sek = |frames: u64| Wert::Zahl(frames as f64 / rate);
 
@@ -531,6 +576,7 @@ impl Steuerpult {
                 Some(b) => Wert::Zahl(b),
                 None => Wert::Leer,
             },
+            "stems" => Wert::Zahl(d.stems.len() as f64),
             "loop_active" => Wert::Schalter(d.state.is_looping()),
             "loop_beats" => match d.state.loop_range() {
                 // Aus der Schleifenlänge zurückgerechnet: Das Deck merkt sich
@@ -1607,6 +1653,25 @@ set master.arc und do master.arc_start"
         };
         let rate = d.sample_rate as f64;
 
+        // Ein Pegel für eine Spur, die es nicht gibt, wird abgewiesen statt
+        // stillschweigend geschluckt: Wer `stem3_level 0` schickt und nichts
+        // hört, soll erfahren, dass der Track nur zwei Spuren hat.
+        if let Some((platz, feld)) = Self::stem_teile(&k.element) {
+            if feld != "level" {
+                return Err(Fehler::NichtSchreibbar(k.to_string()));
+            }
+            if platz >= d.stems.len() {
+                return Err(Fehler::Gescheitert(format!(
+                    "deck{} hat {} Einzelspuren",
+                    i + 1,
+                    d.stems.len()
+                )));
+            }
+            let v = Self::zahl(b, k, &wert)?;
+            d.state.set_stem_pegel(platz, v as f32);
+            return Ok(());
+        }
+
         match k.element.as_str() {
             "play" => d.state.set_playing(Self::schalter(b, k, &wert)?),
             "keylock" => d.state.set_keylock(Self::schalter(b, k, &wert)?),
@@ -2287,10 +2352,30 @@ mod tests {
         // Der Katalog verspricht Schreibbarkeit — das hier prüft, dass die
         // Umsetzung dahinter existiert und nicht nur die Beschreibung.
         let (mut pult, _runner) = pult_mit_zwei_decks();
+        // Deck 1 bekommt Einzelspuren, damit deren Pegel wirklich geschrieben
+        // werden und nicht bloß übersprungen.
+        pult.deck_mut(0).unwrap().stems = vec!["vocals".into(), "drums".into()];
 
         for (schluessel, b) in pult.liste() {
             if !b.schreibbar || b.art == Art::Aktion {
                 continue;
+            }
+            // Ein Spur-Pegel steht im Katalog auf jedem Deck — der ist
+            // statisch, mit Absicht. Schreibbar ist er nur, wenn der Track die
+            // Spur auch hat, und eine Absage ist dort die richtige Antwort,
+            // nicht ein stiller Erfolg. Deck 2 hat oben keine bekommen.
+            if let Some((platz, _)) = Steuerpult::stem_teile(&schluessel.element) {
+                let hat = match schluessel.gruppe {
+                    Gruppe::Deck(i) => pult.decks()[i].stems.len(),
+                    _ => 0,
+                };
+                if platz >= hat {
+                    assert!(
+                        pult.schreibe(&schluessel, Wert::Zahl(0.5)).is_err(),
+                        "{schluessel} nahm einen Pegel an, obwohl es die Spur nicht gibt"
+                    );
+                    continue;
+                }
             }
             let wert = match b.art {
                 Art::Schalter => Wert::Schalter(true),

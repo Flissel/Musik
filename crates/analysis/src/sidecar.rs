@@ -228,6 +228,7 @@ mod tests {
         Track {
             samples: click_track(bpm, 44_100, secs, 0.0),
             sample_rate: 44_100,
+            stems: Vec::new(),
         }
     }
 

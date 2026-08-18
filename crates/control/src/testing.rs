@@ -46,6 +46,7 @@ pub fn pult_mit_protokoll() -> (Steuerpult, EngineRunner, CueProtokoll, GridProt
         let track = Arc::new(audio_core::Track {
             samples: vec![0.0; RATE as usize * 60 * 2],
             sample_rate: RATE,
+            stems: Vec::new(),
         });
         let voice = audio_core::deck::Voice::new(track, Arc::clone(&state));
         let kanal = engine.add_channel(name, Box::new(DeckSource::new(voice)));

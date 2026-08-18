@@ -122,6 +122,7 @@ fn bauen(rate: u32, bpm: f32, bars: usize, muster: Muster) -> Track {
             })
             .collect(),
         sample_rate: rate,
+        stems: Vec::new(),
     }
 }
 

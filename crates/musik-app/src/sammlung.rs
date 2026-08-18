@@ -53,6 +53,8 @@ pub struct Fertig {
     pub tonart: Option<Tonart>,
     /// Gliederung aus der Analyse — Intro, Drop, Outro und der Einstiegspunkt.
     pub struktur: Option<audio_core::Struktur>,
+    /// Namen der Einzelspuren, falls der Track welche mitbringt.
+    pub stems: Vec<String>,
 }
 
 /// Die Umsetzung, die das Pult bekommt.
@@ -328,7 +330,9 @@ fn arbeiten(eingang: Receiver<Auftrag>, ausgang: Sender<Ergebnis>, cache: PathBu
 }
 
 fn fertigen(auftrag: &Auftrag, store: &Store) -> Result<Fertig, String> {
-    let track = Track::decode_file(std::path::Path::new(&auftrag.pfad))
+    // Mit Stems, wenn welche danebenliegen. Ohne Ordner ist das Ergebnis
+    // dasselbe wie ohne — kein Sonderweg, den jemand einschalten müsste.
+    let track = Track::decode_mit_stems(std::path::Path::new(&auftrag.pfad))
         .map_err(|e| format!("nicht lesbar: {e}"))?
         .resampled_to(auftrag.sample_rate);
 
@@ -374,6 +378,14 @@ fn fertigen(auftrag: &Auftrag, store: &Store) -> Result<Fertig, String> {
     });
     auftrag.state.set_grid(grid);
 
+    let stems: Vec<String> = track.stems.iter().map(|s| s.name.clone()).collect();
+    // Voll auf, egal was der vorige Track hinterlassen hat. Ein neu geladenes
+    // Stück mit weggedrehter Stimme wäre eine Überraschung, die niemand
+    // bestellt hat.
+    for i in 0..audio_core::MAX_STEMS {
+        auftrag.state.set_stem_pegel(i, 1.0);
+    }
+
     Ok(Fertig {
         voice: Voice::new(Arc::new(track), Arc::clone(&auftrag.state)),
         peaks,
@@ -382,6 +394,7 @@ fn fertigen(auftrag: &Auftrag, store: &Store) -> Result<Fertig, String> {
         artist: String::new(),
         tonart: analyse.tonart(),
         struktur: analyse.struktur(),
+        stems,
     })
 }
 

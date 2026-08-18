@@ -831,6 +831,17 @@ async def _status(form: Format) -> str:
         # raten, wo im Track er ist — und legt den Übergang mitten in den Drop.
         "section",
         "section_beats_left",
+        # Einzelspuren (P6): Ohne sie lässt sich „zwei Stimmen gleichzeitig"
+        # nur vermeiden, indem man gar nicht überlagert.
+        "stems",
+        "stem1_name",
+        "stem1_level",
+        "stem2_name",
+        "stem2_level",
+        "stem3_name",
+        "stem3_level",
+        "stem4_name",
+        "stem4_level",
         "beats_to_outro",
         "intro_beats",
         "entry",
@@ -911,6 +922,17 @@ async def _status(form: Format) -> str:
                 "playing": roh.get(f"{d}.play") == "1",
                 "finished": roh.get(f"{d}.finished") == "1",
                 "load_status": roh.get(f"{d}.load_status", ""),
+                # Nur die belegten Plätze: Vier leere Zeilen zu melden hieße,
+                # vier Dinge zu zeigen, die es nicht gibt.
+                "stems": [
+                    {
+                        "slot": n,
+                        "name": _als_text(roh.get(f"{d}.stem{n}_name", "-")),
+                        "level": _als_zahl(roh.get(f"{d}.stem{n}_level", "-")),
+                    }
+                    for n in range(1, 5)
+                    if _als_text(roh.get(f"{d}.stem{n}_name", "-"))
+                ],
             }
             for d in decks
         ],
@@ -996,6 +1018,16 @@ async def _status(form: Format) -> str:
             zeilen.append(teil)
         if d["key"]:
             zeilen.append(f"- Tonart {d['key']} ({d['key_camelot']})")
+        if d["stems"]:
+            teile = ", ".join(
+                f"{s['name']} {s['level']:.2f}"
+                for s in d["stems"]
+                if s["level"] is not None
+            )
+            zeilen.append(
+                f"- Einzelspuren: {teile}\n"
+                f"  `musik_set('{d['deck']}.stem1_level', 0)` nimmt eine heraus"
+            )
         if d["finished"]:
             zeilen.append("- **durchgelaufen**")
         if d["load_status"] not in ("bereit", ""):

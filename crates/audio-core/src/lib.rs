@@ -22,4 +22,4 @@ pub use grid::Beatgrid;
 pub use player::Player;
 pub use struktur::{Abschnitt, Art, PHRASE_BEATS, Struktur};
 pub use tonart::Tonart;
-pub use track::Track;
+pub use track::{MAX_STEMS, Stem, Track};

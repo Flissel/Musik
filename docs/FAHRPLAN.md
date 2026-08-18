@@ -346,19 +346,39 @@ Mensch, der im Chat „wird voller" tippt — das ist eine Entscheidung über de
 Aufbau im Raum und keine Softwarefrage. Bis dahin ist die Schleife gebaut und
 läuft mit der Hand am Regler.
 
-## P6 — Stems (S5)
+## P6 — Stems (S5) ✅ ohne Streaming
 
 *Teuer, räumt aber den lautesten Fehler weg.*
 
 Zwei Stimmen gleichzeitig sind der hörbarste Mixfehler überhaupt, und ohne
-Trennung lässt er sich nur vermeiden, indem man gar nicht überlagert. Mit Stems:
-Stimme des ausgehenden Tracks wegnehmen, Instrumental stehen lassen, drüber die
-neue Stimme.
+Trennung lässt er sich nur vermeiden, indem man gar nicht überlagert. Jetzt
+geht: `set deck1.stem3_level 0` — Stimme weg, Instrumental steht.
 
-Steht zuletzt, weil es **Streaming von Platte** braucht — vier Decks mit je vier
-Stems passen nicht in den Speicher — und damit einen Eingriff in den
-Abspielpfad, also in den einzigen Teil mit Echtzeitauflagen. Der größte
-Klanggewinn und das größte Risiko liegen hier beieinander.
+Gemessen am laufenden Programm, zwei Mitschnitte desselben Stücks: Energie bei
+1500 Hz von 9,8 · 10⁻⁵ auf 4,9 · 10⁻⁹, Gesamtpegel nur von 0,061 auf 0,039.
+Die Stimme ist um den Faktor 20 000 weg, Drums und Bass stehen.
+
+**Die Spuren liegen neben der Datei**, in einem Ordner gleichen Namens mit der
+Endung `.stems`. Kein neues Dateiformat, keine neue Abhängigkeit, und genau die
+Form, in der die gängigen Trennwerkzeuge ihr Ergebnis ablegen. Das
+Hersteller-Stem-Format wäre die Alternative gewesen — eine MP4-Datei mit fünf
+AAC-Spuren, die jemandem gehört. Getrennt wird hier nicht: Das ist Arbeit für
+ein neuronales Netz, ein eigenes Werkzeug und eine eigene Lizenzfrage.
+
+**Die schwierige Stelle war die Zeitstreckung.** Sie sucht in jedem Hop die
+Stelle, an der die Wellenform am besten anschließt. Vier Spuren getrennt zu
+strecken hieße vier verschiedene Entscheidungen — die Spuren liefen um
+Millisekunden auseinander, und was zusammen klang, klänge verwaschen. Gesucht
+wird deshalb auf der Summe, angewandt auf jede Spur; gemischt wird beim Lesen,
+was denselben Wert ergibt und einen statt vier Akkumulatoren kostet. Im
+Audio-Callback wird dafür nichts angelegt: Die Spurzeiger stehen auf dem Stapel.
+
+**Offen bleibt das Streaming von Platte.** Vier Spuren kosten das Fünffache
+eines Tracks, weil die Summe daneben stehen bleibt — rund 500 MB je Deck bei
+fünf Minuten. Für die zwei Decks, die es gibt, geht das; für die vier, die der
+Plan vorsieht, nicht. Der Abspielpfad ist der einzige Teil mit
+Echtzeitauflagen, und Platten-I/O gehört dort zuletzt hinein — es ist der
+richtige Schritt, aber nicht derselbe wie dieser.
 
 ## Was an dir hängt
 
@@ -414,7 +434,7 @@ bräuchte es einen zweiten Weg für die Steuerung); MIDI-Controller (Phase 10).
 | P3 ✅ | Geste und Repertoire | Sofort hörbar, seit S1 messbar | — |
 | P4 ✅ | Der Bogen | Braucht S2; für ein Team der gemeinsame Maßstab | P2 |
 | P5 ✅ | Der Raum | Braucht den Bogen, sonst gibt es nichts zu lenken | P4, Quelle |
-| P6 | Stems | Größter Klanggewinn, größtes Risiko, braucht Streaming | — |
+| P6 ✅ | Stems | Größter Klanggewinn; Streaming von Platte steht noch aus | — |
 | M1–M6 | Musik, Gerät, Ohren | Nicht von hier aus zu erledigen | dir |
 | N1–N3 | Nachweise | Läuft nebenher | P1 |
 

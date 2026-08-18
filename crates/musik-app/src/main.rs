@@ -72,7 +72,9 @@ fn main() -> Result<()> {
     {
         let (track, artist, titel) = match pfad {
             Some(p) => {
-                let track = Track::decode_file(p)
+                // Mit Einzelspuren, falls ein `.stems`-Ordner danebenliegt —
+                // derselbe Weg wie beim Laden zur Laufzeit.
+                let track = Track::decode_mit_stems(p)
                     .with_context(|| format!("{} nicht lesbar", p.display()))?
                     .resampled_to(RATE);
                 let titel = p
@@ -115,6 +117,7 @@ fn main() -> Result<()> {
         }));
 
         let frames = track.frames() as u64;
+        let stems: Vec<String> = track.stems.iter().map(|s| s.name.clone()).collect();
         let voice = Voice::new(Arc::new(track), Arc::clone(&state));
         let kanal = engine.add_channel(name, Box::new(DeckSource::new(voice)));
         engine.channel(kanal).set_assign(assign_fuer(index));
@@ -132,6 +135,7 @@ fn main() -> Result<()> {
         eintrag.artist = artist;
         eintrag.tonart = analyse.tonart();
         eintrag.struktur = analyse.struktur();
+        eintrag.stems = stems;
         // Nur bei echten Dateien: Ein Demo-Track steht in keiner Sammlung, und
         // ein Cue darauf hat nichts, wohin er gespeichert werden könnte.
         if let Some(p) = pfad {

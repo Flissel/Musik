@@ -117,6 +117,7 @@ mod tests {
         let track = Arc::new(Track {
             samples: sine_stereo(220.0, RATE, secs),
             sample_rate: RATE,
+            stems: Vec::new(),
         });
         let state = Arc::new(DeckState::new());
         state.set_grid(Some(Beatgrid::new(bpm, anchor, 1.0)));
