@@ -362,6 +362,29 @@ pub fn takt(
             continue;
         };
 
+        // Ist der Track des Taktgebers durchgelaufen, kann der Auftrag nie
+        // mehr fällig werden: Sein Beat steht und rührt sich nicht wieder.
+        //
+        // Das ist etwas anderes als ein angehaltenes Deck — dort wartet der
+        // Plan absichtlich, und das ist richtig so. Hier wartet er auf etwas,
+        // das nicht kommt. Am laufenden Programm sah man die Folge: Der
+        // ausgehende Track lief mitten im Bass-Swap aus, und danach stand der
+        // Crossfader für immer in der Mitte, mit fünf toten Aufträgen im Plan.
+        // Ein Bediener sieht dort einen Übergang, der läuft, und hört einen,
+        // der steht.
+        if pult
+            .decks()
+            .get(auftrag.takt_deck)
+            .is_some_and(|d| d.state.is_finished())
+        {
+            meldungen.push(format!(
+                "plan {} abgebrochen — deck{} ist durchgelaufen",
+                auftrag.id,
+                auftrag.takt_deck + 1
+            ));
+            continue;
+        }
+
         // Ist der Taktgeber zurückgesprungen, ist die Grundlage des Auftrags
         // weg. Ihn trotzdem weiterlaufen zu lassen hieße, eine Rampe von vorn
         // beginnen zu lassen — bei einer Schleife immer wieder. Lieber
@@ -883,6 +906,91 @@ mod tests {
             meldungen.iter().any(|m| m.contains("zurückgesprungen")),
             "kein Wort vom Rücksprung: {meldungen:?}"
         );
+    }
+
+    /// **Läuft der Track des Taktgebers aus, bricht sein Plan ab — statt für
+    /// immer zu warten.**
+    ///
+    /// Am laufenden Programm gefunden: Der ausgehende Track lief mitten im
+    /// Bass-Swap aus, und danach stand der Crossfader für immer in der Mitte,
+    /// mit fünf toten Aufträgen im Plan. Ein Bediener sieht dort einen
+    /// Übergang, der läuft, und hört einen, der steht.
+    ///
+    /// Das ist etwas anderes als ein angehaltenes Deck: Dort wartet der Plan
+    /// absichtlich weiter, und der Test daneben hält das fest.
+    #[test]
+    fn ein_durchgelaufener_track_bricht_seinen_plan_ab() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut plan = Zeitplan::neu();
+        pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+            .unwrap();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+
+        // Etwas, das erst weit hinten fällig wäre — der Track ist vorher zu
+        // Ende. Eine Rampe taugte hier nicht: Der Sprung ans Trackende würde
+        // sie unterwegs fertig laufen lassen, und dann misst der Test etwas
+        // anderes.
+        spaeter_planen(
+            &pult,
+            &mut plan,
+            10_000.0,
+            "set master.crossfader 1".into(),
+            None,
+        )
+        .expect("planen");
+        laufen(&mut pult, &mut plan, &mut runner, RATE as usize / 4);
+        assert!(!plan.ist_leer());
+
+        // Der Track läuft wirklich aus — nicht angehalten, sondern zu Ende.
+        // Kurz vor den Schluss gesprungen und weitergerendert; den Rest macht
+        // der Abspieler selbst, so wie im Betrieb.
+        pult.decks()[0]
+            .state
+            .seek_frames(RATE as u64 * 60 - RATE as u64 / 10);
+        let meldungen = laufen(&mut pult, &mut plan, &mut runner, RATE as usize / 2);
+        assert!(
+            pult.decks()[0].state.is_finished(),
+            "der Track ist nicht durchgelaufen — der Test misst etwas anderes"
+        );
+
+        assert!(
+            plan.ist_leer(),
+            "der Auftrag wartet auf etwas, das nicht kommt"
+        );
+        assert!(
+            meldungen.iter().any(|m| m.contains("durchgelaufen")),
+            "kein Wort davon, warum: {meldungen:?}"
+        );
+    }
+
+    /// Ein bloß angehaltenes Deck hält den Plan an — das ist Absicht und darf
+    /// nicht mit einem durchgelaufenen Track verwechselt werden. Wer pausiert,
+    /// will dort weitermachen, wo er aufgehört hat.
+    #[test]
+    fn ein_angehaltenes_deck_haelt_den_plan_nur_an() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut plan = Zeitplan::neu();
+        pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+            .unwrap();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("master.crossfader"),
+            1.0,
+            64.0,
+            None,
+            Form::Linear,
+        )
+        .expect("planen");
+        laufen(&mut pult, &mut plan, &mut runner, RATE as usize / 4);
+
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(false))
+            .unwrap();
+        laufen(&mut pult, &mut plan, &mut runner, RATE as usize / 2);
+        assert!(!plan.ist_leer(), "die Pause hat den Auftrag verworfen");
     }
 
     /// `in deck2 phrase …` — der Taktgeber darf ein anderer sein als das Deck,

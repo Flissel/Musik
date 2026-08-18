@@ -432,6 +432,21 @@ fängt bei jedem Durchlauf von vorn an, und ein Vorgemerktes hinter dem
 Schleifenende kommt nie an — auch nicht die Zeile, die die Schleife wieder
 lösen soll.
 
+**Läuft der Track eines Taktgebers aus, bricht sein Plan ab und sagt das:**
+
+```text
+plan 17 abgebrochen — deck1 ist durchgelaufen
+```
+
+Am laufenden Programm gefunden, beim ersten Übergang, der sich selbst
+auslöste: Der ausgehende Track lief mitten im Bass-Swap aus, und danach stand
+der Crossfader für immer in der Mitte, mit fünf toten Aufträgen im Plan. Ein
+Bediener sieht dort einen Übergang, der läuft, und hört einen, der steht. Genau
+gegen diesen Fall gibt es den Griff `schleife`.
+
+Ein bloß **angehaltenes** Deck hält den Plan dagegen nur an — dort wartet er
+absichtlich weiter. Wer pausiert, will da weitermachen, wo er aufgehört hat.
+
 **Springt ein Taktgeber zurück, bricht sein Plan ab und sagt das:**
 
 ```text
