@@ -857,6 +857,10 @@ async def _status(form: Format) -> str:
         "arc_actual",
         "arc_gap",
         "arc_trend",
+        # Zurückhaltung: ob immer dasselbe gefahren wird. Vier Griffe im
+        # Repertoire machen Abwechslung möglich, nicht selbstverständlich.
+        "repeats",
+        "transitions",
     ]
 
     gefragt = (
@@ -916,6 +920,8 @@ async def _status(form: Format) -> str:
             "arc_actual": _als_zahl(roh.get("master.arc_actual", "-")),
             "arc_gap": _als_zahl(roh.get("master.arc_gap", "-")),
             "arc_trend": _als_text(roh.get("master.arc_trend", "-")),
+            "repeats": int(_als_zahl(roh.get("master.repeats", "-")) or 0),
+            "transitions": _als_text(roh.get("master.transitions", "-")),
             "last_event": _als_text(roh.get("master.events", "-")),
             "event_count": int(_als_zahl(roh.get("master.event_count", "-")) or 0),
         },
@@ -992,6 +998,15 @@ async def _status(form: Format) -> str:
             f"{m['arc_target']:.2f}, ist {m['arc_actual']:.2f}, Lücke {fehlt}"
             + (f" · {richtung} in den nächsten Minuten" if richtung else "")
         )
+
+    if m["transitions"]:
+        zeile = f"\n## Übergänge\n{m['transitions']}"
+        if m["repeats"] >= 3:
+            zeile += (
+                f"\n\n**{m['repeats']}× hintereinander derselbe Griff.** "
+                "Vier stehen im Repertoire: blende, bassswap, schnitt, filter."
+            )
+        zeilen.append(zeile)
 
     if daten["master"]["last_event"]:
         zeilen.append(

@@ -250,10 +250,36 @@ dasselbe wie eines, das beliebigen Text annimmt — und ein unlesbarer Bogen wir
 abgewiesen statt halb übernommen. Ein Set gegen eine Kurve zu fahren, die
 niemand gemeint hat, wäre schlimmer als eines ohne Kurve.
 
-**Offen bleibt die Zurückhaltung**: zu messen, ob immer dasselbe gefahren wird.
-Das Repertoire aus P3 macht Abwechslung möglich, erzwingt sie aber nicht, und
-ein System, das viermal hintereinander dieselbe Blende wählt, klingt weiterhin
-nach Automat.
+**Die Zurückhaltung steht ✅.** Das Repertoire aus P3 macht Abwechslung möglich,
+erzwingt sie aber nicht, und ein System, das viermal hintereinander dieselbe
+Blende wählt, klingt weiterhin nach Automat. `master.repeats` sagt, wie viele
+der letzten Übergänge gleich waren, `master.transitions` zeigt die letzten acht.
+Damit ist `when master.repeats > 2 do master.uebergang filter` sagbar.
+
+Die Zählregel war der ganze Aufwand: **gezählt wird der Seitenwechsel des
+Crossfaders, nicht sein Wert.** Eine Rampe schreibt bei jedem Takt in denselben
+Regler; auf den Wert gezählt stünde nach einer einzigen Blende eine
+Wiederholung von 80 da — die Zahl, die vor Eintönigkeit warnen soll, wäre selbst
+der Grund, sie zu ignorieren. Beide Wächter dafür wurden geprüft, indem der
+Fehler wieder eingebaut wurde: 4 statt 1, und `schnitt` statt `weich/8`.
+
+Was der letzte Schritt einer Blende und ein Schnitt gemeinsam haben, ist der
+geschriebene Wert; unterscheiden lassen sie sich nur über den Schreiber. Deshalb
+sagt der Zeitplan dem Pult um den einen Schreibvorgang herum, dass gerade eine
+Rampe fährt. Und ein angeforderter Griff wird nur *vorgemerkt* — eingetragen
+wird er, wenn der Crossfader ankommt, weil ein abgelöster Griff nicht
+stattgefunden hat.
+
+Der zweite Fund kam nicht aus einem Test, sondern aus dem laufenden Programm:
+Nach `set channel1.fader 1; set master.crossfader -1; set deck1.play 1` stand
+dort bereits `transitions schnitt` — niemand hatte übergeblendet, es lief ja
+erst ein Deck. Seitdem gilt zusätzlich, dass **zwei Decks laufen müssen**; alle
+vier Griffe starten das eingehende Deck, bevor der Fader sich bewegt.
+
+Die Grenzen stehen im Modul: Wer nur mit den Kanalfadern mischt und den
+Crossfader stehen lässt, taucht nicht auf; und läuft der ausgehende Track aus,
+bevor die Blende ankommt, fehlt sie. Dann sagt die Zahl nichts, statt etwas
+Falsches zu sagen.
 
 Für ein Team ist der Bogen zugleich das, worüber man sich einig sein muss: Ohne
 ihn verhandeln zwei Agenten über den nächsten Track ohne gemeinsamen Maßstab.

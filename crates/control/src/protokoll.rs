@@ -250,6 +250,8 @@ fn rampe(pult: &mut Steuerpult, control: Option<&str>, rest: Option<&str>) -> St
     pult.plan = plan;
 
     match ergebnis {
+        // Gezählt wird die Rampe nicht hier, sondern wenn sie ankommt: Eine
+        // vorgemerkte Bewegung, die jemand ablöst, hat nicht stattgefunden.
         Ok(id) => format!(
             "ok plan {id} ramp {control} nach {ziel} über {beats} Beats, {}",
             form.name()

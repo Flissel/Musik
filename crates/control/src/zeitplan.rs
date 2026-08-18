@@ -409,7 +409,12 @@ fn rampe_schritt(pult: &mut Steuerpult, rampe: &mut Rampe, ab: f64, jetzt: f64) 
     };
     let wert = rampe.von + (rampe.nach - rampe.von) * rampe.form.anwenden(anteil);
 
-    if pult.schreibe(&rampe.control, Wert::Zahl(wert)).is_err() {
+    // Nur um diesen einen Schreibvorgang herum: Das Pult kann sonst den letzten
+    // Schritt einer Blende nicht von einem Schnitt unterscheiden.
+    pult.rampe_am_werk = Some(format!("{}/{:.0}", rampe.form.name(), rampe.beats));
+    let geschrieben = pult.schreibe(&rampe.control, Wert::Zahl(wert));
+    pult.rampe_am_werk = None;
+    if geschrieben.is_err() {
         return Ausgang::Haltlos;
     }
     // Zurücklesen statt den gewünschten Wert zu merken: Das Pult begrenzt, und
@@ -676,6 +681,126 @@ mod tests {
             meldungen.iter().any(|m| m.contains("fertig")),
             "{meldungen:?}"
         );
+    }
+
+    /// Zwei offene Kanäle, zwei laufende Decks — so sieht jeder Griff aus,
+    /// bevor der Crossfader sich bewegt.
+    fn aufgelegt(pult: &mut Steuerpult) {
+        for z in ["channel1.fader", "channel2.fader"] {
+            pult.schreibe(&k(z), Wert::Zahl(1.0)).unwrap();
+        }
+        for d in ["deck1.play", "deck2.play"] {
+            pult.schreibe(&k(d), Wert::Schalter(true)).unwrap();
+        }
+    }
+
+    /// Den Fader vor dem Set auf eine Seite zu stellen ist kein Übergang.
+    ///
+    /// Gefunden am laufenden Programm, nicht im Test: Nach `set channel1.fader
+    /// 1; set master.crossfader -1; set deck1.play 1` stand dort bereits
+    /// `transitions schnitt`. Niemand hatte übergeblendet — es lief ja erst
+    /// ein Deck. Eine Zurückhaltung, die schon beim Einrichten mitzählt,
+    /// warnt beim ersten echten Griff vor einer Wiederholung, die es nicht gab.
+    #[test]
+    fn den_fader_vor_dem_set_zu_parken_ist_kein_uebergang() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+            .unwrap();
+
+        // Erst der Fader, dann das Deck — die Reihenfolge aus dem Fund.
+        pult.schreibe(&k("master.crossfader"), Wert::Zahl(-1.0))
+            .unwrap();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        assert_eq!(pult.lies(&k("master.transitions")).unwrap(), Wert::Leer);
+
+        // Und andersherum, denn so richtet man eher ein: Deck läuft, dann wird
+        // der Fader dorthin gestellt. Ein einzelnes laufendes Deck reicht
+        // nicht — sonst zählte genau dieser Griff.
+        pult.schreibe(&k("master.crossfader"), Wert::Zahl(0.0))
+            .unwrap();
+        pult.schreibe(&k("master.crossfader"), Wert::Zahl(-1.0))
+            .unwrap();
+
+        assert_eq!(pult.lies(&k("master.repeats")).unwrap(), Wert::Zahl(0.0));
+        assert_eq!(pult.lies(&k("master.transitions")).unwrap(), Wert::Leer);
+    }
+
+    /// Eine Blende ist **ein** Übergang, keine achtzig.
+    ///
+    /// Eine Rampe schreibt bei jedem Takt in denselben Regler. Zählte man den
+    /// Wert statt den Seitenwechsel, stünde nach einer einzigen Blende eine
+    /// Wiederholung von 80 da — und die Zahl, die vor Eintönigkeit warnen soll,
+    /// wäre selbst der Grund, sie zu ignorieren.
+    #[test]
+    fn eine_blende_zaehlt_einmal_nicht_achtzigmal() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut plan = Zeitplan::neu();
+        aufgelegt(&mut pult);
+
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("master.crossfader"),
+            1.0,
+            8.0,
+            None,
+            Form::Weich,
+        )
+        .expect("planen");
+        laufen(
+            &mut pult,
+            &mut plan,
+            &mut runner,
+            (RATE as f64 * 4.2) as usize,
+        );
+
+        assert_eq!(pult.lies(&k("master.crossfader")).unwrap(), Wert::Zahl(1.0));
+        assert_eq!(pult.lies(&k("master.repeats")).unwrap(), Wert::Zahl(1.0));
+        assert_eq!(
+            pult.lies(&k("master.transitions")).unwrap(),
+            Wert::Text("weich/8".into())
+        );
+    }
+
+    /// Ein Schnitt und eine Blende sind nicht dasselbe — und dreimal derselbe
+    /// Befehl ist ein Übergang, nicht drei.
+    #[test]
+    fn verschiedene_griffe_sind_keine_wiederholung() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut plan = Zeitplan::neu();
+        aufgelegt(&mut pult);
+
+        // Ein Sprung hinüber, dreimal geschickt.
+        for _ in 0..3 {
+            pult.schreibe(&k("master.crossfader"), Wert::Zahl(1.0))
+                .unwrap();
+        }
+        assert_eq!(pult.lies(&k("master.repeats")).unwrap(), Wert::Zahl(1.0));
+
+        // Und wieder zurück, diesmal als Blende.
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("master.crossfader"),
+            -1.0,
+            8.0,
+            None,
+            Form::Linear,
+        )
+        .expect("planen");
+        laufen(
+            &mut pult,
+            &mut plan,
+            &mut runner,
+            (RATE as f64 * 4.2) as usize,
+        );
+
+        assert_eq!(
+            pult.lies(&k("master.transitions")).unwrap(),
+            Wert::Text("schnitt, linear/8".into())
+        );
+        assert_eq!(pult.lies(&k("master.repeats")).unwrap(), Wert::Zahl(1.0));
     }
 
     /// Der Mensch gewinnt.

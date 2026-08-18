@@ -580,6 +580,23 @@ die Zahl, nach der der nächste Track gewählt wird",
 und im Plan. Die Anlage wählt nicht aus: welcher Griff passt, entscheidet, wer \
 begründen kann warum",
     ),
+    // Zurückhaltung: ob immer dasselbe gefahren wird. Gezählt wird, wenn der
+    // Crossfader die Seite wechselt — siehe `crate::vielfalt`.
+    zahl(
+        "repeats",
+        "",
+        0.0,
+        f64::MAX,
+        Einheit::Keine,
+        false,
+        "Wie viele der letzten Übergänge hintereinander gleich waren. \
+1 heißt: der letzte war anders als der davor. Ab 3 wiederholt sich jemand hörbar",
+    ),
+    text_feld(
+        "transitions",
+        "Die letzten Übergänge, ältester zuerst. Wer nur mit den Kanalfadern mischt \
+und den Crossfader stehen lässt, taucht hier nicht auf",
+    ),
     zahl(
         "event_count",
         "",

@@ -254,6 +254,15 @@ pub struct Steuerpult {
     pub ereignisse: crate::ereignis::Ereignisse,
     /// Was das Set vorhat — siehe [`crate::bogen`].
     pub bogen: crate::bogen::Bogen,
+    /// Was zuletzt gefahren wurde — siehe [`crate::vielfalt`].
+    pub vielfalt: crate::vielfalt::Vielfalt,
+    /// Wie die Rampe heißt, die gerade schreibt; sonst `None`.
+    ///
+    /// Der letzte Schritt einer Blende und ein Schnitt schreiben denselben
+    /// Wert. Nur der Schreiber weiß, welches von beidem es war, und das steht
+    /// hier — gesetzt von [`crate::zeitplan`] genau um den einen Schreibvorgang
+    /// herum.
+    pub(crate) rampe_am_werk: Option<String>,
     /// Wann das Set angefangen hat. `None` heißt: noch nicht gestartet.
     ///
     /// Ohne Startzeit gibt es keinen Ort auf dem Bogen, und dann wird auch
@@ -276,6 +285,8 @@ impl Steuerpult {
             signale: std::array::from_fn(|_| crate::signal::Signal::neu()),
             ereignisse: crate::ereignis::Ereignisse::neu(),
             bogen: crate::bogen::Bogen::neu(),
+            vielfalt: crate::vielfalt::Vielfalt::neu(),
+            rampe_am_werk: None,
             set_start: None,
             decks: Vec::new(),
             kanaele: Vec::new(),
@@ -687,6 +698,16 @@ impl Steuerpult {
                 });
             }
             "event_count" => return Some(Wert::Zahl(self.ereignisse.nummer() as f64)),
+            "repeats" => {
+                return Some(Wert::Zahl(self.vielfalt.wiederholung() as f64));
+            }
+            "transitions" => {
+                return Some(if self.vielfalt.ist_leer() {
+                    Wert::Leer
+                } else {
+                    Wert::Text(self.vielfalt.text())
+                });
+            }
             "arc" => {
                 return Some(if self.bogen.ist_leer() {
                     Wert::Leer
@@ -1189,6 +1210,9 @@ impl Steuerpult {
         };
 
         let zeilen = crate::uebergang::zeilen(self, griff, beats)?;
+        // Der Name des Griffs sagt mehr als die Form seiner letzten Rampe.
+        // Eingetragen wird er erst, wenn der Crossfader wirklich ankommt.
+        self.vielfalt.vormerken(griff.name());
         let mut aus = vec![format!(
             "uebergang {} über {beats} Beats, {} Zeilen",
             griff.name(),
@@ -1695,6 +1719,27 @@ impl Steuerpult {
 
         let befehl = match k.element.as_str() {
             "crossfader" => {
+                // Angekommen ist er, wenn er die Seite wechselt — einmal je
+                // Übergang, egal ob die Bewegung aus einem Sprung bestand oder
+                // aus achtzig Rampenschritten. Wie er ankam, weiß nur der
+                // Schreiber: Fährt eine Rampe, ist es ihre Form; sonst war es
+                // ein Schnitt.
+                let neue_seite = crate::vielfalt::seite(v);
+                // Und nur, wenn es überhaupt etwas zu wechseln gab: Wer vor dem
+                // Set den Fader auf die Seite des einzigen laufenden Decks
+                // stellt, richtet ein, er blendet nicht. Alle vier Griffe
+                // starten das eingehende Deck, bevor der Fader sich bewegt —
+                // zwei laufende Decks sind also nicht die Ausnahme, sondern das
+                // Kennzeichen.
+                let spielende = self.decks.iter().filter(|d| d.state.is_playing()).count();
+                if neue_seite != 0
+                    && neue_seite != crate::vielfalt::seite(self.master.crossfader)
+                    && spielende >= 2
+                {
+                    let wie = self.rampe_am_werk.clone();
+                    self.vielfalt
+                        .angekommen(wie.as_deref().unwrap_or("schnitt"));
+                }
                 self.master.crossfader = v;
                 Command::Crossfader(v as f32)
             }

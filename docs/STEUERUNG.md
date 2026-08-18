@@ -864,6 +864,60 @@ eine will Druck, der andere Luft, und beide haben recht, weil es keinen Satz
 gibt, gegen den sich das prüfen ließe. Mit ihm heißt die Frage nicht mehr
 „welcher Track ist gut", sondern „was fehlt hier gerade".
 
+## Zurückhaltung: ob immer dasselbe gefahren wird
+
+Das Repertoire macht Abwechslung **möglich**. Es erzwingt sie nicht — und ein
+System, das viermal hintereinander dieselbe Blende wählt, klingt weiterhin nach
+Automat, auch wenn jede einzelne sauber ist. Der Vorwurf an den ersten
+selbstgefahrenen Übergang („ein bisschen herzlos") war nie mit einer Zahl
+beantwortet. Hier ist sie.
+
+```text
+get master.repeats       → value master.repeats 3
+get master.transitions   → value master.transitions blende, blende, blende
+```
+
+| Control | Was |
+| --- | --- |
+| `repeats` | wie viele der letzten Übergänge hintereinander gleich waren |
+| `transitions` | die letzten acht, ältester zuerst |
+
+`1` heißt: der letzte war anders als der davor, alles in Ordnung. Ab `3`
+wiederholt sich jemand hörbar, und das lässt sich zur Bedingung machen:
+
+```text
+when master.repeats > 2 do master.uebergang filter
+```
+
+**Gezählt wird der Seitenwechsel des Crossfaders, nicht sein Wert.** Das ist die
+einzige Stelle, die sich ohne Raterei bestimmen lässt, und sie zählt genau
+einmal je Übergang: Ein Bass-Swap fährt zweimal am Crossfader (erst in die
+Mitte, dann hinüber), eine Blende in achtzig kleinen Schritten, ein Schnitt in
+einem Sprung — angekommen sind alle drei einmal. Zählte man stattdessen den
+Wert, stünde nach einer einzigen Blende eine Wiederholung von 80 da, und die
+Zahl, die vor Eintönigkeit warnen soll, wäre selbst der Grund, sie zu
+ignorieren.
+
+Wie ein Übergang heißt, entscheidet sich beim Ankommen: Wurde er über
+`master.uebergang` angefordert, steht sein Name da (`bassswap`), sonst die
+Bewegung, die den Fader hinübergebracht hat (`weich/32`) oder `schnitt`. Damit
+zählt auch, was **von Hand** zusammengesetzt wurde — der erste automatisch
+gefahrene Übergang bestand aus sieben `when`-Zeilen und keinem einzigen
+`uebergang`. Ein Griff, der vorgemerkt und dann abgelöst wird, zählt nicht: Er
+hat nicht stattgefunden.
+
+**Und es müssen zwei Decks laufen.** Wer vor dem Set den Fader auf die Seite des
+einzigen laufenden Decks stellt, richtet ein — da ist nichts, wovon oder wohin
+überzublenden wäre. Das stand zunächst falsch da und fiel erst am laufenden
+Programm auf: Nach vier Zeilen Einrichten meldete die Anlage bereits einen
+Übergang.
+
+**Zwei Grenzen sind echt:** Wer nur mit den Kanalfadern mischt und den
+Crossfader stehen lässt, taucht hier nicht auf. Und wenn der ausgehende Track
+ausläuft, bevor die Blende drüben ankommt, fehlt sie — dann lief zuletzt nur
+noch ein Deck. Beides kommt vor; dann sagt diese Zahl nichts, statt etwas
+Falsches zu sagen.
+
 ## Harmonisch mischen
 
 Tempo ist die halbe Trackauswahl. Zwei Stücke im gleichen Takt können trotzdem
