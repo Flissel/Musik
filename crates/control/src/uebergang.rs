@@ -6,7 +6,7 @@
 //!
 //! Ein Mensch hat vier oder fünf Griffe im Kopf und wählt aus. Hier stehen sie
 //! benannt: lange Blende, Bass-Swap, harter Schnitt auf die Eins,
-//! Filter-Sweep.
+//! Filter-Sweep, Schleifen-Ausstieg.
 //!
 //! # Was hier ausdrücklich *nicht* passiert
 //!
@@ -46,6 +46,13 @@ pub enum Griff {
     Schnitt,
     /// Dem Ausgehenden den Boden wegziehen, während der Neue kommt.
     Filter,
+    /// Den Ausgehenden in eine Schleife legen und darüber wechseln.
+    ///
+    /// Der einzige Griff, der dem Ausgehenden **Zeit gibt**: Ein Track, der in
+    /// vier Beats zu Ende wäre, hält so noch eine ganze Phrase durch. Genau
+    /// dafür setzt ein Mensch am Ende eines Stücks eine Schleife — nicht, um
+    /// etwas zu wiederholen, sondern um nicht gehetzt wechseln zu müssen.
+    Schleife,
 }
 
 impl Griff {
@@ -55,6 +62,7 @@ impl Griff {
             Griff::Bassswap => "bassswap",
             Griff::Schnitt => "schnitt",
             Griff::Filter => "filter",
+            Griff::Schleife => "schleife",
         }
     }
 
@@ -64,15 +72,17 @@ impl Griff {
             "bassswap" => Some(Griff::Bassswap),
             "schnitt" => Some(Griff::Schnitt),
             "filter" => Some(Griff::Filter),
+            "schleife" => Some(Griff::Schleife),
             _ => None,
         }
     }
 
-    pub const ALLE: [Griff; 4] = [
+    pub const ALLE: [Griff; 5] = [
         Griff::Blende,
         Griff::Bassswap,
         Griff::Schnitt,
         Griff::Filter,
+        Griff::Schleife,
     ];
 
     /// Wie lang der Griff üblicherweise ist, in Beats.
@@ -80,12 +90,17 @@ impl Griff {
     /// Keine Vorschrift, nur die Zahl, die man ohne weiteres Nachdenken nimmt:
     /// zwei Phrasen für eine Blende, eine für den Bass-Swap, keine für den
     /// Schnitt.
+    ///
+    /// Bei der Schleife ist die Zahl zugleich die Schleifenlänge, und deshalb
+    /// eine ganze Phrase: Eine Schleife, die nicht auf der Phrase liegt,
+    /// verschiebt die Eins und macht aus dem Griff einen Fehler.
     pub fn beats(&self) -> f64 {
         match self {
             Griff::Blende => 32.0,
             Griff::Bassswap => 16.0,
             Griff::Schnitt => 0.0,
             Griff::Filter => 16.0,
+            Griff::Schleife => 16.0,
         }
     }
 
@@ -95,6 +110,7 @@ impl Griff {
             Griff::Bassswap => "Beide laufen in der Mitte, dann tauschen die Bässe",
             Griff::Schnitt => "Auf der Eins umschalten, ohne Übergang",
             Griff::Filter => "Dem Ausgehenden den Boden wegziehen, während der Neue kommt",
+            Griff::Schleife => "Den Ausgehenden in eine Schleife legen und darüber wechseln",
         }
     }
 }
@@ -156,6 +172,7 @@ pub fn zeilen(pult: &Steuerpult, griff: Griff, beats: f64) -> Result<Vec<String>
     let kaus = pult.decks()[aus].kanal + 1;
     let kein = pult.decks()[ein].kanal + 1;
     let dein = ein + 1;
+    let daus = aus + 1;
 
     // Der Crossfader steht auf −1 für A und +1 für B. Wohin er soll, sagt der
     // Kanalzug des eingehenden Decks, nicht die Deck-Nummer: Welche Seite ein
@@ -207,6 +224,30 @@ pub fn zeilen(pult: &Steuerpult, griff: Griff, beats: f64) -> Result<Vec<String>
             // der andere schon trägt.
             format!("in phrase ramp channel{kaus}.filter 1 {beats} spaet"),
         ],
+        Griff::Schleife => {
+            // Die Schleife wird auf der Phrasengrenze gesetzt und ist genau so
+            // lang wie die Blende darüber: Der Ausgehende läuft sie einmal
+            // durch, und wenn sie herum ist, ist der Wechsel fertig. Eine
+            // Schleife, die länger steht als der Übergang, wiederholt hörbar —
+            // und das ist der Fehler, den dieser Griff gerade vermeiden soll.
+            //
+            // **Alles danach hängt am eingehenden Deck.** Der Beat des
+            // ausgehenden wiederholt sich ja gerade — daran getaktet fing die
+            // Blende bei jedem Schleifendurchlauf von vorn an, und die
+            // Auflösung der Schleife kam nie, weil ihr Beat nie über das Ende
+            // der Schleife hinauskam. Am laufenden Programm sah man den
+            // Crossfader sieben Mal hin und her fahren.
+            vec![
+                format!("in phrase set deck{daus}.loop_beats {beats}"),
+                format!("in phrase set deck{dein}.play 1"),
+                format!(
+                    "in deck{dein} phrase ramp master.crossfader {ziel} {beats} weich deck{dein}"
+                ),
+                // Gelöst, nicht vergessen: Ein Deck, das im Hintergrund
+                // weiterschleift, ist beim nächsten Griff eine Überraschung.
+                format!("in deck{dein} phrase+{beats} set deck{daus}.loop_active 0"),
+            ]
+        }
     })
 }
 
@@ -321,6 +362,67 @@ mod tests {
     }
 
     /// Ein Schnitt ist keine Blende: kein `ramp`, nur ein Umlegen.
+    /// **Der einzige Griff, der dem Ausgehenden Zeit gibt.**
+    ///
+    /// Die Schleife liegt genau so lang wie die Blende darüber: Der Ausgehende
+    /// läuft sie einmal durch, und wenn sie herum ist, ist der Wechsel fertig.
+    /// Eine Schleife, die länger steht als der Übergang, wiederholt hörbar —
+    /// und das ist der Fehler, den dieser Griff gerade vermeiden soll.
+    #[test]
+    fn die_schleife_haelt_den_ausgehenden_genau_solange_wie_der_wechsel_dauert() {
+        let (pult, _runner) = laufend();
+        let zeilen = zeilen(&pult, Griff::Schleife, 16.0).expect("Zeilen");
+
+        assert!(
+            zeilen
+                .iter()
+                .any(|z| z == "in phrase set deck1.loop_beats 16"),
+            "die Schleife wird nicht gesetzt: {zeilen:?}"
+        );
+        assert!(
+            zeilen
+                .iter()
+                .any(|z| z == "in deck2 phrase+16 set deck1.loop_active 0"),
+            "die Schleife wird nicht gelöst: {zeilen:?}"
+        );
+        // Gesetzt wird sie auf dem ausgehenden Deck — auf dem eingehenden wäre
+        // sie das Gegenteil von Zeit gewinnen.
+        assert!(
+            !zeilen.iter().any(|z| z.contains("deck2.loop")),
+            "die Schleife liegt auf dem falschen Deck: {zeilen:?}"
+        );
+        // **Alles nach dem Setzen hängt am eingehenden Deck.** Der Beat des
+        // schleifenden wiederholt sich; daran getaktet fängt die Blende bei
+        // jedem Durchlauf von vorn an, und die Auflösung kommt nie.
+        for zeile in &zeilen {
+            if zeile.contains("loop_beats") || zeile.contains("play 1") {
+                continue;
+            }
+            assert!(
+                zeile.starts_with("in deck2 "),
+                "hängt am schleifenden Deck: {zeile}"
+            );
+        }
+    }
+
+    /// Eine gesetzte und nie gelöste Schleife ist beim nächsten Griff eine
+    /// Überraschung — und zwar eine, die man erst hört, wenn es zu spät ist.
+    #[test]
+    fn jede_gesetzte_schleife_wird_auch_wieder_geloest() {
+        let (pult, _runner) = laufend();
+        for griff in Griff::ALLE {
+            let zeilen = zeilen(&pult, griff, 16.0).expect("Zeilen");
+            let gesetzt = zeilen.iter().any(|z| z.contains(".loop_beats"));
+            let geloest = zeilen.iter().any(|z| z.contains(".loop_active 0"));
+            assert_eq!(
+                gesetzt,
+                geloest,
+                "{}: gesetzt {gesetzt}, gelöst {geloest} — {zeilen:?}",
+                griff.name()
+            );
+        }
+    }
+
     #[test]
     fn der_schnitt_rampt_nicht() {
         let (pult, _runner) = laufend();

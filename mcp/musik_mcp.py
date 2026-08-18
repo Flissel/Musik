@@ -450,6 +450,7 @@ class GriffName(str, Enum):
     bassswap = "bassswap"
     schnitt = "schnitt"
     filter = "filter"
+    schleife = "schleife"
 
 
 class UebergangEingabe(Basis):
@@ -460,7 +461,9 @@ class UebergangEingabe(Basis):
             "verteilt (32 Beats); 'bassswap' beide laufen in der Mitte, dann "
             "tauschen die Bässe (16); 'schnitt' auf der Eins umschalten, ohne "
             "Übergang; 'filter' dem Ausgehenden den Boden wegziehen, während der "
-            "Neue kommt (16)."
+            "Neue kommt (16); 'schleife' den Ausgehenden in eine Schleife legen "
+            "und darüber wechseln (16) — der einzige Griff, der ihm Zeit gibt, "
+            "wenn sein Track gleich zu Ende ist."
         ),
     )
     beats: Optional[float] = Field(
@@ -862,7 +865,7 @@ async def _status(form: Format) -> str:
         "arc_actual",
         "arc_gap",
         "arc_trend",
-        # Zurückhaltung: ob immer dasselbe gefahren wird. Vier Griffe im
+        # Zurückhaltung: ob immer dasselbe gefahren wird. Fünf Griffe im
         # Repertoire machen Abwechslung möglich, nicht selbstverständlich.
         "repeats",
         "transitions",
@@ -1029,7 +1032,8 @@ async def _status(form: Format) -> str:
         if m["repeats"] >= 3:
             zeile += (
                 f"\n\n**{m['repeats']}× hintereinander derselbe Griff.** "
-                "Vier stehen im Repertoire: blende, bassswap, schnitt, filter."
+                "Fünf stehen im Repertoire: blende, bassswap, schnitt, "
+                "filter, schleife."
             )
         zeilen.append(zeile)
 
@@ -1612,9 +1616,10 @@ async def musik_schedule(params: VormerkEingabe) -> str:
 async def musik_uebergang(params: UebergangEingabe) -> str:
     """Merkt einen Übergang aus dem Repertoire vor.
 
-    Vier Griffe statt einer immer gleichen Blende. Ein DJ, der jedes Mal
+    Fünf Griffe statt einer immer gleichen Blende. Ein DJ, der jedes Mal
     dasselbe macht, ist der langweiligste im Raum — auch wenn jeder einzelne
-    Übergang sauber ist.
+    Übergang sauber ist. `musik_status` sagt unter „Übergänge", wie oft
+    zuletzt derselbe kam.
 
     **Die Anlage wählt nicht aus.** Welcher Griff passt, hängt daran, ob der
     ausgehende Track ein Outro hat (`beats_to_outro`), der eingehende ein
@@ -1642,6 +1647,7 @@ async def musik_uebergang(params: UebergangEingabe) -> str:
         - „Blende rüber" → griff='blende'
         - „Bass-Swap über 32" → griff='bassswap', beats=32
         - „Auf der Eins hart umschalten" → griff='schnitt'
+        - „Der Track ist gleich zu Ende, ich brauche Zeit" → griff='schleife'
     """
     befehl = f"do master.uebergang {params.griff.value}"
     if params.beats is not None:

@@ -416,6 +416,33 @@ Auseinanderlaufen.
 Ohne Deck mit Beatgrid hat `phrase` keinen Bezugspunkt und wird abgewiesen,
 statt stillschweigend auf null zu fallen.
 
+### Wessen Takte gemeint sind
+
+```text
+in deck2 phrase+16 set deck1.loop_active 0
+```
+
+Ohne Angabe nimmt `in` das erste Deck mit Beatgrid. Steht ein `deckN` direkt
+hinter `in`, ist dessen Takt gemeint — auch wenn der Befehl auf ein anderes Deck
+wirkt.
+
+**Gebraucht wird das, sobald ein Deck in einer Schleife läuft.** Dessen Beat
+wiederholt sich, und alles, was daran hängt, wiederholt sich mit: Eine Rampe
+fängt bei jedem Durchlauf von vorn an, und ein Vorgemerktes hinter dem
+Schleifenende kommt nie an — auch nicht die Zeile, die die Schleife wieder
+lösen soll.
+
+**Springt ein Taktgeber zurück, bricht sein Plan ab und sagt das:**
+
+```text
+plan 3 abgebrochen — deck1 ist zurückgesprungen (Schleife oder Sprung)
+```
+
+Das ist der Fall bei jeder Schleife und bei jedem Sprung im Track. Ihn still
+weiterlaufen zu lassen wäre das Schlimmste von allem: Der Bediener sieht einen
+Plan, der läuft, und hört etwas anderes. Am laufenden Programm sah man den
+Crossfader sieben Mal hin und her fahren, bevor das hier stand.
+
 ### Sobald es so weit ist
 
 `in` wartet auf Takte. Die Frage, die beim Auflegen wirklich gestellt wird,
@@ -773,7 +800,7 @@ Bewegung über die Zeit, die Kurve übersetzt die Reglerstellung in Lautstärke.
 
 ## Ein Repertoire statt eines Handgriffs
 
-Vier benannte Übergänge:
+Fünf benannte Übergänge:
 
 ```text
 do master.uebergang bassswap 16
@@ -792,6 +819,26 @@ uebergang bassswap über 16 Beats, 6 Zeilen
 | `bassswap` | beide laufen in der Mitte, dann tauschen die Bässe | 16 |
 | `schnitt` | auf der Eins umschalten, ohne Übergang | 0 |
 | `filter` | dem Ausgehenden den Boden wegziehen, während der Neue kommt | 16 |
+| `schleife` | den Ausgehenden in eine Schleife legen und darüber wechseln | 16 |
+
+**Die Schleife ist der einzige Griff, der dem Ausgehenden Zeit gibt.** Ein
+Track, der in vier Beats zu Ende wäre, hält so noch eine ganze Phrase durch —
+genau dafür setzt ein Mensch am Ende eines Stücks eine Schleife: nicht, um
+etwas zu wiederholen, sondern um nicht gehetzt wechseln zu müssen.
+
+```text
+in phrase set deck1.loop_beats 16
+in phrase set deck2.play 1
+in phrase ramp master.crossfader 1 16 weich
+in phrase+16 set deck1.loop_active 0
+```
+
+Die Schleife ist genau so lang wie die Blende darüber: Der Ausgehende läuft sie
+einmal durch, und wenn sie herum ist, ist der Wechsel fertig. Eine Schleife, die
+länger steht als der Übergang, wiederholt hörbar — und das ist der Fehler, den
+dieser Griff gerade vermeiden soll. Deshalb wird sie am Ende auch wieder
+**gelöst**: Ein Deck, das im Hintergrund weiterschleift, ist beim nächsten Griff
+eine Überraschung.
 
 **Es geschieht nichts, was man nicht auch selbst tippen könnte.** Jeder Griff
 ist eine Handvoll gewöhnlicher Zeilen, die durch denselben Weg laufen wie alles

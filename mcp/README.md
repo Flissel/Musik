@@ -52,7 +52,7 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
 | `musik_do` | Eine Aktion auslösen: laden, syncen, Cue, Mitschnitt |
 | `musik_ramp` | Einen Regler über Beats bewegen — eine Blende |
 | `musik_schedule` | Eine Aktion oder einen Wert auf einen späteren Beat legen |
-| `musik_uebergang` | Einen benannten Griff vormerken — blende, bassswap, schnitt, filter |
+| `musik_uebergang` | Einen benannten Griff vormerken — blende, bassswap, schnitt, filter, schleife |
 | `musik_cancel` | Vorgemerktes zurücknehmen |
 | `musik_when` | Einen Befehl an eine Schwelle hängen — „wenn noch 32 Beats" |
 | `musik_signal` | Etwas aus dem Raum melden — Energie, Andrang, Stimmung |

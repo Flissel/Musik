@@ -1,6 +1,6 @@
 //! Zurückhaltung: ob immer dasselbe gefahren wird.
 //!
-//! Das Repertoire aus vier Griffen macht Abwechslung **möglich**. Es erzwingt
+//! Das Repertoire aus fünf Griffen macht Abwechslung **möglich**. Es erzwingt
 //! sie nicht — und ein System, das viermal hintereinander dieselbe Blende
 //! wählt, klingt weiterhin nach Automat, auch wenn jede einzelne sauber ist.
 //! Genau das war der erste selbstgefahrene Übergang, und der Vorwurf daran
@@ -23,7 +23,7 @@
 //! des einzigen laufenden Decks stellt, richtet ein — da ist nichts, wovon oder
 //! wohin überzublenden wäre. Das stand hier zunächst falsch und fiel erst am
 //! laufenden Programm auf: Nach vier Zeilen Einrichten meldete die Anlage
-//! bereits einen Übergang. Alle vier Griffe starten das eingehende Deck, bevor
+//! bereits einen Übergang. Alle fünf Griffe starten das eingehende Deck, bevor
 //! der Fader sich bewegt; zwei laufende Decks sind also kein Sonderfall,
 //! sondern das Kennzeichen.
 //!

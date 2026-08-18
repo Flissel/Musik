@@ -1971,7 +1971,7 @@ set master.arc und do master.arc_start"
                 let neue_seite = crate::vielfalt::seite(v);
                 // Und nur, wenn es überhaupt etwas zu wechseln gab: Wer vor dem
                 // Set den Fader auf die Seite des einzigen laufenden Decks
-                // stellt, richtet ein, er blendet nicht. Alle vier Griffe
+                // stellt, richtet ein, er blendet nicht. Alle fünf Griffe
                 // starten das eingehende Deck, bevor der Fader sich bewegt —
                 // zwei laufende Decks sind also nicht die Ausnahme, sondern das
                 // Kennzeichen.

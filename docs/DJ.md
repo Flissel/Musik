@@ -232,7 +232,7 @@ auch wenn jeder einzelne davon sauber ist.
 
 ## S4 — Geste statt Rampe ✅
 
-*Gebaut. Formen für Rampen und vier benannte Griffe — siehe [`FAHRPLAN.md`](FAHRPLAN.md#p3--geste-und-repertoire-s4-).*
+*Gebaut. Formen für Rampen und fünf benannte Griffe — siehe [`FAHRPLAN.md`](FAHRPLAN.md#p3--geste-und-repertoire-s4-).*
 
 Zwei Erweiterungen, beide klein:
 

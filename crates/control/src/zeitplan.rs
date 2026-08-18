@@ -50,8 +50,24 @@ pub struct Auftrag {
     pub takt_deck: usize,
     /// Beat des Taktgeber-Decks, ab dem gehandelt wird.
     pub ab_beat: f64,
+    /// Der zuletzt gesehene Beat des Taktgebers.
+    ///
+    /// Nur, um einen **Rücksprung** zu bemerken: Läuft das Deck in einer
+    /// Schleife oder springt jemand zurück, zählt sein Beat wieder von vorn,
+    /// und dann ist alles falsch, was daran hängt — eine Rampe fängt von vorn
+    /// an und wiederholt sich endlos, ein Vorgemerktes kommt nie an. Beides
+    /// hat kein Test gezeigt, sondern ein Blick auf den Crossfader, der sieben
+    /// Mal hin und her fuhr.
+    pub zuletzt_beat: f64,
     pub was: Was,
 }
+
+/// Wie weit der Beat zurückgehen darf, bevor es ein Sprung ist.
+///
+/// Ein halber Beat: Die Position wird aus der Frame-Zahl gerechnet und
+/// schwankt um Bruchteile, aber sie geht nicht rückwärts. Alles darüber ist
+/// eine Schleife oder ein Sprung.
+pub const RUECKSPRUNG: f64 = 0.5;
 
 #[derive(Debug, Clone)]
 pub enum Was {
@@ -228,6 +244,7 @@ impl Zeitplan {
             id: self.naechste_id,
             takt_deck,
             ab_beat,
+            zuletzt_beat: ab_beat,
             was,
         });
         self.naechste_id
@@ -344,6 +361,21 @@ pub fn takt(
             ));
             continue;
         };
+
+        // Ist der Taktgeber zurückgesprungen, ist die Grundlage des Auftrags
+        // weg. Ihn trotzdem weiterlaufen zu lassen hieße, eine Rampe von vorn
+        // beginnen zu lassen — bei einer Schleife immer wieder. Lieber
+        // abbrechen und es sagen: Wer eine Schleife setzt, soll erfahren, dass
+        // sein Plan daran hängt.
+        if jetzt + RUECKSPRUNG < auftrag.zuletzt_beat {
+            meldungen.push(format!(
+                "plan {} abgebrochen — deck{} ist zurückgesprungen (Schleife oder Sprung)",
+                auftrag.id,
+                auftrag.takt_deck + 1
+            ));
+            continue;
+        }
+        auftrag.zuletzt_beat = jetzt;
 
         match &mut auftrag.was {
             Was::Spaeter { beim_beat, zeile } => {
@@ -801,6 +833,82 @@ mod tests {
             Wert::Text("schnitt, linear/8".into())
         );
         assert_eq!(pult.lies(&k("master.repeats")).unwrap(), Wert::Zahl(1.0));
+    }
+
+    /// **Ein Deck, das zurückspringt, bricht den Plan ab — statt ihn zu
+    /// wiederholen.**
+    ///
+    /// Gefunden am laufenden Programm beim ersten Schleifen-Übergang: Der
+    /// Crossfader fuhr sieben Mal hin und her. Eine Rampe rechnet ihren
+    /// Fortschritt aus dem Beat des Taktgebers; läuft der in einer Schleife,
+    /// fängt sie bei jedem Durchlauf von vorn an. Ein Vorgemerktes hinter dem
+    /// Schleifenende kommt umgekehrt nie an.
+    ///
+    /// Beides still zu tun wäre das Schlimmste: Der Bediener sieht einen Plan,
+    /// der läuft, und hört etwas anderes.
+    #[test]
+    fn ein_zurueckgesprungenes_deck_bricht_den_plan_ab_statt_ihn_zu_wiederholen() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        let mut plan = Zeitplan::neu();
+        pult.schreibe(&k("channel1.fader"), Wert::Zahl(1.0))
+            .unwrap();
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+
+        rampe_planen(
+            &pult,
+            &mut plan,
+            k("master.crossfader"),
+            1.0,
+            32.0,
+            None,
+            Form::Linear,
+        )
+        .expect("planen");
+
+        // Ein Stück laufen lassen, dann zurückspringen — genau das tut eine
+        // Schleife an ihrem Ende.
+        laufen(
+            &mut pult,
+            &mut plan,
+            &mut runner,
+            (RATE as f64 * 2.0) as usize,
+        );
+        assert!(!plan.ist_leer(), "die Rampe ist zu früh fertig");
+        pult.decks()[0].state.seek_frames(0);
+
+        let meldungen = laufen(&mut pult, &mut plan, &mut runner, RATE as usize / 4);
+        assert!(plan.ist_leer(), "der Auftrag läuft nach dem Sprung weiter");
+        assert!(
+            meldungen.iter().any(|m| m.contains("zurückgesprungen")),
+            "kein Wort vom Rücksprung: {meldungen:?}"
+        );
+    }
+
+    /// `in deck2 phrase …` — der Taktgeber darf ein anderer sein als das Deck,
+    /// auf das gewirkt wird. Ohne das ließe sich ein schleifendes Deck nicht
+    /// wieder auflösen: Sein eigener Beat kommt nie über das Schleifenende.
+    #[test]
+    fn in_nimmt_ein_eigenes_taktgeber_deck() {
+        let (mut pult, mut runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("channel2.fader"), Wert::Zahl(1.0))
+            .unwrap();
+        pult.schreibe(&k("deck2.play"), Wert::Schalter(true))
+            .unwrap();
+        rendern(&mut runner, 256);
+
+        let mut sitzung = crate::Sitzung::neu();
+        let antwort = crate::behandle(
+            &mut pult,
+            &mut sitzung,
+            "in deck2 4 set deck1.loop_active 0",
+        );
+        assert!(antwort.starts_with("ok plan "), "{antwort}");
+        assert_eq!(
+            pult.plan.auftraege()[0].takt_deck,
+            1,
+            "der Auftrag hängt am falschen Deck"
+        );
     }
 
     /// Der Mensch gewinnt.

@@ -606,7 +606,7 @@ Raum, Ziel, Ist-Energie, Lücke — und ob zu oft dasselbe gefahren wurde",
     ),
     aktion(
         "uebergang",
-        "<blende|bassswap|schnitt|filter> [beats]",
+        "<blende|bassswap|schnitt|filter|schleife> [beats]",
         "Einen benannten Übergang vormerken — die Zeilen dafür stehen in der Antwort \
 und im Plan. Die Anlage wählt nicht aus: welcher Griff passt, entscheidet, wer \
 begründen kann warum",

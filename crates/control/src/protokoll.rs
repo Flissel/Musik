@@ -186,6 +186,7 @@ ok Befehle:
   Formen: linear, weich (S-Kurve), spaet (lange nichts), frueh (sofort viel)
   in <beats> <befehl>    Befehl nach so vielen Beats ausführen
   in phrase[+n] <befehl> Befehl auf der nächsten Phrasengrenze ausführen
+  in deckN <zeit> <befehl>   nach den Takten dieses Decks statt des ersten
   when <control> < <wert> <befehl>   Befehl, sobald ein Wert die Schwelle reisst
   plan              was vorgemerkt ist
   cancel [id]       Vorgemerktes zurücknehmen; ohne Argument alles
@@ -266,18 +267,35 @@ fn rampe(pult: &mut Steuerpult, control: Option<&str>, rest: Option<&str>) -> St
 /// Übergang beginnt auf der Eins einer Phrase, nicht nach einer runden Zahl
 /// Beats. Wer das mit `in 32` nachbaut, trifft irgendwo hin — und der Mix
 /// klingt danach, egal wie sauber alles andere sitzt.
-fn spaeter(pult: &mut Steuerpult, beats: Option<&str>, befehl: Option<&str>) -> String {
-    let beats = match beats_bezug(pult, beats.unwrap_or("")) {
+fn spaeter(pult: &mut Steuerpult, erstes: Option<&str>, rest: Option<&str>) -> String {
+    // `in deck2 phrase+16 …` — der Taktgeber darf ein anderer sein als der,
+    // auf den der Befehl wirkt. Gebraucht wird das, sobald ein Deck in einer
+    // Schleife läuft: Dessen Beat wiederholt sich, und alles, was daran hängt,
+    // wiederholt sich mit oder kommt nie an.
+    let mut erstes = erstes.unwrap_or("");
+    let mut rest = rest.unwrap_or("");
+    let mut takt_deck = None;
+    if let Some(crate::schluessel::Gruppe::Deck(i)) =
+        Schluessel::parse(&format!("{erstes}.play")).map(|k| k.gruppe)
+    {
+        if i < pult.decks().len() {
+            takt_deck = Some(i);
+            erstes = wort(&mut rest);
+        }
+    }
+
+    let beats = match beats_bezug(pult, erstes, takt_deck) {
         Ok(b) => b,
         Err(e) => return e,
     };
-    let Some(befehl) = befehl.filter(|b| !b.trim().is_empty()) else {
+    let befehl = rest.trim();
+    if befehl.is_empty() {
         return "err in braucht einen Befehl: in 16 set channel2.fader 0.9".into();
-    };
+    }
 
     let mut plan = std::mem::take(&mut pult.plan);
     let ergebnis =
-        crate::zeitplan::spaeter_planen(pult, &mut plan, beats, befehl.to_string(), None);
+        crate::zeitplan::spaeter_planen(pult, &mut plan, beats, befehl.to_string(), takt_deck);
     pult.plan = plan;
 
     match ergebnis {
@@ -338,7 +356,7 @@ fn wenn(pult: &mut Steuerpult, control: Option<&str>, rest: Option<&str>) -> Str
 /// Der Bezugspunkt für `phrase` ist dasselbe Deck, auf dessen Takten der
 /// Auftrag dann liegt — das erste mit Beatgrid. Sonst zählte man die Beats des
 /// einen und die Phrase des anderen.
-fn beats_bezug(pult: &Steuerpult, roh: &str) -> Result<f64, String> {
+fn beats_bezug(pult: &Steuerpult, roh: &str, takt_deck: Option<usize>) -> Result<f64, String> {
     if let Ok(zahl) = roh.parse::<f64>() {
         return Ok(zahl);
     }
@@ -358,9 +376,9 @@ fn beats_bezug(pult: &Steuerpult, roh: &str) -> Result<f64, String> {
         );
     }
 
-    let Some(deck) =
+    let Some(deck) = takt_deck.or_else(|| {
         (0..pult.decks().len()).find(|i| crate::zeitplan::beat_jetzt(pult, *i).is_some())
-    else {
+    }) else {
         return Err("err kein Deck mit Beatgrid — phrase hat keinen Bezugspunkt".into());
     };
     let Some(bis) = pult.beats_bis_phrase(deck) else {

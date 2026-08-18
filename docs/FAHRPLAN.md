@@ -194,7 +194,7 @@ Offen bleibt die Crossfader-Kurve, die es schon gibt und die im ersten Lauf
 ungenutzt auf weich stand — sie ist kein Code, sondern eine Frage der Benutzung.
 
 **Ein Repertoire statt eines Handgriffs** ✅. `do master.uebergang
-<blende|bassswap|schnitt|filter> [beats]`. Jeder Griff ist eine Handvoll
+<blende|bassswap|schnitt|filter|schleife> [beats]`. Jeder Griff ist eine Handvoll
 gewöhnlicher Protokollzeilen, die durch denselben Weg laufen wie alles andere —
 also im Plan stehen, in der Mitschrift, bei den Ereignissen, und mit `cancel`
 zurückgehen. Die Antwort nennt jede Zeile: Es gibt nichts, was ein Agent nicht
@@ -250,6 +250,18 @@ dasselbe wie eines, das beliebigen Text annimmt — und ein unlesbarer Bogen wir
 abgewiesen statt halb übernommen. Ein Set gegen eine Kurve zu fahren, die
 niemand gemeint hat, wäre schlimmer als eines ohne Kurve.
 
+**Der fünfte Griff steht ✅.** `schleife` legt den Ausgehenden in eine Schleife
+und wechselt darüber — der einzige Griff, der ihm *Zeit gibt*: Ein Track, der in
+vier Beats zu Ende wäre, hält so noch eine ganze Phrase durch.
+
+Er hat zwei Fehler aufgedeckt, die beide erst am laufenden Programm sichtbar
+wurden. Ein Deck in einer Schleife wiederholt seinen Beat, und alles, was daran
+getaktet ist, wiederholt sich mit: Der Crossfader fuhr sieben Mal hin und her,
+und die Zeile, die die Schleife wieder lösen sollte, kam nie an — ihr Beat lag
+hinter dem Schleifenende. Seitdem bricht ein Auftrag ab und sagt es, wenn sein
+Taktgeber zurückspringt, und `in deckN <zeit> <befehl>` erlaubt, den Takt eines
+*anderen* Decks zu nehmen. Der Griff taktet alles nach dem eingehenden.
+
 **Die Zurückhaltung steht ✅.** Das Repertoire aus P3 macht Abwechslung möglich,
 erzwingt sie aber nicht, und ein System, das viermal hintereinander dieselbe
 Blende wählt, klingt weiterhin nach Automat. `master.repeats` sagt, wie viele
@@ -274,7 +286,7 @@ Der zweite Fund kam nicht aus einem Test, sondern aus dem laufenden Programm:
 Nach `set channel1.fader 1; set master.crossfader -1; set deck1.play 1` stand
 dort bereits `transitions schnitt` — niemand hatte übergeblendet, es lief ja
 erst ein Deck. Seitdem gilt zusätzlich, dass **zwei Decks laufen müssen**; alle
-vier Griffe starten das eingehende Deck, bevor der Fader sich bewegt.
+fünf Griffe starten das eingehende Deck, bevor der Fader sich bewegt.
 
 Die Grenzen stehen im Modul: Wer nur mit den Kanalfadern mischt und den
 Crossfader stehen lässt, taucht nicht auf; und läuft der ausgehende Track aus,
