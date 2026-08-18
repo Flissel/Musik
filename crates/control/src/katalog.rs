@@ -520,6 +520,59 @@ pub static MASTER: &[Beschreibung] = &[
         "Was der Plan zuletzt gemeldet hat: fertig, abgeloest, abgebrochen, gestrichen. \
 Abonnieren meldet jede Zeile einzeln, mit 'event' davor",
     ),
+    // Der Bogen: was das Set vorhat, bevor der nächste Track gewählt wird.
+    text_schreibbar(
+        "arc",
+        "Ziel-Energiekurve über die Setdauer: '0 0.3, 20 0.7, 45 0.95, 60 0.5'. \
+Zeiten in Minuten, Energie 0 bis 1. Schreibbar",
+    ),
+    zahl(
+        "arc_minutes",
+        "",
+        0.0,
+        f64::MAX,
+        Einheit::Keine,
+        false,
+        "Wie lange das Set schon läuft, in Minuten; leer vor arc_start",
+    ),
+    zahl(
+        "arc_target",
+        "SOLL",
+        0.0,
+        1.0,
+        Einheit::Keine,
+        false,
+        "Wie viel Energie der Bogen hier vorsieht",
+    ),
+    zahl(
+        "arc_actual",
+        "IST",
+        0.0,
+        1.0,
+        Einheit::Keine,
+        false,
+        "Wie viel gerade läuft — aus der Art des Abschnitts, nicht aus dem Pegel: \
+der ist auf den Track selbst bezogen und über Tracks hinweg nicht vergleichbar",
+    ),
+    zahl(
+        "arc_gap",
+        "LÜCKE",
+        -1.0,
+        1.0,
+        Einheit::Keine,
+        false,
+        "Soll minus Ist. Positiv heißt: der Bogen will mehr, als gerade läuft — \
+die Zahl, nach der der nächste Track gewählt wird",
+    ),
+    text_feld(
+        "arc_trend",
+        "Wohin der Bogen als Nächstes will: steigt, haelt oder faellt",
+    ),
+    aktion(
+        "arc_start",
+        "",
+        "Das Set beginnt jetzt — ohne das gibt es keinen Ort auf dem Bogen",
+    ),
     aktion(
         "uebergang",
         "<blende|bassswap|schnitt|filter> [beats]",

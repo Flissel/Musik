@@ -213,9 +213,9 @@ Ein DJ, der immer dasselbe macht, ist der langweiligste im Raum — und genau da
 war mein erster Lauf. Der Kritiker misst inzwischen Länge und Form jeder Blende,
 also lässt sich diesmal belegen, dass sich etwas geändert hat.
 
-## P4 — Der Bogen (S3)
+## P4 — Der Bogen (S3) ✅
 
-*Vom Übergang zum Set. Braucht S2, und S2 steht.*
+*Gebaut. Vom Übergang zum Set.*
 
 Eine Ziel-Energiekurve über die Setdauer, gegen die jede Auswahl begründet wird.
 Die Warteschlange trägt die Notiz dann nicht mehr als Freitext, sondern als
@@ -225,6 +225,35 @@ hoch".
 Hier gehört auch **Zurückhaltung** einprogrammiert. Ein System, das jeden
 Übergang gleich lang und gleich weich fährt, klingt nach Automat — auch wenn
 jeder einzelne davon sauber ist.
+
+### Was daraus geworden ist
+
+`master.arc` trägt die Kurve als Text (`0 0.3, 20 0.7, 45 0.95, 60 0.5`),
+`do master.arc_start` setzt die Uhr, und dann steht im Steuerraum:
+`arc_target`, `arc_actual`, **`arc_gap`** und `arc_trend`. Damit ist
+`when master.arc_gap > 0.3 do master.queue_next` sagbar.
+
+**Die Ist-Energie kommt aus der Art des Abschnitts, nicht aus dem Pegel.** Der
+Pegel der Gliederung ist auf den lautesten Abschnitt *desselben* Tracks bezogen
+— der Drop eines leisen Stücks steht dort genauso bei 0,99 wie der eines lauten.
+Über Tracks hinweg ist das nicht vergleichbar, und ein Bogen, der solche Zahlen
+addiert, rechnet mit Äpfeln. Stattdessen eine grobe Leiter über die sechs
+Abschnittsarten. Sechs Stufen sind hier ehrlicher als eine Nachkommastelle, die
+niemand einlösen kann.
+
+Ohne `arc_start` gibt es keinen Ort auf dem Bogen, und dann wird auch keiner
+behauptet: leer statt null. Eine Kurve ohne Uhr ist ein Bild, kein Maßstab.
+
+Ein Fund nebenbei, vom Wächter über alle schreibbaren Controls: `master.arc`
+nimmt Text an, aber nicht *jeden* Text. Ein Feld, das Text annimmt, ist nicht
+dasselbe wie eines, das beliebigen Text annimmt — und ein unlesbarer Bogen wird
+abgewiesen statt halb übernommen. Ein Set gegen eine Kurve zu fahren, die
+niemand gemeint hat, wäre schlimmer als eines ohne Kurve.
+
+**Offen bleibt die Zurückhaltung**: zu messen, ob immer dasselbe gefahren wird.
+Das Repertoire aus P3 macht Abwechslung möglich, erzwingt sie aber nicht, und
+ein System, das viermal hintereinander dieselbe Blende wählt, klingt weiterhin
+nach Automat.
 
 Für ein Team ist der Bogen zugleich das, worüber man sich einig sein muss: Ohne
 ihn verhandeln zwei Agenten über den nächsten Track ohne gemeinsamen Maßstab.
@@ -311,7 +340,7 @@ bräuchte es einen zweiten Weg für die Steuerung); MIDI-Controller (Phase 10).
 | P1 ✅ | Prüfstand | Macht jede spätere Zahl prüfbar und deinen Beitrag billig | — |
 | P2 ◐ | Das Team | Der Zweck des Projekts; alles darüber wäre sonst zweimal gebaut | Stufe 2: zwei Modelle |
 | P3 ✅ | Geste und Repertoire | Sofort hörbar, seit S1 messbar | — |
-| P4 | Der Bogen | Braucht S2; für ein Team der gemeinsame Maßstab | P2 |
+| P4 ✅ | Der Bogen | Braucht S2; für ein Team der gemeinsame Maßstab | P2 |
 | P5 | Der Raum | Braucht den Bogen, sonst gibt es nichts zu lenken | P4, Quelle |
 | P6 | Stems | Größter Klanggewinn, größtes Risiko, braucht Streaming | — |
 | M1–M6 | Musik, Gerät, Ohren | Nicht von hier aus zu erledigen | dir |

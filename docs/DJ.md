@@ -214,9 +214,9 @@ mit bekannter Gliederung nachmisst. Bis dahin stehen die drei Zahlen neben jedem
 Namen — im Bericht von `musik-analyze` und im Sidecar —, damit man ihm
 widersprechen kann.
 
-## S3 — Der Bogen
+## S3 — Der Bogen ✅
 
-*Vom Übergang zum Set.*
+*Gebaut. Vom Übergang zum Set — siehe [`FAHRPLAN.md`](FAHRPLAN.md#p4--der-bogen-s3-).*
 
 Ein einzelner guter Übergang ist Handwerk. Ein gutes Set ist Architektur: Aufbau,
 Plateau, Bruch, Wiederaufbau — über eine Stunde, nicht über vier Minuten.

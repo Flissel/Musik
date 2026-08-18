@@ -813,6 +813,57 @@ liegt. Läuft nichts, gibt es keinen Übergang; laufen beide, ist er im Gange �
 und wer dann gemeint ist, kann niemand wissen. In beiden Fällen sagt die Anlage
 das, statt ein Deck zu wählen.
 
+## Der Bogen: was das Set vorhat
+
+Ein einzelner guter Übergang ist Handwerk. Ein gutes Set ist Architektur —
+Aufbau, Plateau, Bruch, Wiederaufbau, über eine Stunde und nicht über vier
+Minuten. Bisher konnte die Anlage jeden Übergang begründen und keine
+Reihenfolge.
+
+```text
+set master.arc 0 0.3, 20 0.7, 45 0.95, 60 0.5, 80 1.0
+do master.arc_start
+get master.arc_gap        → value master.arc_gap 0.400000
+get master.arc_trend      → value master.arc_trend steigt
+```
+
+Zeiten in **Minuten**, Energie zwischen 0 und 1. Zwischen den Punkten wird
+geradlinig verbunden — nicht weil das musikalisch stimmt, sondern weil alles
+andere eine Genauigkeit vortäuschte, die eine von Hand gesetzte Kurve nicht hat.
+
+| Control | Was |
+| --- | --- |
+| `arc` | die Kurve selbst, schreibbar |
+| `arc_minutes` | wie lange das Set läuft |
+| `arc_target` | was der Bogen hier vorsieht |
+| `arc_actual` | was gerade läuft |
+| `arc_gap` | **Soll minus Ist** — die Zahl, nach der gewählt wird |
+| `arc_trend` | `steigt`, `haelt` oder `faellt` |
+
+Damit wird die eigentliche Frage sagbar:
+
+```text
+when master.arc_gap > 0.3 do master.queue_next
+```
+
+**Die Ist-Energie kommt aus der Art des Abschnitts, nicht aus dem Pegel.** Die
+Gliederung misst je Abschnitt einen Pegel, aber der ist auf den lautesten
+Abschnitt *desselben* Tracks bezogen: Der Drop eines leisen Stücks steht dort
+genauso bei 0,99 wie der eines lauten. Über Tracks hinweg ist das nicht
+vergleichbar, und ein Bogen, der solche Zahlen addiert, rechnet mit Äpfeln.
+Stattdessen eine grobe Leiter — Intro 0,2, Break 0,35, Aufbau 0,55, Drop 0,9 —,
+und grob ist hier ehrlicher als eine Nachkommastelle, die niemand einlösen kann.
+
+**Ohne `arc_start` gibt es keinen Ort auf dem Bogen**, und dann wird auch keiner
+behauptet: `arc_minutes`, `arc_target` und `arc_gap` antworten leer. Eine Kurve
+ohne Uhr ist ein Bild, kein Maßstab.
+
+**Für ein Team ist der Bogen das, worüber man sich einig sein muss.** Ohne ihn
+verhandeln zwei Agenten über den nächsten Track ohne gemeinsamen Maßstab: Der
+eine will Druck, der andere Luft, und beide haben recht, weil es keinen Satz
+gibt, gegen den sich das prüfen ließe. Mit ihm heißt die Frage nicht mehr
+„welcher Track ist gut", sondern „was fehlt hier gerade".
+
 ## Harmonisch mischen
 
 Tempo ist die halbe Trackauswahl. Zwei Stücke im gleichen Takt können trotzdem

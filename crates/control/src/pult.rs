@@ -157,6 +157,13 @@ pub struct DeckEintrag {
 
 pub use audio_core::struktur::PHRASE_BEATS;
 
+/// Wie weit `arc_trend` vorausschaut, in Minuten.
+///
+/// Fünf Minuten sind ein bis zwei Tracks — die Strecke, über die die Wahl des
+/// nächsten überhaupt etwas ändern kann. Wer weiter schaut, bekommt eine
+/// Richtung, auf die er heute nicht mehr reagieren kann.
+pub const VORAUS_MINUTEN: f64 = 5.0;
+
 impl DeckEintrag {
     pub fn neu(state: Arc<DeckState>, kanal: usize, sample_rate: u32) -> DeckEintrag {
         DeckEintrag {
@@ -245,6 +252,13 @@ pub struct Steuerpult {
     /// Was geschehen ist, ohne dass jemand danach gefragt hat — siehe
     /// [`crate::ereignis`].
     pub ereignisse: crate::ereignis::Ereignisse,
+    /// Was das Set vorhat — siehe [`crate::bogen`].
+    pub bogen: crate::bogen::Bogen,
+    /// Wann das Set angefangen hat. `None` heißt: noch nicht gestartet.
+    ///
+    /// Ohne Startzeit gibt es keinen Ort auf dem Bogen, und dann wird auch
+    /// keiner behauptet — eine Kurve ohne Uhr ist ein Bild, kein Maßstab.
+    pub set_start: Option<std::time::Instant>,
     decks: Vec<DeckEintrag>,
     kanaele: Vec<KanalSpiegel>,
     master: MasterSpiegel,
@@ -261,6 +275,8 @@ impl Steuerpult {
             liste: crate::warteschlange::Warteschlange::neu(),
             signale: std::array::from_fn(|_| crate::signal::Signal::neu()),
             ereignisse: crate::ereignis::Ereignisse::neu(),
+            bogen: crate::bogen::Bogen::neu(),
+            set_start: None,
             decks: Vec::new(),
             kanaele: Vec::new(),
             master: MasterSpiegel::default(),
@@ -564,6 +580,25 @@ impl Steuerpult {
         Some(wert)
     }
 
+    /// Wie weit das Set läuft, in Minuten. `None` ohne Start.
+    pub fn set_minuten(&self) -> Option<f64> {
+        self.set_start.map(|s| s.elapsed().as_secs_f64() / 60.0)
+    }
+
+    /// Die Energie, die gerade wirklich läuft.
+    ///
+    /// Aus der **Art** des laufenden Abschnitts, nicht aus dem Pegel: Der ist
+    /// auf den lautesten Abschnitt desselben Tracks bezogen und über Tracks
+    /// hinweg nicht vergleichbar. Läuft mehr als ein Deck, zählt das lauteste
+    /// — beim Übergang ist das der, der den Raum trägt.
+    pub fn ist_energie(&self) -> Option<f64> {
+        (0..self.decks.len())
+            .filter(|i| self.decks[*i].state.is_playing())
+            .filter_map(|i| self.abschnitt(i))
+            .map(|a| crate::bogen::energie(a.art))
+            .max_by(f64::total_cmp)
+    }
+
     /// Der Abschnitt, in dem ein Deck gerade steht.
     pub fn abschnitt(&self, deck: usize) -> Option<audio_core::Abschnitt> {
         let d = self.decks.get(deck)?;
@@ -652,6 +687,51 @@ impl Steuerpult {
                 });
             }
             "event_count" => return Some(Wert::Zahl(self.ereignisse.nummer() as f64)),
+            "arc" => {
+                return Some(if self.bogen.ist_leer() {
+                    Wert::Leer
+                } else {
+                    Wert::Text(crate::bogen::text(&self.bogen))
+                });
+            }
+            "arc_minutes" => {
+                return Some(match self.set_minuten() {
+                    Some(m) => Wert::Zahl(m),
+                    None => Wert::Leer,
+                });
+            }
+            "arc_target" => {
+                return Some(match self.set_minuten().and_then(|m| self.bogen.soll(m)) {
+                    Some(e) => Wert::Zahl(e),
+                    None => Wert::Leer,
+                });
+            }
+            "arc_actual" => {
+                return Some(match self.ist_energie() {
+                    Some(e) => Wert::Zahl(e),
+                    None => Wert::Leer,
+                });
+            }
+            // Die Zahl, nach der gehandelt wird: positiv heißt, der Bogen will
+            // mehr, als gerade läuft.
+            "arc_gap" => {
+                let soll = self.set_minuten().and_then(|m| self.bogen.soll(m));
+                return Some(match (soll, self.ist_energie()) {
+                    (Some(s), Some(i)) => Wert::Zahl(s - i),
+                    _ => Wert::Leer,
+                });
+            }
+            "arc_trend" => {
+                return Some(
+                    match self
+                        .set_minuten()
+                        .and_then(|m| self.bogen.verlauf(m, VORAUS_MINUTEN))
+                    {
+                        Some(v) => Wert::Text(v.name().to_string()),
+                        None => Wert::Leer,
+                    },
+                );
+            }
             "recording" => {
                 return Some(Wert::Schalter(
                     self.aufnahme.as_ref().is_some_and(|a| a.laeuft()),
@@ -730,6 +810,10 @@ impl Steuerpult {
             (Gruppe::Master, "record") => {
                 let pfad = argument.ok_or_else(fehlt)?;
                 self.aufnehmen(pfad)
+            }
+            (Gruppe::Master, "arc_start") => {
+                self.set_start = Some(std::time::Instant::now());
+                Ok(vec!["arc gestartet".into()])
             }
             (Gruppe::Master, "uebergang") => self.uebergang(argument),
             (Gruppe::Master, "record_stop") => self.aufnahme_stoppen(),
@@ -1592,6 +1676,21 @@ impl Steuerpult {
             };
         }
 
+        // Der Bogen ist Text und geht nicht in den Mixer.
+        if k.element == "arc" {
+            let Wert::Text(text) = wert else {
+                return Err(Fehler::FalscherTyp {
+                    control: k.to_string(),
+                    erwartet: crate::wert::Art::Text,
+                });
+            };
+            // Ein unlesbarer Bogen wird abgewiesen, nicht halb übernommen: Ein
+            // Set gegen eine Kurve zu fahren, die niemand gemeint hat, ist
+            // schlimmer als eines ohne Kurve.
+            self.bogen = crate::bogen::parse(&text).map_err(Fehler::Gescheitert)?;
+            return Ok(());
+        }
+
         let v = Self::zahl(b, k, &wert)?;
 
         let befehl = match k.element.as_str() {
@@ -1909,6 +2008,12 @@ mod tests {
                 Art::Auswahl => Wert::Auswahl(b.auswahl[0].to_string()),
                 // Ein Textfeld nimmt keine Zahl: Der Typ ist die Zusage, und
                 // sie stillschweigend zu dehnen hieße, sie aufzugeben.
+                //
+                // Nicht jeder Text ist beliebig: Der Bogen ist eine Kurve in
+                // Textform, und „Probe" ist keine. Dass dieser Wächter das
+                // gemerkt hat, ist der Punkt — ein Feld, das Text *annimmt*,
+                // ist nicht dasselbe wie eines, das jeden Text annimmt.
+                Art::Text if schluessel.element == "arc" => Wert::Text("0 0.3, 60 0.9".into()),
                 Art::Text => Wert::Text("Probe".into()),
                 _ => Wert::Zahl(b.aus_normiert(0.5)),
             };
@@ -2964,5 +3069,171 @@ mod struktur_tests {
         let (mut pult, _runner) = pult_mit_zwei_decks();
         let fehler = pult.ausloesen(&k("deck1.jump_entry"), None);
         assert!(matches!(fehler, Err(Fehler::Gescheitert(_))), "{fehler:?}");
+    }
+}
+
+/// Der Bogen im Steuerraum: Soll, Ist und die Lücke dazwischen.
+#[cfg(test)]
+mod bogen_tests {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+    use audio_core::struktur::{Abschnitt, Art, Struktur};
+
+    fn k(text: &str) -> Schluessel {
+        Schluessel::parse(text).unwrap()
+    }
+
+    fn abschnitt(art: Art) -> Struktur {
+        Struktur {
+            phrase_beats: PHRASE_BEATS,
+            abschnitte: vec![Abschnitt {
+                von_frames: 0,
+                bis_frames: u64::MAX,
+                von_beat: 0.0,
+                bis_beat: 1e9,
+                art,
+                pegel: 0.5,
+                bass: 0.5,
+                dichte: 0.5,
+            }],
+        }
+    }
+
+    #[test]
+    fn ein_bogen_laesst_sich_setzen_und_lesen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        assert_eq!(pult.lies(&k("master.arc")).unwrap(), Wert::Leer);
+
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.3, 60 0.9".into()))
+            .expect("setzen");
+        let Wert::Text(zurueck) = pult.lies(&k("master.arc")).unwrap() else {
+            panic!("kein Text")
+        };
+        assert_eq!(zurueck, "0:00 0.30, 60:00 0.90");
+    }
+
+    /// Ein unlesbarer Bogen wird abgewiesen, nicht halb übernommen. Ein Set
+    /// gegen eine Kurve zu fahren, die niemand gemeint hat, ist schlimmer als
+    /// eines ohne Kurve.
+    #[test]
+    fn ein_unlesbarer_bogen_wird_abgewiesen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.3, 60 0.9".into()))
+            .unwrap();
+
+        let fehler = pult.schreibe(&k("master.arc"), Wert::Text("völlig kaputt".into()));
+        assert!(fehler.is_err(), "Unsinn wurde angenommen");
+
+        // Und der alte Bogen steht noch.
+        let Wert::Text(zurueck) = pult.lies(&k("master.arc")).unwrap() else {
+            panic!()
+        };
+        assert!(zurueck.starts_with("0:00 0.30"), "{zurueck}");
+    }
+
+    /// Ohne Startzeit gibt es keinen Ort auf dem Bogen — und dann wird auch
+    /// keiner behauptet. `Leer` und nicht 0.
+    #[test]
+    fn ohne_start_gibt_es_keinen_ort_auf_dem_bogen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.3, 60 0.9".into()))
+            .unwrap();
+
+        for name in ["master.arc_minutes", "master.arc_target", "master.arc_gap"] {
+            assert_eq!(pult.lies(&k(name)).unwrap(), Wert::Leer, "{name}");
+        }
+
+        pult.ausloesen(&k("master.arc_start"), None).expect("Start");
+        assert!(matches!(
+            pult.lies(&k("master.arc_minutes")).unwrap(),
+            Wert::Zahl(_)
+        ));
+        // Nicht auf die letzte Stelle: Zwischen Start und Abfrage sind
+        // Mikrosekunden vergangen, und der Bogen steht nicht still.
+        let Wert::Zahl(soll) = pult.lies(&k("master.arc_target")).unwrap() else {
+            panic!("keine Zahl")
+        };
+        assert!((soll - 0.3).abs() < 1e-4, "{soll}");
+    }
+
+    /// Die Ist-Energie kommt aus der **Art** des Abschnitts, nicht aus dem
+    /// Pegel — der ist über Tracks hinweg nicht vergleichbar.
+    #[test]
+    fn die_ist_energie_kommt_aus_der_art_des_abschnitts() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        assert_eq!(pult.lies(&k("master.arc_actual")).unwrap(), Wert::Leer);
+
+        pult.deck_mut(0).unwrap().struktur = Some(abschnitt(Art::Drop));
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        assert_eq!(
+            pult.lies(&k("master.arc_actual")).unwrap(),
+            Wert::Zahl(crate::bogen::energie(Art::Drop))
+        );
+
+        // Ein stehendes Deck zählt nicht — was nicht läuft, trägt den Raum
+        // nicht.
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(false))
+            .unwrap();
+        assert_eq!(pult.lies(&k("master.arc_actual")).unwrap(), Wert::Leer);
+    }
+
+    /// Laufen zwei, zählt das lautere — beim Übergang trägt der den Raum.
+    #[test]
+    fn bei_zwei_laufenden_decks_zaehlt_das_lautere() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.deck_mut(0).unwrap().struktur = Some(abschnitt(Art::Outro));
+        pult.deck_mut(1).unwrap().struktur = Some(abschnitt(Art::Drop));
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+        pult.schreibe(&k("deck2.play"), Wert::Schalter(true))
+            .unwrap();
+
+        assert_eq!(
+            pult.lies(&k("master.arc_actual")).unwrap(),
+            Wert::Zahl(crate::bogen::energie(Art::Drop))
+        );
+    }
+
+    /// **Die Zahl, nach der gehandelt wird.** Positiv heißt: Der Bogen will
+    /// mehr, als gerade läuft.
+    #[test]
+    fn die_luecke_ist_soll_minus_ist() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.9, 60 0.9".into()))
+            .unwrap();
+        pult.ausloesen(&k("master.arc_start"), None).unwrap();
+        pult.deck_mut(0).unwrap().struktur = Some(abschnitt(Art::Break));
+        pult.schreibe(&k("deck1.play"), Wert::Schalter(true))
+            .unwrap();
+
+        let Wert::Zahl(luecke) = pult.lies(&k("master.arc_gap")).unwrap() else {
+            panic!("keine Zahl")
+        };
+        let erwartet = 0.9 - crate::bogen::energie(Art::Break);
+        assert!(
+            (luecke - erwartet).abs() < 1e-9,
+            "{luecke} statt {erwartet}"
+        );
+        assert!(luecke > 0.0, "der Bogen will mehr — das muss positiv sein");
+    }
+
+    #[test]
+    fn der_trend_sagt_wohin_es_geht() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.2, 60 1.0".into()))
+            .unwrap();
+        pult.ausloesen(&k("master.arc_start"), None).unwrap();
+        assert_eq!(
+            pult.lies(&k("master.arc_trend")).unwrap(),
+            Wert::Text("steigt".into())
+        );
+
+        pult.schreibe(&k("master.arc"), Wert::Text("0 0.7, 60 0.7".into()))
+            .unwrap();
+        assert_eq!(
+            pult.lies(&k("master.arc_trend")).unwrap(),
+            Wert::Text("haelt".into())
+        );
     }
 }

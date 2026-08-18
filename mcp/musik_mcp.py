@@ -850,6 +850,13 @@ async def _status(form: Format) -> str:
         # muss sichtbar sein statt still.
         "events",
         "event_count",
+        # Der Bogen: was das Set vorhat. Ohne ihn ist „welcher Track als
+        # Nächstes" eine Geschmacksfrage, mit ihm eine mit Antwort.
+        "arc_minutes",
+        "arc_target",
+        "arc_actual",
+        "arc_gap",
+        "arc_trend",
     ]
 
     gefragt = (
@@ -904,6 +911,11 @@ async def _status(form: Format) -> str:
             "recording": roh.get("master.recording") == "1",
             "record_seconds": _als_zahl(roh.get("master.record_seconds", "-")) or 0.0,
             "record_dropped": _als_zahl(roh.get("master.record_dropped", "-")) or 0.0,
+            "arc_minutes": _als_zahl(roh.get("master.arc_minutes", "-")),
+            "arc_target": _als_zahl(roh.get("master.arc_target", "-")),
+            "arc_actual": _als_zahl(roh.get("master.arc_actual", "-")),
+            "arc_gap": _als_zahl(roh.get("master.arc_gap", "-")),
+            "arc_trend": _als_text(roh.get("master.arc_trend", "-")),
             "last_event": _als_text(roh.get("master.events", "-")),
             "event_count": int(_als_zahl(roh.get("master.event_count", "-")) or 0),
         },
@@ -964,6 +976,22 @@ async def _status(form: Format) -> str:
             zeilen.append("- **durchgelaufen**")
         if d["load_status"] not in ("bereit", ""):
             zeilen.append(f"- Laden: {d['load_status']}")
+
+    m = daten["master"]
+    if m["arc_gap"] is not None:
+        richtung = {"steigt": "steigt", "haelt": "hält", "faellt": "fällt"}.get(
+            m["arc_trend"] or "", m["arc_trend"] or ""
+        )
+        fehlt = (
+            f"**{m['arc_gap']:+.2f}** — "
+            + ("mehr Energie gesucht" if m["arc_gap"] > 0.05 else
+               "weniger gesucht" if m["arc_gap"] < -0.05 else "passt")
+        )
+        zeilen.append(
+            f"\n## Bogen\nBei {m['arc_minutes']:.0f} min: soll "
+            f"{m['arc_target']:.2f}, ist {m['arc_actual']:.2f}, Lücke {fehlt}"
+            + (f" · {richtung} in den nächsten Minuten" if richtung else "")
+        )
 
     if daten["master"]["last_event"]:
         zeilen.append(
