@@ -434,9 +434,40 @@ und Feinsuche über die Hüllkurve, genau wie bei der Prüfung an echter Musik. 
 dabei herauskommt, ist eine Aussage über das Verfahren, nicht über Musik; das
 gehört dazugesagt.
 
-**N2 — Die Gliederung an schwierigen Fällen.** Ein Track ohne Outro, einer ohne
-Intro, einer mit zwei Breaks, einer mit einem Tempowechsel. Gebaut, mit bekannter
-Wahrheit, durch den Prüfstand. Findet, wo die Regeln zu eng sind.
+**N2 — Die Gliederung an schwierigen Fällen ✅.** Ein Track ohne Outro, einer
+ohne Intro, einer mit zwei Breaks, einer mit einem Tempowechsel. `musik-material
+<ordner>` baut sie und legt die Wahrheitsdatei daneben; `musik-pruefstand` hält
+die Analyse dagegen.
+
+Der erste Lauf: **13 von 23 Namen richtig** — und die Fehler waren nicht
+verstreut, sondern ein Muster. Viermal wurde ein Drop zu „Teil".
+
+Die Ursache war eine einzige Zeile, und sie steckte tiefer, als sie aussah: Ein
+Drop war, wer über dem **75. Perzentil** des Bassbands lag. Das ist rangbasiert,
+und darin steckt eine Behauptung über die Musik, die niemand aufgestellt hat —
+höchstens ein Viertel der Abschnitte kann je ein Drop sein. Ein Stück mit vier
+Drops bekam einen; die Schwelle lag *zwischen* den Drops.
+
+Jetzt entscheidet der Pegel als **Anteil am lautesten Abschnitt** — eine Höhe,
+kein Rang. Vier Drops dürfen vier Drops sein. Dieselbe Umstellung trennt auch
+Aufbau und Break sauber, und zwar an dem, was sie musikalisch unterscheidet:
+Ein Aufbau kommt von etwas Leiserem und führt in den Drop, ein Break fällt aus
+einem Drop heraus. Am Pegel allein sind sie nicht zu trennen (0,48 gegen 0,40).
+
+Danach: **21 von 23**. Die zwei Reste liegen beim Tempowechsel, und dort steigt
+schon die Segmentierung aus.
+
+**Die Grenze ist echt und steht jetzt im Modul: ein Tempo je Track.** Gerechnet
+wird auf einem Beatgrid, und ein Beatgrid hat ein Tempo. Springt es mitten im
+Stück — ein Mitschnitt zweier Tracks in einer Datei —, stimmen die
+Phrasengrenzen danach nicht mehr, und die Gliederung findet ab dort nichts:
+drei von sechs Abschnitten, alle drei davor. Ein zweites Grid wäre eine eigene
+Schicht (Tempokurve statt Tempo), und die braucht man erst, wenn solche Dateien
+im Ordner liegen.
+
+Das ist bereits der **sechste** Entwurf einer Schwelle in dieser Schicht, der am
+Material gescheitert ist. Gebautes Material findet solche Fehler; es ersetzt
+aber keine echte Musik mit gehörter Wahrheit (M1) — die bleibt der Prüfstein.
 
 **N3 — Der Kritiker gegen sich selbst.** Denselben Mitschnitt mit und ohne
 Mitschrift bewerten und die Abweichung über viele Sets sammeln. Aus dem einen

@@ -249,6 +249,22 @@ einer bestehenden Traktor-Sammlung — ⚠️ gegen eine *echte* `collection.nml
 das noch nicht geprüft, nur gegen selbst geschriebene Beispiele. Der erste Lauf
 gehört stichprobenartig nachgesehen.
 
+Die Analyse gegen das prüfen, was jemand gehört hat — **ohne** Audiogerät:
+
+```sh
+cargo run -p musik-cli --bin musik-material -- /tmp/schwierig
+cargo run -p musik-cli --bin musik-pruefstand -- /tmp/schwierig/wahrheit.txt
+```
+
+`musik-pruefstand` legt die Analyse neben eine Wahrheitsdatei und meldet den
+Abstand — mit Vorzeichen, ohne Urteil. `musik-material` baut vier Fälle mit
+bekannter Gliederung und schreibt die Wahrheitsdatei gleich dazu: ein Track ohne
+Outro, einer ohne Intro, einer mit zwei Breaks, einer mit Tempowechsel. Jeder
+bricht eine Annahme, die in der Gliederung steckt.
+
+⚠️ Gebautes Material findet Fehler, ersetzt aber keine echte Musik mit gehörter
+Wahrheit. Eine Vorlage dafür steht in [`docs/wahrheit-vorlage.txt`](docs/wahrheit-vorlage.txt).
+
 Auflegen — **hier** braucht es ein Audiogerät:
 
 ```sh

@@ -31,6 +31,21 @@
 //! anderen drei schon trennen, und jede Größe, die nichts entscheidet, macht
 //! die Schwellen nur schwerer zu begründen.
 //!
+//! # Wo es aufhört: ein Tempo je Track
+//!
+//! Gerechnet wird auf **einem** Beatgrid, und ein Beatgrid hat ein Tempo.
+//! Springt das Tempo mitten im Stück — ein Mitschnitt zweier Tracks in einer
+//! Datei, ein Edit mit Übergang —, stimmen die Phrasengrenzen danach nicht
+//! mehr, und die Gliederung findet ab dort nichts. Gemessen an gebautem
+//! Material mit Sprung von 124 auf 140: drei von sechs Abschnitten gefunden,
+//! alle drei davor.
+//!
+//! Das ist eine Grenze und kein Fehler: Ein zweites Grid wäre eine eigene
+//! Schicht (Tempokurve statt Tempo), und die brauchte man erst, wenn solche
+//! Dateien im Ordner liegen. **Gemeldet wird sie trotzdem** — eine Gliederung,
+//! die nach der halben Datei aufhört und das verschweigt, wäre schlimmer als
+//! keine.
+//!
 //! Eine Grenze liegt dort, wo sich das Klangbild über eine Phrasengrenze hinweg
 //! ändert: Der Abstand zwischen dem Mittel der [`KERN`] Phrasen davor und dem
 //! der [`KERN`] danach ist die Neuheit, und ihre lokalen Spitzen sind die
@@ -109,6 +124,21 @@ pub const MIN_PHRASEN: usize = 2;
 /// entscheidet sie. Genau der Satz, der in diesem Projekt schon viermal die
 /// Vorstufe eines Fehlers war — er steht hier, damit die Zahl nicht für
 /// geprüft gehalten wird.
+/// Ab welchem Anteil am lautesten Abschnitt ein Abschnitt „oben" ist.
+///
+/// 0,6 trennt am gebauten Material Aufbau und Break (0,48 und 0,40) von Drop
+/// und Teil (0,95 und mehr) mit reichlich Abstand nach beiden Seiten. Eine
+/// **Höhe** und kein Rang: Ein Stück darf durchweg oben sein, und eines mit
+/// vier Drops darf vier haben.
+pub const OBEN: f32 = 0.6;
+
+/// Ab welchem Anteil am stärksten Bass eines lauten Abschnitts er ein Drop ist.
+///
+/// Derselbe Gedanke wie bei [`OBEN`]. Am gebauten Material liegen Drops bei
+/// 0,95 und darüber, alles ohne Bass bei 0,39 und darunter — die Lücke ist
+/// groß, und 0,6 liegt darin.
+pub const DROP_BASS: f32 = 0.6;
+
 pub const SCHWELLE: f32 = 0.15;
 
 /// Gliedert einen Track.
@@ -375,69 +405,83 @@ fn zusammenfassen(
 
 /// Gibt den Abschnitten ihre Namen.
 ///
-/// Alle Schwellen sind **Quantile des Tracks selbst**. Eine absolute Zahl wäre
-/// eine Behauptung über alle Musik; ein Quantil ist eine über diesen Track, und
-/// die lässt sich wenigstens einhalten.
-/// Gibt den Abschnitten ihre Namen.
+/// # Warum keine Quantile mehr
 ///
-/// **Die Quantile werden über die Abschnitte gebildet, nicht über die
-/// Phrasen.** Das klingt nach einer Feinheit und ist keine: Verglichen wird ein
-/// Abschnitts*mittel*, und ein Mittel liegt immer unter der lautesten Phrase
-/// darin. Bei einem Track, der die meiste Zeit oben ist, rutscht der
-/// Phrasen-Median damit fast auf die Spitze — und *jeder* Abschnitt fällt
-/// darunter. Ein Stück mit 90 Sekunden Vollgas wurde so zu „Intro, Break,
-/// Outro": als wäre es durchweg leise gewesen.
+/// Der erste Entwurf verglich jeden Abschnitt mit dem Median der übrigen und
+/// nannte einen Drop, wer über dem 75. Perzentil des Bassbands lag. Das ist
+/// **rangbasiert**, und darin steckt eine Behauptung über die Musik, die
+/// niemand aufgestellt hat: Höchstens ein Viertel der Abschnitte kann je ein
+/// Drop sein. Ein Stück mit vier Drops bekam einen und drei „Teil" — die
+/// Schwelle lag *zwischen* den Drops.
 ///
-/// Gefunden beim ersten Lauf gegen ein Stück ohne inneren Kontrast, nicht im
-/// Test — dieselbe Falle wie schon dreimal: eine Schwelle, geeicht an Material,
-/// das zufällig die richtige Verteilung hatte.
+/// Gemessen an gebautem Material mit bekannter Gliederung (`musik-material`):
+/// 13 von 23 Namen stimmten, und die Fehler waren nicht verstreut, sondern
+/// genau dieses Muster. Jetzt entscheidet der **Pegel als Anteil am lautesten
+/// Abschnitt des Tracks** — eine Höhe, kein Rang. Vier Drops dürfen vier
+/// Drops sein.
+///
+/// # Was das immer noch nicht ist
+///
+/// Ein Maß für Lautstärke über Tracks hinweg. Bezugspunkt bleibt der lauteste
+/// Abschnitt *dieses* Stücks; der Drop eines leisen Stücks heißt genauso Drop
+/// wie der eines lauten. Das ist Absicht — siehe `bogen::energie_des_tracks`.
 fn benennen(abschnitte: &mut [Abschnitt]) {
-    let q = |werte: &[f32], anteil: f32| {
-        let mut s = werte.to_vec();
-        s.sort_by(f32::total_cmp);
-        let spitze = s.last().copied().unwrap_or(1.0).max(1e-9);
-        s[((s.len() - 1) as f32 * anteil) as usize] / spitze
-    };
-    let pegel: Vec<f32> = abschnitte.iter().map(|a| a.pegel).collect();
-    let bass: Vec<f32> = abschnitte.iter().map(|a| a.bass).collect();
-    if pegel.is_empty() {
+    let Some(lautester) = abschnitte
+        .iter()
+        .map(|a| a.pegel)
+        .fold(None::<f32>, |m, p| Some(m.map_or(p, |m: f32| m.max(p))))
+    else {
         return;
-    }
-    let p50 = q(&pegel, 0.5);
-    let b75 = q(&bass, 0.75);
+    };
+    let staerkster_bass = abschnitte
+        .iter()
+        .map(|a| a.bass)
+        .fold(0.0f32, f32::max)
+        .max(1e-9);
+    let lautester = lautester.max(1e-9);
 
     let letzter = abschnitte.len().saturating_sub(1);
     for (i, a) in abschnitte.iter_mut().enumerate() {
-        a.art = if i == 0 && a.pegel < p50 {
-            Art::Intro
-        } else if i == letzter && i > 0 && a.pegel < p50 {
-            Art::Outro
-        } else if a.bass >= b75 && a.pegel >= p50 {
-            Art::Drop
-        } else if a.pegel < p50 {
-            // Ein Einbruch in der Mitte. Der erste Entwurf verlangte dafür
-            // „Bass weg", und das war falsch gemessen: Ein Kick allein bringt
-            // schon reichlich Energie unter 160 Hz, ein Break mit laufenden
-            // Drums bleibt also im Bassband deutlich sichtbar. Am gebauten
-            // Material lag er bei 0,41 gegen 0,99 im Drop — leiser, aber weit
-            // entfernt von „weg". Der Pegel trennt das zuverlässiger.
+        let laut = a.pegel / lautester >= OBEN;
+        let bassig = a.bass / staerkster_bass >= DROP_BASS;
+
+        a.art = match (laut, bassig) {
+            (true, true) => Art::Drop,
+            // Laut, aber ohne Boden: ein Teil, der läuft. Ihn Drop zu nennen,
+            // damit ein Name dasteht, macht die Auskunft wertlos.
+            (true, false) => Art::Teil,
+            // Unten. Am Anfang ist das ein Intro, am Ende ein Outro,
+            // dazwischen ein Break — dasselbe, nur woanders.
             //
-            // Damit ist ein Break dasselbe wie ein Intro, nur nicht am Anfang.
-            // Das ist keine Schwäche der Regel, sondern die Sache selbst.
-            Art::Break
-        } else {
-            Art::Teil
+            // Der erste Entwurf verlangte für ein Break „Bass weg", und das
+            // war falsch gemessen: Ein Kick allein bringt reichlich Energie
+            // unter 160 Hz. Am gebauten Material lag er bei 0,41 gegen 0,99 im
+            // Drop — leiser, aber weit entfernt von „weg".
+            _ if i == 0 => Art::Intro,
+            _ if i == letzter && i > 0 => Art::Outro,
+            _ => Art::Break,
         };
     }
 
-    // Ein Aufbau ist nur einer, wenn danach etwas kommt, worauf er aufbaut.
+    // Ein Aufbau ist nur einer, wenn danach etwas kommt, worauf er aufbaut —
+    // und wenn er von unten kommt. Genau das trennt ihn von einem Break: Der
+    // Aufbau folgt auf etwas Leiseres und führt in den Drop, der Break fällt
+    // aus einem Drop heraus und in den nächsten hinein. Am Pegel allein sind
+    // die beiden nicht zu unterscheiden; am gebauten Material lagen sie bei
+    // 0,48 gegen 0,40.
+    //
     // Deshalb ein zweiter Durchgang: Beim ersten war der nächste Name noch
     // nicht vergeben.
     for i in 0..abschnitte.len().saturating_sub(1) {
-        let naechster_drop = abschnitte[i + 1].art == Art::Drop;
-        let a = &mut abschnitte[i];
-        if naechster_drop && matches!(a.art, Art::Teil) {
-            a.art = Art::Aufbau;
+        if abschnitte[i + 1].art != Art::Drop {
+            continue;
+        }
+        if !matches!(abschnitte[i].art, Art::Teil | Art::Break) {
+            continue;
+        }
+        let von_unten = i == 0 || abschnitte[i - 1].pegel < abschnitte[i].pegel;
+        if von_unten {
+            abschnitte[i].art = Art::Aufbau;
         }
     }
 }
@@ -645,6 +689,101 @@ mod tests {
             s.abschnitte
                 .iter()
                 .map(|a| (a.art, a.pegel, a.bass))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// **Vier Drops dürfen vier Drops sein.**
+    ///
+    /// Der erste Entwurf nannte einen Drop, wer über dem 75. Perzentil des
+    /// Bassbands lag — rangbasiert, und darin steckt eine Behauptung über die
+    /// Musik, die niemand aufgestellt hat: Höchstens ein Viertel der
+    /// Abschnitte kann je ein Drop sein. Ein Stück mit drei Drops bekam einen
+    /// und zwei „Teil", weil die Schwelle *zwischen* den Drops lag.
+    ///
+    /// Gefunden am gebauten Prüfmaterial (`musik-material`), nicht hier: Von
+    /// 23 Namen stimmten 13, und die Fehler waren nicht verstreut, sondern
+    /// genau dieses Muster.
+    #[test]
+    fn mehrere_drops_werden_alle_drops_genannt() {
+        // Intro, Aufbau, Drop, Break, Drop, Break, Drop, Outro.
+        let s = gliedern(&bauen(&[
+            (false, false, 0.20),
+            (true, false, 0.30),
+            (true, true, 0.33),
+            (true, false, 0.12),
+            (true, true, 0.31),
+            (true, false, 0.11),
+            (true, true, 0.32),
+            (false, false, 0.18),
+        ]));
+
+        let arten: Vec<Art> = s.abschnitte.iter().map(|a| a.art).collect();
+        assert_eq!(
+            arten,
+            vec![
+                Art::Intro,
+                Art::Aufbau,
+                Art::Drop,
+                Art::Break,
+                Art::Drop,
+                Art::Break,
+                Art::Drop,
+                Art::Outro
+            ],
+            "{:?}",
+            s.abschnitte
+                .iter()
+                .map(|a| (a.art, a.pegel, a.bass))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// **Ein Stück, das auf dem Höhepunkt endet, hat kein Outro** — und eines,
+    /// das sofort oben anfängt, kein Intro.
+    ///
+    /// Beides kommt in jedem DJ-Ordner vor: das eine als Produktion, das
+    /// andere als Werkzeug-Edit. Eine Regel „der letzte Abschnitt ist ein
+    /// Outro" wäre für `beats_to_outro` schlimmer als keine Auskunft — dort
+    /// hinge ein Übergang daran.
+    #[test]
+    fn ohne_outro_und_ohne_intro_wird_keins_erfunden() {
+        let ohne_outro = gliedern(&bauen(&[
+            (false, false, 0.20),
+            (true, false, 0.30),
+            (true, true, 0.32),
+            (true, false, 0.12),
+            (true, true, 0.31),
+        ]));
+        assert_eq!(
+            ohne_outro.abschnitte.last().map(|a| a.art),
+            Some(Art::Drop),
+            "aus dem Schluss wurde ein Outro gemacht: {:?}",
+            ohne_outro
+                .abschnitte
+                .iter()
+                .map(|a| a.art)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            ohne_outro.outro_frames().is_none(),
+            "ein Outro, das es nicht gibt, hängt an beats_to_outro"
+        );
+
+        let ohne_intro = gliedern(&bauen(&[
+            (true, true, 0.32),
+            (true, false, 0.12),
+            (true, true, 0.31),
+            (false, false, 0.18),
+        ]));
+        assert_eq!(
+            ohne_intro.abschnitte.first().map(|a| a.art),
+            Some(Art::Drop),
+            "aus dem Anfang wurde ein Intro gemacht: {:?}",
+            ohne_intro
+                .abschnitte
+                .iter()
+                .map(|a| a.art)
                 .collect::<Vec<_>>()
         );
     }
