@@ -265,6 +265,21 @@ bricht eine Annahme, die in der Gliederung steckt.
 ⚠️ Gebautes Material findet Fehler, ersetzt aber keine echte Musik mit gehörter
 Wahrheit. Eine Vorlage dafür steht in [`docs/wahrheit-vorlage.txt`](docs/wahrheit-vorlage.txt).
 
+Eine lange Aufnahme in Lieder zerlegen:
+
+```sh
+cargo run -p musik-cli --release --bin musik-schneiden -- aufnahme.wav /musik/neu
+```
+
+`musik-schneiden` schneidet an den Lücken zwischen den Stücken, analysiert jedes
+gleich mit und legt das Sidecar daneben — danach hat die Sammlung Tempo, Tonart
+und Gliederung. `--probe` zeigt die Schnitte, ohne etwas zu schreiben.
+
+⚠️ **Ein gemixtes Set lässt sich nicht sauber schneiden.** Während einer Blende
+laufen zwei Lieder gleichzeitig; dort gibt es keine Grenze, nur eine Stelle, an
+der man sie zieht. Findet das Werkzeug weder Lücke noch Klangwechsel, schneidet
+es gar nicht und sagt es.
+
 Und den Kritiker gegen die Anlage halten:
 
 ```sh
