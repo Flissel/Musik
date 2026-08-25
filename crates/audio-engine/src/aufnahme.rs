@@ -199,6 +199,13 @@ impl Drop for Aufnahme {
 
 /// Legt Ringpuffer und Schreiber-Thread an.
 pub fn mitschnitt(sample_rate: u32) -> (Mitschnitt, Aufnahme) {
+    let (tap, aufnahme, _nummer) = mitschnitt_intern(sample_rate);
+    (tap, aufnahme)
+}
+
+/// Wie [`mitschnitt`], gibt aber die Nummer des Schreibers mit heraus. Nur der
+/// Test braucht sie — um genau diesen einen Schreiber anzuhalten.
+fn mitschnitt_intern(sample_rate: u32) -> (Mitschnitt, Aufnahme, u64) {
     let kapazitaet = (sample_rate as f32 * PUFFER_SEKUNDEN) as usize * CHANNELS;
     let (tx, rx) = rtrb::RingBuffer::new(kapazitaet);
 
@@ -207,9 +214,11 @@ pub fn mitschnitt(sample_rate: u32) -> (Mitschnitt, Aufnahme) {
     let geschrieben = Arc::new(AtomicU64::new(0));
     let (befehle, eingang) = std::sync::mpsc::channel();
 
+    let id = schreiber_id();
+    let mitzaehlen = Arc::clone(&geschrieben);
     std::thread::Builder::new()
         .name("mitschnitt".into())
-        .spawn(move || schreiben(rx, eingang))
+        .spawn(move || schreiben(rx, eingang, mitzaehlen, id))
         .expect("Schreiber-Thread ließ sich nicht starten");
 
     (
@@ -227,6 +236,7 @@ pub fn mitschnitt(sample_rate: u32) -> (Mitschnitt, Aufnahme) {
             pfad: None,
             sample_rate,
         },
+        id,
     )
 }
 
@@ -234,7 +244,8 @@ pub fn mitschnitt(sample_rate: u32) -> (Mitschnitt, Aufnahme) {
 ///
 /// Leert den Ring **immer**, auch ohne offene Datei. Täte er das nicht, liefe
 /// der Puffer nach einem Stopp voll, und der nächste Start begänne mit den
-/// Resten des letzten.
+/// Resten des letzten. Er leert ihn aber nur so weit, wie sich die Frames
+/// zuordnen lassen — dazu unten beim Deckel mehr.
 ///
 /// Beim `Start` wird dagegen **nicht** geleert, und das ist wichtiger, als es
 /// aussieht. Der Aufnehmende schreibt in den Ring, sobald `starten` zurück ist;
@@ -263,7 +274,58 @@ pub fn mitschnitt(sample_rate: u32) -> (Mitschnitt, Aufnahme) {
 /// kommt — das gehört schon zum nächsten. „Alles, was noch im Ring ist" wäre
 /// die naheliegende Regel und die falsche: Genau darin steckt der Anfang des
 /// nächsten Mitschnitts.
-fn schreiben(mut rx: rtrb::Consumer<f32>, befehle: Receiver<Befehl>) {
+/// Ein Haltepunkt im Schreiber, den nur der Test kennt.
+///
+/// Die Lücke, um die es geht, ist ein paar Maschinenbefehle breit — zwischen
+/// „Befehle abholen" und „Ring leeren". Sie durch Wiederholen zu treffen ging
+/// nicht: vierzig Läufe mit zwanzig Runden blieben grün. Also wird der
+/// Schreiber an genau dieser Stelle angehalten, während der Test in Ruhe
+/// stoppt, neu startet und nachlegt.
+///
+/// Außerhalb von `cfg(test)` bleibt davon nichts übrig — beide Funktionen sind
+/// leer und werden wegoptimiert.
+#[cfg(not(test))]
+#[inline(always)]
+fn schreiber_id() -> u64 {
+    0
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+fn haltepunkt(_id: u64) {}
+
+#[cfg(test)]
+static NAECHSTE_ID: AtomicU64 = AtomicU64::new(1);
+#[cfg(test)]
+static ANGEHALTEN: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static PARKT: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+fn schreiber_id() -> u64 {
+    NAECHSTE_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Hält **nur** den Schreiber an, dessen Nummer der Test angemeldet hat. Alle
+/// anderen laufen weiter — die Tests dieser Datei laufen nebeneinander.
+#[cfg(test)]
+fn haltepunkt(id: u64) {
+    if ANGEHALTEN.load(Ordering::Acquire) != id {
+        return;
+    }
+    PARKT.store(id, Ordering::Release);
+    while ANGEHALTEN.load(Ordering::Acquire) == id {
+        std::hint::spin_loop();
+    }
+    PARKT.store(0, Ordering::Release);
+}
+
+fn schreiben(
+    mut rx: rtrb::Consumer<f32>,
+    befehle: Receiver<Befehl>,
+    geschrieben: Arc<AtomicU64>,
+    id: u64,
+) {
     const TAKT: std::time::Duration = std::time::Duration::from_millis(20);
     let mut datei: Option<WavDatei> = None;
     let mut frames: u64 = 0;
@@ -283,6 +345,10 @@ fn schreiben(mut rx: rtrb::Consumer<f32>, befehle: Receiver<Befehl>) {
 
     loop {
         let mut beenden = false;
+        // Der Stand **vor** dem Abholen der Befehle. Alles, was danach in den
+        // Ring kommt, bleibt bis zur nächsten Runde liegen — siehe unten.
+        let stand = geschrieben.load(Ordering::Relaxed);
+        let mut frisch_gestartet = false;
 
         while let Ok(befehl) = befehle.try_recv() {
             match befehl {
@@ -294,6 +360,7 @@ fn schreiben(mut rx: rtrb::Consumer<f32>, befehle: Receiver<Befehl>) {
                         let _ = d.abschliessen();
                     }
                     frames = 0;
+                    frisch_gestartet = true;
                     match WavDatei::anlegen(&pfad, sample_rate) {
                         Ok(d) => datei = Some(d),
                         Err(e) => eprintln!("Mitschnitt: {e}"),
@@ -312,7 +379,26 @@ fn schreiben(mut rx: rtrb::Consumer<f32>, befehle: Receiver<Befehl>) {
             }
         }
 
-        holen(&mut rx, &mut block, u64::MAX);
+        haltepunkt(id);
+
+        // **Nur so weit leeren, wie es sich zuordnen lässt.**
+        //
+        // `stand` wurde abgelesen, bevor die Befehle drankamen. Ein Frame, der
+        // darin mitzählt, wurde also vorher abgelegt — und wenn er zu einem
+        // *neueren* Mitschnitt gehört, dann wurde dessen `Start` ebenfalls
+        // vorher abgeschickt und ist in dieser Runde schon abgeholt. Anders
+        // gesagt: Was hier gezählt wird, gehört nie zu einer Datei, die noch
+        // kommt.
+        //
+        // Nach einem frischen `Start` gilt der Stand nicht mehr — er zählt
+        // dann womöglich noch den vorigen Mitschnitt. Eine Runde warten kostet
+        // eine Zwanzigstelsekunde und liegt weit innerhalb des Vorrats.
+        let deckel = if frisch_gestartet {
+            0
+        } else {
+            stand.saturating_sub(frames)
+        };
+        holen(&mut rx, &mut block, deckel);
         if let Some(d) = datei.as_mut() {
             if !block.is_empty() {
                 if let Err(e) = d.schreiben(&block) {
@@ -557,6 +643,134 @@ mod tests {
                 .map(|m| m.len() == erwartet)
                 .unwrap_or(false)),
             "der zweite hat {:?} statt {erwartet} Bytes",
+            std::fs::metadata(&zweiter).map(|m| m.len())
+        );
+
+        let _ = std::fs::remove_file(&erster);
+        let _ = std::fs::remove_file(&zweiter);
+    }
+
+    /// **Zwanzig Mitschnitte hintereinander, ohne einmal Luft zu holen.**
+    ///
+    /// Zwanzig `Start`/`Stop`-Paare liegen dann auf einen Schlag im Briefkasten
+    /// und alle Frames zusammen im Ring; der Schreiber muss sie allein aus den
+    /// Zahlen im `Stop` auseinandersortieren. Verschiedene Längen sorgen dafür,
+    /// dass ein Verrutschen um einen einzigen Mitschnitt auffällt.
+    ///
+    /// **Den Fehler aus der CI trifft dieser Test nicht** — vierzig Läufe
+    /// blieben grün, auch mit dem Fehler drin. Dafür ist die Lücke zu schmal;
+    /// das leistet erst `der_ring_wird_nur_bis_zur_grenze_geleert` mit seinem
+    /// Haltepunkt. Hier bleibt eine billige Grundprüfung.
+    #[test]
+    fn viele_mitschnitte_hintereinander_verrutschen_nicht() {
+        const RUNDEN: usize = 20;
+        let (mut tap, mut aufnahme) = mitschnitt(RATE);
+
+        // Verschiedene Längen: Rutscht etwas, passt keine einzige Größe mehr.
+        let laengen: Vec<usize> = (0..RUNDEN).map(|r| 200 + r * 13).collect();
+        let dateien: Vec<PathBuf> = (0..RUNDEN).map(|r| scratch(&format!("hetze{r}"))).collect();
+
+        for (r, pfad) in dateien.iter().enumerate() {
+            let block: Vec<f32> = (0..laengen[r]).flat_map(|_| [0.5f32, -0.5]).collect();
+            aufnahme.starten(pfad).unwrap();
+            tap.nimm_auf(&block);
+            aufnahme.stoppen();
+        }
+
+        for (r, pfad) in dateien.iter().enumerate() {
+            let soll = KOPF_BYTES as u64 + laengen[r] as u64 * CHANNELS as u64 * 2;
+            assert!(
+                warte_bis(|| std::fs::metadata(pfad)
+                    .map(|m| m.len() == soll)
+                    .unwrap_or(false)),
+                "Runde {r} hat {:?} statt {soll} Bytes",
+                std::fs::metadata(pfad).map(|m| m.len())
+            );
+        }
+
+        for pfad in &dateien {
+            let _ = std::fs::remove_file(pfad);
+        }
+    }
+
+    /// **Der Ring wird nur so weit geleert, wie es sich zuordnen lässt.**
+    ///
+    /// Der Fehler dahinter ist einmal in der CI aufgetaucht und danach nie
+    /// wieder: Die erste Datei hatte 5244 statt 4044 Bytes — also 1300 Frames
+    /// statt 1000. Genau 1000 + 300, die beiden Mitschnitte in einer Datei.
+    ///
+    /// Der Weg dorthin ließ sich lesen, aber nicht treffen. Der Schreiber holt
+    /// erst die Befehle ab und leert dann den Ring; wer in dieser Lücke stoppt,
+    /// neu startet und nachlegt, dessen zweiter Mitschnitt liegt schon im Ring,
+    /// während der `Stop` noch im Briefkasten steckt. Vierzig Läufe mit zwanzig
+    /// Runden blieben grün — die Lücke ist ein paar Maschinenbefehle breit.
+    ///
+    /// Also wird der Schreiber angehalten. Zweimal: einmal, damit er den
+    /// `Start` überhaupt verarbeitet und die erste Datei offen ist, und dann
+    /// noch einmal in genau der Lücke. Das zweite Parken kann erst in einer
+    /// Runde passieren, die den `Start` schon abgeholt hat — die Runde davor
+    /// hat ihren Haltepunkt bereits hinter sich.
+    ///
+    /// Dieser Test ist der einzige, der den [`haltepunkt`] benutzt, und der
+    /// Grund, dass es ihn gibt.
+    #[test]
+    fn der_ring_wird_nur_bis_zur_grenze_geleert() {
+        let erster = scratch("grenze1");
+        let zweiter = scratch("grenze2");
+        let (mut tap, mut aufnahme, nummer) = mitschnitt_intern(RATE);
+
+        let eins: Vec<f32> = (0..1_000).flat_map(|_| [0.5f32, -0.5]).collect();
+        let zwei: Vec<f32> = (0..300).flat_map(|_| [0.25f32, -0.25]).collect();
+
+        let parken = |nummer: u64| {
+            ANGEHALTEN.store(nummer, Ordering::Release);
+            assert!(
+                warte_bis(|| PARKT.load(Ordering::Acquire) == nummer),
+                "der Schreiber ist nicht stehen geblieben"
+            );
+        };
+        // Losfahren lassen und **abwarten, bis er wirklich weg ist**. Ohne das
+        // Abwarten wurde beim zweiten Mal gar nicht neu geparkt: Der Schreiber
+        // sah die Null nie, blieb stehen, wo er stand, und der Test hielt das
+        // alte Parken für das neue. Er prüfte dann etwas anderes als gedacht.
+        let weiterfahren = |nummer: u64| {
+            ANGEHALTEN.store(0, Ordering::Release);
+            assert!(
+                warte_bis(|| PARKT.load(Ordering::Acquire) != nummer),
+                "der Schreiber ist nicht weitergefahren"
+            );
+        };
+
+        // Erstes Parken: den `Start` losschicken, während er steht. Er holt ihn
+        // in einer der nächsten Runden ab und legt die Datei an.
+        parken(nummer);
+        aufnahme.starten(&erster).unwrap();
+        weiterfahren(nummer);
+
+        // Zweites Parken: jetzt ist die erste Datei offen, und der Ring ist
+        // leer. Genau hier saß der Fehler.
+        parken(nummer);
+        tap.nimm_auf(&eins);
+        aufnahme.stoppen();
+        aufnahme.starten(&zweiter).unwrap();
+        tap.nimm_auf(&zwei);
+        weiterfahren(nummer);
+
+        let soll_eins = KOPF_BYTES as u64 + eins.len() as u64 * 2;
+        let soll_zwei = KOPF_BYTES as u64 + zwei.len() as u64 * 2;
+        assert!(
+            warte_bis(|| std::fs::metadata(&erster)
+                .map(|m| m.len() == soll_eins)
+                .unwrap_or(false)),
+            "der erste hat {:?} statt {soll_eins} Bytes — hat er den zweiten mitgenommen?",
+            std::fs::metadata(&erster).map(|m| m.len())
+        );
+        aufnahme.stoppen();
+        assert!(
+            warte_bis(|| std::fs::metadata(&zweiter)
+                .map(|m| m.len() == soll_zwei)
+                .unwrap_or(false)),
+            "der zweite hat {:?} statt {soll_zwei} Bytes",
             std::fs::metadata(&zweiter).map(|m| m.len())
         );
 
