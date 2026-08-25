@@ -265,6 +265,24 @@ bricht eine Annahme, die in der Gliederung steckt.
 ⚠️ Gebautes Material findet Fehler, ersetzt aber keine echte Musik mit gehörter
 Wahrheit. Eine Vorlage dafür steht in [`docs/wahrheit-vorlage.txt`](docs/wahrheit-vorlage.txt).
 
+Etwas von außen hereinlassen — Plattenspieler, Interface, ein zweiter Rechner:
+
+```sh
+cargo run -p musik-cli --release --bin musik-eingang -- --liste
+cargo run -p musik-cli --release --bin musik-eingang -- --gerät scarlett
+cargo run -p musik-app -- --aux-in
+```
+
+`musik-eingang` öffnet das Gerät auf demselben Weg wie die Anwendung und sagt
+vorher, was hinterher zu spät wäre: ob überhaupt etwas ankommt, ob noch Luft
+unter dem Begrenzer ist und ob es lückenlos ankommt. `musik-app --aux-in` legt
+den AUX-Kanal dann darauf; mit `do master.record` läuft alles mit.
+
+⚠️ **An echter Hardware ungeprüft** — hier gibt es kein Audiogerät. Geprüft ist
+der Weg gegen das `null`-Gerät von ALSA: Auswahl, Rate, Format, Callback,
+Umrechnung auf Stereo. Ob der Treiber tut, was seine Beschreibung sagt, weiß
+erst, wer es anschließt.
+
 Eine lange Aufnahme in Lieder zerlegen:
 
 ```sh

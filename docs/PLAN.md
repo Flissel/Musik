@@ -137,6 +137,17 @@ einem Deck:
   entkoppelt beide; bleibt die Aufnahme zurück, gibt es Stille und einen
   gezählten Unterlauf statt eines Aussetzers.
 
+**Der Zuspieler kam später.** Der Kanalzug stand lange, der Ring auch — nur hat
+niemand hineingeschrieben; im Programm stand wörtlich „AUX bleibt ohne Zuspieler
+still". `musik-app --aux-in` legt den Kanal jetzt auf ein Aufnahmegerät.
+
+Zwei Dinge werden dabei nicht geraten. Die **Samplerate** muss genau die der
+Engine sein — der Ring trägt Samples, keine Zeit, und 44,1 statt 48 kHz heißt
+8 % zu langsam, ohne dass etwas es meldet. Und das **Sample-Format** wird nicht
+der Reihe nach genommen, sondern nach Auflösung gewählt: Das `null`-Gerät von
+ALSA bietet `i8` zuerst an, also acht Bit für Material, das analysiert werden
+soll.
+
 ### Threads
 
 | Thread | Aufgabe | Regeln |

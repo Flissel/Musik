@@ -40,6 +40,12 @@ struct Args {
     screenshot: Option<PathBuf>,
     screenshot_nach: std::time::Duration,
     socket: PathBuf,
+    /// Woher der AUX-Kanal sein Audio bekommt.
+    ///
+    /// `None` heißt: gar nicht — dann bleibt AUX still wie bisher. `Some("")`
+    /// heißt: Standardgerät. Ein Text wählt ein Gerät über einen Teil seines
+    /// Namens.
+    aux_in: Option<String>,
 }
 
 /// Wo die Steuerung lauscht. Im Laufzeitverzeichnis des Benutzers, nicht in
@@ -164,10 +170,38 @@ fn main() -> Result<()> {
         });
     }
 
-    // AUX bleibt ohne Zuspieler still, ist aber vorhanden und bedienbar.
-    let (_aux_writer, aux_source) = aux_channel(RATE as usize * 2);
+    // Ohne `--aux-in` bleibt AUX still, ist aber vorhanden und bedienbar.
+    let (aux_writer, aux_source) = aux_channel(RATE as usize * 2);
     let aux_kanal = engine.add_channel("AUX", Box::new(aux_source));
     engine.channel(aux_kanal).set_assign(assign_fuer(2));
+
+    // Der Eingang wird **gehalten**, nicht nur geöffnet: Fällt er weg, schließt
+    // sich der Stream, und AUX ist wieder still — ohne dass etwas danach
+    // aussähe.
+    let _eingang = match &args.aux_in {
+        Some(wunsch) => {
+            let wunsch = Some(wunsch.as_str()).filter(|w| !w.is_empty());
+            match audio_engine::Eingang::open(aux_writer, RATE, wunsch) {
+                Ok(e) => {
+                    println!(
+                        "AUX: {} — {} Kanal/Kanäle bei {} Hz",
+                        e.device_name(),
+                        e.channels(),
+                        e.sample_rate()
+                    );
+                    Some(e)
+                }
+                // Kein Abbruch: Ein fehlender Eingang ist kein Grund, das Pult
+                // nicht zu öffnen. Verschwiegen wird er nicht.
+                Err(e) => {
+                    eprintln!("AUX: {e}");
+                    eprintln!("     Der Kanal bleibt still; alles andere läuft.");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
 
     // Der Mitschnitt greift hinter dem Begrenzer ab. Angelegt vor der
     // Kommandoschlange, weil die Engine danach in den Audio-Thread wandert.
@@ -299,6 +333,7 @@ fn parse_args() -> Result<Args> {
         // gezeichnet ist.
         screenshot_nach: std::time::Duration::from_millis(600),
         socket: standard_socket(),
+        aux_in: None,
     };
 
     let mut iter = std::env::args().skip(1);
@@ -311,6 +346,20 @@ fn parse_args() -> Result<Args> {
             "--b" => args.b = Some(PathBuf::from(wert()?)),
             "--screenshot" => args.screenshot = Some(PathBuf::from(wert()?)),
             "--socket" => args.socket = PathBuf::from(wert()?),
+            "--aux-in" => args.aux_in = Some(String::new()),
+            "--aux-gerät" | "--aux-geraet" => args.aux_in = Some(wert()?),
+            "--aux-liste" => {
+                let geraete = audio_engine::eingang::geraete();
+                if geraete.is_empty() {
+                    println!("Kein Aufnahmegerät gefunden.");
+                } else {
+                    println!("Aufnahmegeräte:");
+                    for g in geraete {
+                        println!("  {g}");
+                    }
+                }
+                std::process::exit(0);
+            }
             "--screenshot-nach" => {
                 let sekunden: f64 = wert()?
                     .parse()
@@ -321,6 +370,11 @@ fn parse_args() -> Result<Args> {
                 println!("Aufruf: musik-app [--db <datei>] [--a <track>] [--b <track>]");
                 println!("                  [--cache <dir>] [--screenshot <bild.png>]");
                 println!("                  [--socket <pfad>] [--screenshot-nach <sekunden>]");
+                println!("                  [--aux-in] [--aux-gerät <name>] [--aux-liste]");
+                println!();
+                println!("--aux-in       legt den AUX-Kanal auf das Standard-Aufnahmegerät");
+                println!("--aux-gerät    wählt eines über einen Teil seines Namens");
+                println!("--aux-liste    zeigt, welche es gibt");
                 std::process::exit(0);
             }
             other => anyhow::bail!("unbekannte Option: {other}"),
