@@ -10,6 +10,7 @@ pub mod sidecar;
 pub mod struktur;
 pub mod tempo;
 pub mod tonart;
+pub mod wechsel;
 
 #[cfg(test)]
 pub(crate) mod testing;
