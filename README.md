@@ -265,6 +265,20 @@ bricht eine Annahme, die in der Gliederung steckt.
 ⚠️ Gebautes Material findet Fehler, ersetzt aber keine echte Musik mit gehörter
 Wahrheit. Eine Vorlage dafür steht in [`docs/wahrheit-vorlage.txt`](docs/wahrheit-vorlage.txt).
 
+Und den Kritiker gegen die Anlage halten:
+
+```sh
+cargo run -p musik-cli --release --bin musik-streuung -- /tmp/streuung
+```
+
+`musik-streuung` fährt 24 Sets durch die echte Anlage — echter Mixer, echtes
+Pult, echtes Repertoire, echte Mitschrift — und vergleicht danach, wo der
+Kritiker den Übergang **hört**, mit dem Frame, in dem der Crossfader sich
+wirklich bewegt hat. Heraus kommt eine Verteilung statt einer Anekdote: Median
++2,0 s, ein harter Schnitt auf ein Fenster genau, eine Blende über 64 Beats gar
+nicht gefunden. Was das heißt, steht in [`docs/FAHRPLAN.md`](docs/FAHRPLAN.md)
+unter N3.
+
 Auflegen — **hier** braucht es ein Audiogerät:
 
 ```sh

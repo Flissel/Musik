@@ -506,9 +506,64 @@ Das ist bereits der **sechste** Entwurf einer Schwelle in dieser Schicht, der am
 Material gescheitert ist. Gebautes Material findet solche Fehler; es ersetzt
 aber keine echte Musik mit gehörter Wahrheit (M1) — die bleibt der Prüfstein.
 
-**N3 — Der Kritiker gegen sich selbst.** Denselben Mitschnitt mit und ohne
-Mitschrift bewerten und die Abweichung über viele Sets sammeln. Aus dem einen
-gemessenen Wert (3,7 s zu spät) wird so eine Verteilung.
+**N3 — Der Kritiker gegen sich selbst ✅.** Aus dem einen gemessenen Wert
+(3,7 s zu spät) ist eine Verteilung geworden. `musik-streuung <ordner>` fährt
+24 Sets durch die **echte Anlage** — echter Mixer, echtes Pult, echtes
+Repertoire, echter Mitschnitt, echte Mitschrift — und hält danach die Schätzung
+des Kritikers gegen das, was die Mitschrift festgehalten hat.
+
+**Die Verteilung:** Median **+2,0 s**, im Betrag 2,4 s, Spanne −1,4 bis +7,6 s
+über 20 gefundene Übergänge. Der ursprüngliche Einzelwert liegt darin: Er
+stammt von einer 32-Beat-Blende, und die haben hier im Mittel +4,9 s.
+
+**Der Fehler hängt an der Länge des Übergangs, nicht am Zufall:**
+
+| Übergang | Fehler im Mittel | Unschärfe, die der Kritiker angibt |
+| --- | --- | --- |
+| Schnitt (0 Beats) | **−1,1 s** | 0,2 s |
+| 16 Beats | +1,5 s | 4,5 s |
+| 32 Beats | +4,9 s | 4,2 s |
+| 64 Beats | +7,6 s | 9,0 s |
+
+Ein harter Schnitt wird also auf ein Fenster genau gefunden — und eher zu
+früh als zu spät. Je länger die Blende, desto später die Schätzung, ungefähr
+ein Viertel der Blendendauer. Das ist kein Zufallsfehler, sondern der Preis
+dafür, dass der Anfang einer Blende per Konstruktion unhörbar ist.
+
+**Die angegebene Unschärfe trägt.** In 16 von 20 Fällen deckt sie den
+tatsächlichen Fehler. Eine Fehlerspanne, die den Fehler nicht deckt, wäre
+schlimmer als keine — sie beruhigt.
+
+**Der Fund: eine lange Blende wird gar nicht bemerkt.** Vier von 24 Übergängen
+hat der Kritiker übersehen, drei davon Blenden über 64 Beats. Der Grund steht
+in seiner eigenen Konstante: Er vergleicht das Klangbild mit dem von vor
+`ABSTAND_SEK` = 16 s. Dauert die Blende länger als das, liegt der Vergleich
+selbst schon mitten in ihr, und der Unterschied reißt die Schwelle nie. Bei
+128 BPM sind 64 Beats 30 Sekunden — **eine Blende über zwei Phrasen ist für
+den Kritiker unsichtbar.** Das ist nicht mit einer größeren Zahl behoben: Ein
+weiterer Rückblick verwechselt zwei aufeinanderfolgende Tracks.
+
+**Zwei Anker waren falsch, bevor einer stimmte**, und beide gaben Zahlen aus,
+die nach Messwerten aussahen. Der erste nahm den ersten Crossfader-Eintrag
+überhaupt — das war das Einrichten, Sekunde 0, und gemessen wurde danach der
+Abstand zum Dateianfang. Der zweite nahm die *Bestellung* des Griffs: 24,00 s,
+sauber, in jedem Set gleich. Dazwischen liegt aber die Wartezeit auf die
+Phrase, hier sechs Sekunden — dem Kritiker wären vier Sekunden Verspätung
+angeschrieben worden, die in Wahrheit sein Vorsprung waren. Drei Wächter
+halten den Anker jetzt fest.
+
+**Und der Prüfstand hat zuerst sich selbst gemessen.** Der erste Durchgang lief
+so viel schneller als die Wiedergabe, dass der Ring des Mitschnitts überlief:
+1,2 von 2,1 Millionen Frames verworfen, mehr als die Hälfte. Die Datei war
+lesbar, die Mitschrift passte zu ihr, und die Zahlen sahen aus wie Messwerte.
+Seitdem läuft die Schleife am Zügel, und ein Set mit auch nur einem verworfenen
+Frame wird nicht gemessen, sondern gemeldet.
+
+**Was das nicht ist:** eine Aussage über Musik. Das Material ist gebaut — Kick,
+Bass, ein Dur-Dreiklang —, und zwei solche Stücke unterscheiden sich harmonisch
+deutlicher als zwei Tracks einer Platte. Die Streuung hier ist deshalb eher die
+**untere Schranke** des Fehlers als sein Erwartungswert. Was sie trägt, ist das
+Vorzeichen, der Zusammenhang mit der Länge und der blinde Fleck bei 16 s.
 
 ## Kleine Schulden
 

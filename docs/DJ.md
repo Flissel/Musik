@@ -132,6 +132,15 @@ Damit ist die erste Zahl da, die dieses ganze Vorhaben rechtfertigt: **Die
 Schätzung aus dem Klang lag 3,7 Sekunden zu spät.** Vorher war das eine
 Vermutung; `--ohne-mitschrift` misst sie jetzt bei jedem Set neu.
 
+Aus der einen Zahl ist inzwischen eine Verteilung geworden (`musik-streuung`,
+24 Sets durch die echte Anlage): Median **+2,0 s**, und der Fehler hängt an der
+Länge des Übergangs — ein Schnitt wird auf ein Fenster genau gefunden, eine
+Blende über 32 Beats im Mittel 4,9 s zu spät. **Eine Blende über 64 Beats wird
+gar nicht mehr gefunden**, weil der Kritiker mit dem Klangbild von vor 16
+Sekunden vergleicht und dieser Vergleich dann selbst schon mitten in der Blende
+liegt. Der Einzelwert oben stammt von einer 32-Beat-Blende und sitzt genau da,
+wo die Verteilung ihn erwarten lässt.
+
 Und der erste Befund, den vorher niemand hätte finden können: Deck 2 setzte auf
 *seinem* Beat −1 ein, also fünfzehn Beats neben seiner eigenen Eins. Der
 ausgehende Track war auf der Phrase, der eingehende nicht. Genau dafür braucht

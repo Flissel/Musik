@@ -285,7 +285,9 @@ fragen nur und stünden sonst in jeder zweiten Zeile.
 **Wozu.** Der Griff an den Fader steht nicht im Klang. Am Anfang einer langen
 Blende ist der eingehende Track per Konstruktion unhörbar; wer den Beginn
 nachträglich aus dem Mitschnitt schätzt, liegt an einem gemessenen Beispiel
-3,7 Sekunden daneben. Dieselbe Lücke bei der Phrasenlage: Der Anker eines
+3,7 Sekunden daneben — über 24 gefahrene Sets im Median 2,0 Sekunden, bei
+langen Blenden bis 7,6, und über 64 Beats findet er den Übergang gar nicht
+mehr. Dieselbe Lücke bei der Phrasenlage: Der Anker eines
 nachträglich geschätzten Rasters ist irgendein starker Schlag, nicht die Eins.
 Beides weiß die Anlage im Moment des Geschehens genau.
 
