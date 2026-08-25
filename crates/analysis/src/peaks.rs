@@ -32,7 +32,9 @@ impl PeakLevel {
 /// Berechnet alle Stufen aus interleaved Stereo.
 pub fn compute(samples: &[f32]) -> Vec<PeakLevel> {
     let mono: Vec<f32> = samples
-        .chunks_exact(CHANNELS)
+        .as_chunks::<CHANNELS>()
+        .0
+        .iter()
         .map(|f| 0.5 * (f[0] + f[1]))
         .collect();
 

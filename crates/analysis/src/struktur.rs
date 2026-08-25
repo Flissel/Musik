@@ -265,7 +265,9 @@ fn merkmale(
 
 fn mono(samples: &[f32]) -> Vec<f32> {
     samples
-        .chunks_exact(CHANNELS)
+        .as_chunks::<CHANNELS>()
+        .0
+        .iter()
         .map(|f| f.iter().sum::<f32>() / CHANNELS as f32)
         .collect()
 }

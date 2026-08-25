@@ -136,7 +136,7 @@ impl ThreeBandEq {
 
     /// Verarbeitet interleaved Stereo an Ort und Stelle.
     pub fn process(&mut self, buffer: &mut [f32]) {
-        for frame in buffer.chunks_exact_mut(2) {
+        for frame in buffer.as_chunks_mut::<2>().0 {
             for (ch, sample) in frame.iter_mut().enumerate() {
                 let (low, rest) = self.lower[ch].process(*sample);
                 let (mid, high) = self.upper[ch].process(rest);

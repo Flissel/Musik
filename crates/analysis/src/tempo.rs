@@ -293,7 +293,9 @@ pub fn refine_anchor(samples: &[f32], sample_rate: u32, grid: Beatgrid) -> Beatg
     }
 
     let mono: Vec<f32> = samples
-        .chunks_exact(CHANNELS)
+        .as_chunks::<CHANNELS>()
+        .0
+        .iter()
         .map(|f| 0.5 * (f[0] + f[1]))
         .collect();
 

@@ -92,7 +92,7 @@ impl DjFilter {
             return;
         }
 
-        for frame in buffer.chunks_exact_mut(2) {
+        for frame in buffer.as_chunks_mut::<2>().0 {
             for (ch, sample) in frame.iter_mut().enumerate() {
                 let out = self.svf[ch].process(*sample);
                 *sample = match self.mode {

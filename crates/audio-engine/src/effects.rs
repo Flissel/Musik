@@ -242,7 +242,7 @@ impl FxUnit {
         let rueck = self.amount * 0.9;
         let mut spitze = 0.0f32;
 
-        for frame in buffer.chunks_exact_mut(2) {
+        for frame in buffer.as_chunks_mut::<2>().0 {
             let nass_l = self.delay.lies(verzoegerung, 0);
             let nass_r = self.delay.lies(verzoegerung, 1);
 
@@ -267,7 +267,7 @@ impl FxUnit {
         let rampe = (GATE_RAMPE_MS * 0.001 * self.sample_rate).max(1.0);
         let pro_sample = 1.0 / rampe;
 
-        for frame in buffer.chunks_exact_mut(2) {
+        for frame in buffer.as_chunks_mut::<2>().0 {
             let ziel = if self.phase < offen { 1.0 } else { 0.0 };
             // Stetig auf das Ziel zulaufen statt springen.
             if self.gate < ziel {
@@ -298,7 +298,7 @@ impl FxUnit {
         let rueck = 0.4 * self.amount;
         let mut spitze = 0.0f32;
 
-        for frame in buffer.chunks_exact_mut(2) {
+        for frame in buffer.as_chunks_mut::<2>().0 {
             let lfo = (std::f32::consts::TAU * self.phase).sin();
             let verzoegerung = mitte + tiefe * lfo;
 
@@ -328,7 +328,7 @@ impl FxUnit {
         // Und gleichzeitig die Rate herunter, bis auf ein Achtel.
         let halten = 1.0 + self.amount * 7.0;
 
-        for frame in buffer.chunks_exact_mut(2) {
+        for frame in buffer.as_chunks_mut::<2>().0 {
             self.halt_zaehler += 1.0;
             if self.halt_zaehler >= halten {
                 self.halt_zaehler -= halten;
@@ -501,9 +501,10 @@ mod tests {
         let mut buffer = vec![0.5; RATE as usize * 2];
         fx.process(&mut buffer);
 
-        let groesster_sprung = buffer
-            .chunks_exact(2)
-            .zip(buffer.chunks_exact(2).skip(1))
+        let frames = buffer.as_chunks::<2>().0;
+        let groesster_sprung = frames
+            .iter()
+            .zip(frames.iter().skip(1))
             .fold(0.0f32, |m, (a, b)| m.max((b[0] - a[0]).abs()));
 
         // Über eine Rampe von 1,5 ms darf ein Schritt nur ein Bruchteil sein.

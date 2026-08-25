@@ -46,7 +46,7 @@ impl Limiter {
 
     /// Verarbeitet interleaved Stereo an Ort und Stelle.
     pub fn process(&mut self, buffer: &mut [f32]) {
-        for frame in buffer.chunks_exact_mut(2) {
+        for frame in buffer.as_chunks_mut::<2>().0 {
             let peak = frame[0].abs().max(frame[1].abs());
 
             let needed = if peak > 0.0 {

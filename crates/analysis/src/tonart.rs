@@ -195,7 +195,9 @@ fn terz_anteil(chroma: &[f32; 12], tonart: Tonart) -> f32 {
 /// Die zwölf Halbtonklassen, aufsummiert über den ganzen Track.
 pub fn chroma(samples: &[f32], sample_rate: u32) -> Option<[f32; 12]> {
     let mono: Vec<f32> = samples
-        .chunks_exact(CHANNELS)
+        .as_chunks::<CHANNELS>()
+        .0
+        .iter()
         .map(|f| f.iter().sum::<f32>() / CHANNELS as f32)
         .collect();
     if mono.len() < FENSTER {
