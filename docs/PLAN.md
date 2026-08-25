@@ -267,9 +267,12 @@ Zwei Dinge stehen damit fest, die vorher Vermutung waren:
   an der richtigen Stelle sitzt — wer sie als Gütesiegel liest, liest etwas
   hinein, das nicht drinsteht.
 
-Offen bleibt der Bereich unter `MIN_BPM` (70): Ein Stück bei 65 BPM findet der
-Detektor nicht als solches. Bei den fünf Aufnahmen kam das nicht vor, die
-langsamste lag bei 71.
+Offen bleibt der Bereich unter `MIN_BPM` (70). Bei den fünf Aufnahmen kam er
+nicht vor, die langsamste lag bei 71 — nachgemessen wurde er später an gebautem
+Material (N1), und das Ergebnis ist schlechter als erwartet: Ein Stück bei
+65 BPM wird nicht abgewiesen, sondern **mit rund 71 BPM gemeldet**, deutlich und
+falsch. Die Begründung, warum die Grenze trotzdem steht, hängt an der Konstante
+selbst.
 
 ## Entschiedene Punkte
 

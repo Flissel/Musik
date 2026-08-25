@@ -416,7 +416,7 @@ machen** — deshalb steht der Prüfstand vorn.
 | **M3** | **Ein Interface mit vier Ausgängen.** Phase 1 ist bis auf einen Schritt abgenommen: ob der Treiber die Pufferkanäle 3/4 auf die Buchsen 3/4 legt. Ohne Vorhören fehlt dem System außerdem das Ohr am Kopfhörer | vierkanaliges Rendern steht (`musik-mix --cue`), gemessen ist es auch |
 | **M4** | **Einmal hinhören, ob die Zeitstreckung bei ±8 % taugt.** Gemessen ist sie, gehört nie | eine Datei mit demselben Takt bei 0,92 / 1,00 / 1,08 zum Vergleichen |
 | **M5** | **Eine echte `collection.nml`** — der Traktor-Import ist nie gegen eine gelaufen | der Import steht, der Testfall ist synthetisch |
-| **M6** | **Material unter 70 BPM.** Dort findet der Detektor nichts, und ob das an der Grenze liegt oder am Verfahren, ist unbekannt | siehe N3: Das kann ich zur Hälfte selbst |
+| **M6** | **Material unter 70 BPM.** N1 hat die halbe Frage beantwortet: Es liegt an der Grenze, nicht am Verfahren — und darunter meldet der Detektor nicht nichts, sondern falsch. Was fehlt, ist echtes langsames Material, an dem die Oktavwahl ohne enges Fenster geprüft werden kann | N1 ✅ an gebautem Material; das gebaute reicht für die Oktavfrage nicht |
 
 Vier davon sind mit denselben fünf Tracks erledigt, wenn du sie noch einmal
 hochlädst — und diesmal schreibe ich sie sofort ins Repo, statt sie im
@@ -427,12 +427,49 @@ verschluckt.
 
 Kein Feature, sondern das Einlösen offener Behauptungen. Läuft nebenher.
 
-**N1 — Langsames Material selbst bauen.** Unter 70 BPM findet der Detektor
-nichts, weil `MIN_BPM` dort liegt. Ob das Verfahren darunter trägt, lässt sich
-mit gebautem Material und **zwei unabhängigen Gegenproben** klären — Oktavlage
-und Feinsuche über die Hüllkurve, genau wie bei der Prüfung an echter Musik. Was
-dabei herauskommt, ist eine Aussage über das Verfahren, nicht über Musik; das
-gehört dazugesagt.
+**N1 — Langsames Material selbst bauen ✅.** Die Frage war, ob das Verfahren
+unter `MIN_BPM` trägt. Die Antwort war ja — und der eigentliche Fund ein
+anderer.
+
+Gemessen an gebautem Material von 38 bis 128 BPM, mit zwei unabhängigen
+Gegenproben (Median der Hüllkurven-Abstände und dieselbe Grobsuche mit
+tieferer Grenze): Zwischen **46 und 58 BPM findet die Autokorrelation die
+richtige Periode**, deutlich und stabil — beide Gegenproben stimmen auf ein
+halbes BPM überein. Das Verfahren trägt dort also.
+
+**Der Fund:** Eine harte Untergrenze weist unter sich nicht ab — sie meldet
+falsch. Ein Stück mit 66 BPM bekam ein Grid mit **71,51 BPM**, eines mit 68 BPM
+eines mit 69,88, und zwar mit hoher Deutlichkeit: Innerhalb des abgeschnittenen
+Suchfensters ragt die beste Verschiebung sauber heraus, sie sitzt nur am Rand.
+Ein Grid, das um 8 % danebenliegt, ist schlimmer als keines — jeder Beat
+driftet, Sync zieht das andere Deck mit, und nichts sagt es.
+
+**Zwei Auswege wurden gebaut und beide wieder zurückgenommen.** Sie stehen
+hier, weil das Zurücknehmen das Ergebnis ist:
+
+1. *Das Fenster weiter aufmachen und knapp über der neuen Grenze abweisen.* Das
+   lädt den Halbtempo-Fehler ein, und zwar sofort messbar: Bei Snare auf zwei
+   und vier greift die Grobsuche auf den Zweitakt-Zyklus, und der Demo-Track mit
+   124 BPM bekam gar kein Grid mehr. Einen Backbeat hat fast jede Musik — der
+   Preis ist also nicht die Ausnahme, sondern der Normalfall.
+2. *Den Rand erkennen und dann abweisen.* Geht lokal nicht. Nachgemessen sitzt
+   ein echtes Stück mit 71 BPM bei 0,989 · Fensterrand **näher** am Rand als das
+   falsche 66 bei 0,975, und „die Korrelation steigt am Rand noch" trifft 92 und
+   128 BPM genauso. Die nötige Auskunft — wo die eigentliche Spitze liegt —
+   steht per Konstruktion außerhalb des Fensters.
+
+**`MIN_BPM` bleibt darum bei 70, und der Fehler bleibt bestehen.** Material
+unter 70 BPM bekommt ein Grid, dem nicht zu trauen ist. Das steht jetzt an der
+Konstante selbst, damit es niemand übersieht, der daran rührt; ein Test hält
+fest, dass 71, 75 und 92 BPM nicht auf die Hälfte kippen, damit ein zweiter
+Anlauf auf das Fenster sofort rot wird.
+
+Der Weg dahin führt nicht über die Schwelle, sondern über die Oktavwahl: Erst
+wenn die Entscheidung zwischen Periode und halber Periode ohne enges Fenster
+trägt, darf das Fenster aufgehen. Ob die 140, 150 und 174 BPM, die in der
+Messung auf die Hälfte kippten, am Fenster lagen oder am Zweitakt-Zyklus des
+gebauten Materials, lässt sich mit gebautem Material **nicht entscheiden** —
+genau da hört es auf, und hier hilft nur M1.
 
 **N2 — Die Gliederung an schwierigen Fällen ✅.** Ein Track ohne Outro, einer
 ohne Intro, einer mit zwei Breaks, einer mit einem Tempowechsel. `musik-material

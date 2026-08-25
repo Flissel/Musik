@@ -19,6 +19,45 @@ use audio_core::track::CHANNELS;
 
 use crate::onset::OnsetEnvelope;
 
+/// Untergrenze der Tempo-Erkennung.
+///
+/// # Was darunter passiert — gemessen, nicht vermutet
+///
+/// **Eine harte Untergrenze weist unter sich nicht ab. Sie meldet falsch.**
+/// Gebautes Material mit 66 BPM bekommt ein Grid mit **71,51 BPM**, eines mit
+/// 68 eines mit 69,88 — und zwar mit hoher Deutlichkeit, denn innerhalb des
+/// abgeschnittenen Suchfensters ragt die beste Verschiebung sauber heraus. Sie
+/// sitzt nur am Rand. Ein Grid, das um 8 % danebenliegt, ist schlimmer als
+/// keines: Jeder Beat driftet, Sync zieht das andere Deck mit, und nichts sagt
+/// es.
+///
+/// Das Verfahren selbst trägt tiefer. Mit geöffnetem Fenster findet die
+/// Autokorrelation zwischen 46 und 58 BPM die richtige Periode, deutlich und
+/// stabil — zwei unabhängige Gegenproben (Median der Hüllkurven-Abstände,
+/// Grobsuche mit tieferer Grenze) stimmen dort auf ein halbes BPM überein.
+/// Die Grenze liegt also an dieser Konstante, nicht am Verfahren.
+///
+/// # Warum sie trotzdem steht
+///
+/// Zwei naheliegende Auswege wurden ausprobiert und sind beide falsch:
+///
+/// 1. **Das Fenster weiter aufmachen** lädt den Halbtempo-Fehler ein, und zwar
+///    messbar: Bei Material mit Snare auf zwei und vier greift die Grobsuche
+///    auf den Zweitakt-Zyklus. Der Demo-Track mit 124 BPM bekam so gar kein
+///    Grid mehr. Einen Backbeat hat fast jede Musik.
+/// 2. **Den Rand erkennen** geht nicht lokal. Ein echtes Stück mit 71 BPM sitzt
+///    mit 0,989 · Fensterrand **näher** am Rand als das falsche 66 mit 0,975,
+///    und „die Korrelation steigt am Rand noch" trifft 92 und 128 BPM genauso.
+///    Die nötige Auskunft — wo die eigentliche Spitze liegt — steht per
+///    Konstruktion außerhalb des Fensters.
+///
+/// Der Weg dahin führt über die Oktavwahl: Erst wenn die Entscheidung zwischen
+/// Periode und halber Periode ohne enges Fenster trägt, darf das Fenster
+/// aufgehen. Das ist eine eigene Aufgabe und keine Schwellenkorrektur.
+///
+/// **Bis dahin gilt: Material unter 70 BPM bekommt ein Grid, dem nicht zu
+/// trauen ist** — nicht „kein Grid", sondern ein falsches. Der Messweg dorthin
+/// steht in `docs/FAHRPLAN.md` unter N1.
 const MIN_BPM: f64 = 70.0;
 const MAX_BPM: f64 = 200.0;
 
@@ -428,6 +467,60 @@ mod tests {
             *s += *t;
         }
         samples
+    }
+
+    /// Material knapp über [`MIN_BPM`] — gebaut, mit Kick auf jedem Beat und
+    /// Snare auf zwei und vier, auf durchgehendem Bass.
+    fn langsam(bpm: f64, secs: f64) -> Vec<f32> {
+        let je_beat = RATE as f64 * 60.0 / bpm;
+        let n = (RATE as f64 * secs) as usize;
+        let mut mono = vec![0.0f32; n];
+        // Durchgehender Ton, damit der Sockel der Autokorrelation liegt wie
+        // bei echter Musik und nicht wie bei einem Klick-Track.
+        for (i, s) in mono.iter_mut().enumerate() {
+            let t = i as f32 / RATE as f32;
+            *s += 0.20 * (std::f32::consts::TAU * 55.0 * t).sin();
+            *s += 0.12 * (std::f32::consts::TAU * 220.0 * t).sin();
+        }
+        let mut beat = 0usize;
+        loop {
+            let start = (beat as f64 * je_beat) as usize;
+            if start + RATE as usize / 4 >= n {
+                break;
+            }
+            for i in 0..RATE as usize / 4 {
+                let t = i as f32 / RATE as f32;
+                let f = 110.0 * (-t * 30.0).exp() + 45.0;
+                mono[start + i] += (std::f32::consts::TAU * f * t).sin() * (-t * 22.0).exp() * 0.9;
+                if beat % 2 == 1 {
+                    let rausch = ((i * 1103515245 + 12345) % 2048) as f32 / 1024.0 - 1.0;
+                    mono[start + i] += rausch * (-t * 40.0).exp() * 0.35;
+                }
+            }
+            beat += 1;
+        }
+        mono.iter().flat_map(|v| [*v, *v]).collect()
+    }
+
+    /// **Langsames Material mit Backbeat kippt nicht auf die halbe Periode.**
+    ///
+    /// Der Test steht hier, weil genau das beim Versuch passiert ist, das
+    /// Suchfenster zu öffnen: Bei Snare auf zwei und vier gewann der
+    /// Zweitakt-Zyklus, und der Demo-Track mit 124 BPM bekam gar kein Grid
+    /// mehr. Solange [`MIN_BPM`] das Fenster eng hält, hält auch das hier —
+    /// wer daran rührt, sieht es sofort.
+    #[test]
+    fn langsames_material_mit_backbeat_kippt_nicht_auf_die_haelfte() {
+        for bpm in [71.0, 75.0, 92.0] {
+            let grid = detect(&crate::onset::onset_envelope(&langsam(bpm, 40.0), RATE))
+                .unwrap_or_else(|| panic!("{bpm} BPM wurde nicht erkannt"));
+            let ab = (grid.bpm as f64 - bpm).abs();
+            assert!(
+                ab < 1.5,
+                "{bpm} BPM wurde als {:.2} erkannt — auf die Hälfte gekippt?",
+                grid.bpm
+            );
+        }
     }
 
     /// Sichert den Abstand ab, auf dem [`MIN_SALIENCE`] beruht. Rutschen die
