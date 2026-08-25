@@ -276,7 +276,24 @@ cargo run -p musik-app -- --aux-in
 `musik-eingang` öffnet das Gerät auf demselben Weg wie die Anwendung und sagt
 vorher, was hinterher zu spät wäre: ob überhaupt etwas ankommt, ob noch Luft
 unter dem Begrenzer ist und ob es lückenlos ankommt. `musik-app --aux-in` legt
-den AUX-Kanal dann darauf; mit `do master.record` läuft alles mit.
+den AUX-Kanal dann darauf.
+
+**Zwei Arten mitzuschneiden, und sie meinen Verschiedenes:**
+
+```sh
+musik-eingang --gerät scarlett --aufnehmen /musik/roh.wav   # die Quelle
+#   im Pult:  do master.record /musik/abend.wav             # den Abend
+```
+
+`--aufnehmen` schreibt **am Mixer vorbei** — ohne Begrenzer, ohne Kanalzug, so
+wie es ankommt. Das will, wer Lieder gewinnen will. `do master.record` nimmt die
+Summe auf, hinter Fader, EQ und Begrenzer; das will, wer sein Set behalten will.
+Ohne `--sekunden` läuft die Aufnahme, bis Strg-C kommt, und bleibt trotzdem
+lesbar: Der Kopf wird jede Sekunde nachgetragen.
+
+⚠️ **Ein Gerät, ein Zugriff.** Die meisten Treiber lassen sich nur von einem
+Programm zugleich aufnehmen — entweder `musik-app --aux-in` oder
+`musik-eingang --aufnehmen`, nicht beides auf demselben Gerät.
 
 ⚠️ **An echter Hardware ungeprüft** — hier gibt es kein Audiogerät. Geprüft ist
 der Weg gegen das `null`-Gerät von ALSA: Auswahl, Rate, Format, Callback,
