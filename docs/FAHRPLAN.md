@@ -569,8 +569,7 @@ Vorzeichen, der Zusammenhang mit der Länge und der blinde Fleck bei 16 s.
 
 Nichts davon blockiert etwas; sie stehen hier, damit sie nicht vergessen werden.
 Pitch Bend; Reverb als fünfter Effekt; FLAC statt WAV für den Mitschnitt; mehr
-als zwei Decks (heute fest verdrahtet); Windows (keine Unix-Sockets — dort
-bräuchte es einen zweiten Weg für die Steuerung); MIDI-Controller (Phase 10).
+als zwei Decks (heute fest verdrahtet); MIDI-Controller (Phase 10).
 
 ## Reihenfolge und Begründung
 

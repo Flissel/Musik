@@ -7,3 +7,4 @@ publish.workspace = true
 [dependencies]
 audio-core = { version = "0.1.0", path = "../audio-core" }
 audio-engine = { version = "0.1.0", path = "../audio-engine" }
+getrandom = "0.3.4"

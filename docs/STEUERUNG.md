@@ -206,9 +206,53 @@ Der Standardpfad liegt aus demselben Grund in `$XDG_RUNTIME_DIR` und nicht in
 `/tmp` — dort könnte jeder andere Benutzer des Rechners mitsteuern. Mit
 `--socket <pfad>` lässt er sich verlegen.
 
-Es gibt **keine Authentifizierung**. Sie wäre bei Dateisystemrechten
-verdoppelt. Sollte die Steuerung je über das Netz gehen, ist das die Stelle, an
-der sie nachzurüsten ist — vorher nicht.
+Über den Socket gibt es **keine Authentifizierung**. Sie wäre bei
+Dateisystemrechten verdoppelt.
+
+### Wo es keinen Socket gibt
+
+Auf Windows gibt es keine Unix-Sockets, und dort lief die Anlage bis vor Kurzem
+**ohne jede Steuerung** — Oberfläche, Decks und Mixer ja, Fernsteuerung nein,
+und damit auch kein MCP und keine Agenten. Also genau der Teil, um
+dessentwillen das Projekt gebaut wird.
+
+`musik-app --tcp` lauscht deshalb auf der Rückschleife. Der Absatz oben hatte
+vorausgesagt, wo dann nachzurüsten ist, und genau das ist geschehen:
+
+```text
+$ musik-app --tcp
+Steuerung: 127.0.0.1:7657
+Schlüssel: 50270126063f57dd96e73b655ce56d5a
+
+$ nc 127.0.0.1 7657
+auth 50270126063f57dd96e73b655ce56d5a
+ok angemeldet
+set deck1.play 1
+```
+
+Zwei Dinge sind dabei enger gebaut als beim Socket, weil TCP von sich aus
+weiter offen steht:
+
+- **Nur die Rückschleife.** Gebunden wird ausschließlich an `127.0.0.1` oder
+  `::1`; eine andere Adresse wird abgelehnt, nicht stillschweigend übernommen.
+  Ein Tippfehler soll die Anlage nicht ins WLAN stellen. Geprüft wird **vor**
+  dem Binden — danach läge zwischen Öffnen und Schließen genau das Fenster, das
+  man nicht haben will.
+- **Ein Schlüssel je Start.** Die erste Zeile muss `auth <schlüssel>` sein,
+  sonst wird nichts ausgeführt, auch nichts Lesendes: Wer nicht hereindarf, soll
+  nicht erfahren, was gerade läuft. Der Schlüssel steht nur im Fenster der
+  Anwendung — in eine Datei geschrieben läge er dort, wo ihn jeder findet.
+
+**Der Schlüssel ist kein Zierrat.** Die Rückschleife ist nicht privat: Jedes
+Programm auf demselben Rechner erreicht sie, eine Webseite im Browser
+eingeschlossen. Ein `fetch` an `http://127.0.0.1:7657` schickt Zeilen, die
+dieses Protokoll liest. Nachgestellt mit einer echten HTTP-Anfrage samt Rumpf
+`set master.crossfader 1`: Jede Zeile — Anfragezeile, Kopfzeilen und Rumpf —
+bekam `err nicht angemeldet`, und der Crossfader stand hinterher unverändert
+auf −0,5.
+
+Wo es einen Unix-Socket gibt, bleibt er die erste Wahl: Dort erledigt das
+Dateisystem, wofür hier ein Schlüssel nötig ist.
 
 ## Echtzeit bleibt unangetastet
 
@@ -1230,8 +1274,10 @@ sofort mit — und wird bemerkt.
   Stück Arbeit.
 - **Beatgrid korrigieren.** `set deck1.bpm_grid` ist nur lesbar; ein falsch
   erkanntes Grid lässt sich von außen nicht geraderücken.
-- **Windows.** Unix-Sockets gibt es dort nicht; eine Named Pipe wäre die
-  Entsprechung.
+- **Windows: Named Pipe.** Die Steuerung läuft dort inzwischen über die
+  Rückschleife (`--tcp`, mit Schlüssel), also gibt es sie überhaupt. Eine Named
+  Pipe wäre trotzdem der bessere Weg: Sie erbt die Rechte des Systems, so wie
+  der Unix-Socket, und käme ohne Schlüssel aus.
 - **MIDI.** Der normierte Weg (`setn`) ist da, der Übersetzer von MIDI-CC auf
   Control-Namen noch nicht. Das ist Phase 10 — und mit dem Steuerraum im Rücken
   fast nur noch eine Tabelle.

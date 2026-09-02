@@ -1,4 +1,5 @@
-//! Die Steckdose: das Protokoll über einen Unix-Socket.
+//! Die Steckdose: das Protokoll über einen Unix-Socket — und, wo es den nicht
+//! gibt, über die Rückschleife.
 //!
 //! Ein Socket im Dateisystem und nicht TCP, und das ist eine
 //! Sicherheitsentscheidung, keine Bequemlichkeit. Wer hier hineinschreibt,
@@ -6,6 +7,33 @@
 //! Netz — auf einer Clubbühne mit fremdem WLAN ist das keine theoretische
 //! Sorge. Ein Unix-Socket erbt dagegen die Rechte des Dateisystems: Wer die
 //! Datei nicht öffnen darf, kommt nicht hinein.
+//!
+//! # Windows hat keine Unix-Sockets
+//!
+//! Dort lief die Anlage bisher **ohne jede Steuerung**: Oberfläche, Decks und
+//! Mixer ja, Fernsteuerung nein — und damit auch kein MCP und keine Agenten,
+//! also genau der Teil, um dessentwillen das Projekt gebaut wird.
+//!
+//! Deshalb gibt es einen zweiten Weg, und er ist **enger gebaut als der
+//! erste**, weil TCP von sich aus weiter offen steht:
+//!
+//! 1. **Nur die Rückschleife.** Gebunden wird ausschließlich an `127.0.0.1`
+//!    oder `::1`. Eine andere Adresse wird abgelehnt, nicht stillschweigend
+//!    übernommen — ein Tippfehler soll die Anlage nicht ins WLAN stellen.
+//! 2. **Ein Schlüssel.** Die erste Zeile einer Verbindung muss `auth
+//!    <schlüssel>` sein, sonst wird nichts ausgeführt. Der Schlüssel entsteht
+//!    beim Start neu und steht nur im Fenster der Anwendung.
+//!
+//! Der zweite Punkt ist nicht Zierrat. Die Rückschleife ist nicht privat: Jedes
+//! Programm auf demselben Rechner erreicht sie, **eine Webseite im Browser
+//! eingeschlossen**. Ein `fetch` an `http://127.0.0.1:<port>` schickt Zeilen,
+//! die dieses Protokoll liest; ohne Schlüssel könnte eine beliebige Seite im
+//! Hintergrund den Crossfader ziehen. Lesen kann sie ihn nicht — die Antwort
+//! bleibt ihr durch die Regeln des Browsers verborgen, und ohne die erste Zeile
+//! kommt sie nicht weiter.
+//!
+//! Wo es einen Unix-Socket gibt, bleibt er die erste Wahl: Dort erledigt das
+//! Dateisystem, wofür hier ein Schlüssel nötig ist.
 //!
 //! Ein Thread je Verbindung, ein Mutex um das Pult. Das ist grob und hier
 //! völlig ausreichend: Es fließen Reglerbewegungen, keine Samples, und der
@@ -17,8 +45,17 @@
 //! list deck1.
 //! set deck1.play 1
 //! ```
+//!
+//! ```text
+//! # über die Rückschleife, Schlüssel zuerst
+//! nc 127.0.0.1 7657
+//! auth 7f3a1c…
+//! ok angemeldet
+//! set deck1.play 1
+//! ```
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -38,6 +75,8 @@ const ABO_TAKT: Duration = Duration::from_millis(50);
 #[derive(Debug)]
 pub enum ServerFehler {
     Belegt(PathBuf),
+    /// Es sollte an etwas gebunden werden, das nicht die Rückschleife ist.
+    NichtLokal(SocketAddr),
     Io(std::io::Error),
 }
 
@@ -48,6 +87,11 @@ impl std::fmt::Display for ServerFehler {
                 f,
                 "{} wird bereits von einer laufenden Instanz benutzt",
                 p.display()
+            ),
+            ServerFehler::NichtLokal(a) => write!(
+                f,
+                "{a} ist nicht die Rückschleife — die Anlage wird nicht ins Netz \
+                 gestellt. Erlaubt sind 127.0.0.1 und ::1."
             ),
             ServerFehler::Io(e) => write!(f, "{e}"),
         }
@@ -63,7 +107,53 @@ impl From<std::io::Error> for ServerFehler {
 }
 
 pub struct Server {
-    pfad: PathBuf,
+    /// Der Socketpfad — nur beim Weg über das Dateisystem, und nur der wird
+    /// beim Aufräumen gelöscht.
+    pfad: Option<PathBuf>,
+    /// Wie man hinkommt, für Menschen.
+    adresse: String,
+    /// Der Schlüssel, den eine Verbindung zuerst nennen muss. `None` beim
+    /// Unix-Socket: Dort hat das Dateisystem die Frage schon beantwortet.
+    schluessel: Option<String>,
+}
+
+/// Eine Leitung, über die das Protokoll läuft.
+///
+/// Zwei Threads teilen sie sich — einer antwortet, einer meldet —, deshalb muss
+/// sie sich verdoppeln lassen. Mehr wird nicht gebraucht, und genau deshalb
+/// steht hier ein eigener kleiner Vertrag statt zweier fast gleicher Kopien
+/// der Bedienung.
+trait Leitung: Read + Write + Send + Sized + 'static {
+    fn klonen(&self) -> std::io::Result<Self>;
+}
+
+#[cfg(unix)]
+impl Leitung for std::os::unix::net::UnixStream {
+    fn klonen(&self) -> std::io::Result<Self> {
+        self.try_clone()
+    }
+}
+
+impl Leitung for TcpStream {
+    fn klonen(&self) -> std::io::Result<Self> {
+        self.try_clone()
+    }
+}
+
+/// Ein Schlüssel aus dem Zufall des Betriebssystems.
+///
+/// Nicht aus der Uhrzeit: Wer weiß, wann die Anwendung gestartet wurde, hätte
+/// den Schlüssel damit fast schon. Sechzehn Byte als Hex sind kurz genug zum
+/// Abtippen und lang genug, dass Raten ausscheidet.
+fn schluessel_erzeugen() -> String {
+    let mut roh = [0u8; 16];
+    getrandom::fill(&mut roh).expect("kein Zufall vom Betriebssystem");
+    roh.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Ob eine Adresse nur von diesem Rechner aus erreichbar ist.
+fn ist_rueckschleife(adresse: &SocketAddr) -> bool {
+    adresse.ip().is_loopback()
 }
 
 impl Server {
@@ -102,37 +192,102 @@ impl Server {
                     // selten mehr als eine Handvoll offen.
                     let _ = std::thread::Builder::new()
                         .name("control-verbindung".into())
-                        .spawn(move || bediene(strom, pult));
+                        .spawn(move || bediene(strom, pult, None));
                 }
             })?;
 
-        Ok(Server { pfad: pfad_kopie })
+        Ok(Server {
+            adresse: pfad_kopie.display().to_string(),
+            pfad: Some(pfad_kopie),
+            schluessel: None,
+        })
     }
 
     #[cfg(not(unix))]
     pub fn starten(_pfad: &Path, _pult: Arc<Mutex<Steuerpult>>) -> Result<Server, ServerFehler> {
         Err(ServerFehler::Io(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
-            "Unix-Sockets gibt es hier nicht — eine Named Pipe fehlt noch",
+            "Unix-Sockets gibt es hier nicht — nimm starten_tcp",
         )))
     }
 
-    pub fn pfad(&self) -> &Path {
-        &self.pfad
+    /// Startet den Server auf der Rückschleife, mit Schlüssel.
+    ///
+    /// Für Windows gedacht, wo es keine Unix-Sockets gibt; anderswo geht es
+    /// auch, ist aber der schwächere Weg — siehe den Kopf dieser Datei.
+    pub fn starten_tcp(
+        adresse: SocketAddr,
+        pult: Arc<Mutex<Steuerpult>>,
+    ) -> Result<Server, ServerFehler> {
+        // **Vor** dem Binden prüfen. Danach wäre der Port schon offen, und
+        // zwischen Öffnen und Schließen liegt genau das Fenster, das man nicht
+        // haben will.
+        if !ist_rueckschleife(&adresse) {
+            return Err(ServerFehler::NichtLokal(adresse));
+        }
+
+        let listener = TcpListener::bind(adresse)?;
+        let echte = listener.local_addr()?;
+        let schluessel = schluessel_erzeugen();
+        let fuer_threads = Arc::new(schluessel.clone());
+
+        std::thread::Builder::new()
+            .name("control-server".into())
+            .spawn(move || {
+                for verbindung in listener.incoming() {
+                    let Ok(strom) = verbindung else { continue };
+                    // Nagle aus: Es fließen kurze Zeilen, und die sollen sofort
+                    // ankommen statt auf Gesellschaft zu warten.
+                    let _ = strom.set_nodelay(true);
+                    let pult = Arc::clone(&pult);
+                    let schluessel = Arc::clone(&fuer_threads);
+                    let _ = std::thread::Builder::new()
+                        .name("control-verbindung".into())
+                        .spawn(move || bediene(strom, pult, Some(schluessel)));
+                }
+            })?;
+
+        Ok(Server {
+            pfad: None,
+            adresse: echte.to_string(),
+            schluessel: Some(schluessel),
+        })
+    }
+
+    /// Der Socketpfad — `None`, wenn über die Rückschleife gelauscht wird.
+    pub fn pfad(&self) -> Option<&Path> {
+        self.pfad.as_deref()
+    }
+
+    /// Wie man hinkommt, als Text für Menschen.
+    pub fn adresse(&self) -> &str {
+        &self.adresse
+    }
+
+    /// Der Schlüssel, falls einer nötig ist.
+    pub fn schluessel(&self) -> Option<&str> {
+        self.schluessel.as_deref()
     }
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
         // Aufräumen, damit der nächste Start nicht über die eigene Leiche
-        // stolpert.
-        let _ = std::fs::remove_file(&self.pfad);
+        // stolpert. Ein Port hinterlässt nichts, was aufzuräumen wäre.
+        if let Some(pfad) = &self.pfad {
+            let _ = std::fs::remove_file(pfad);
+        }
     }
 }
 
-#[cfg(unix)]
-fn bediene(strom: std::os::unix::net::UnixStream, pult: Arc<Mutex<Steuerpult>>) {
-    let Ok(zum_schreiben) = strom.try_clone() else {
+/// Bedient eine Verbindung, bis sie abbricht.
+///
+/// `schluessel` ist `Some`, wenn erst angemeldet werden muss — beim Weg über
+/// die Rückschleife. Solange das nicht geschehen ist, wird **kein** Befehl
+/// ausgeführt, auch kein lesender: Wer nicht hereindarf, soll auch nicht
+/// erfahren, was gerade läuft.
+fn bediene<L: Leitung>(strom: L, pult: Arc<Mutex<Steuerpult>>, schluessel: Option<Arc<String>>) {
+    let Ok(zum_schreiben) = strom.klonen() else {
         return;
     };
 
@@ -175,9 +330,29 @@ fn bediene(strom: std::os::unix::net::UnixStream, pult: Arc<Mutex<Steuerpult>>) 
             .ok()
     };
 
+    // Beim Unix-Socket hat das Dateisystem schon entschieden; dort gilt die
+    // Verbindung von Anfang an als angemeldet.
+    let mut angemeldet = schluessel.is_none();
+
     let leser = BufReader::new(strom);
     for zeile in leser.lines() {
         let Ok(zeile) = zeile else { break };
+
+        if !angemeldet {
+            let antwort = match anmeldung_pruefen(&zeile, schluessel.as_deref()) {
+                true => {
+                    angemeldet = true;
+                    "ok angemeldet".to_string()
+                }
+                // Kein Hinweis darauf, was falsch war, und keine Auskunft über
+                // die Anlage. Wer raten will, soll nichts dazulernen.
+                false => "err nicht angemeldet — erste Zeile: auth <schlüssel>".to_string(),
+            };
+            if !schreibe(&aus, &antwort) {
+                break;
+            }
+            continue;
+        }
 
         let antwort = match (pult.lock(), sitzung.lock()) {
             (Ok(mut p), Ok(mut s)) => protokoll::behandle(&mut p, &mut s, &zeile),
@@ -201,8 +376,32 @@ fn bediene(strom: std::os::unix::net::UnixStream, pult: Arc<Mutex<Steuerpult>>) 
     }
 }
 
-#[cfg(unix)]
-fn schreibe(aus: &Mutex<std::os::unix::net::UnixStream>, zeile: &str) -> bool {
+/// Ob diese Zeile die richtige Anmeldung ist.
+///
+/// Verglichen wird über die volle Länge, nicht mit `==` auf dem ersten
+/// Unterschied — ein Vergleich, der früh abbricht, verrät über die Zeit, wie
+/// viele Zeichen stimmten. Hier ist das kaum auszunutzen, aber der richtige
+/// Vergleich kostet nichts.
+fn anmeldung_pruefen(zeile: &str, schluessel: Option<&String>) -> bool {
+    let Some(erwartet) = schluessel else {
+        return true;
+    };
+    let Some(gegeben) = zeile.trim().strip_prefix("auth ") else {
+        return false;
+    };
+    let gegeben = gegeben.trim().as_bytes();
+    let erwartet = erwartet.as_bytes();
+    if gegeben.len() != erwartet.len() {
+        return false;
+    }
+    let mut unterschied = 0u8;
+    for (a, b) in gegeben.iter().zip(erwartet) {
+        unterschied |= a ^ b;
+    }
+    unterschied == 0
+}
+
+fn schreibe<L: Leitung>(aus: &Mutex<L>, zeile: &str) -> bool {
     let Ok(mut strom) = aus.lock() else {
         return false;
     };
@@ -243,7 +442,7 @@ mod tests {
         let p = pfad("bedienen");
         let server = Server::starten(&p, Arc::clone(&pult)).expect("Server startet nicht");
 
-        let strom = UnixStream::connect(server.pfad()).expect("keine Verbindung");
+        let strom = UnixStream::connect(server.pfad().unwrap()).expect("keine Verbindung");
         assert_eq!(
             sprich(&strom, "set channel1.fader 0.8"),
             "ok channel1.fader 0.800000"
@@ -269,8 +468,8 @@ mod tests {
         let p = pfad("mehrere");
         let server = Server::starten(&p, Arc::new(Mutex::new(pult))).unwrap();
 
-        let a = UnixStream::connect(server.pfad()).unwrap();
-        let b = UnixStream::connect(server.pfad()).unwrap();
+        let a = UnixStream::connect(server.pfad().unwrap()).unwrap();
+        let b = UnixStream::connect(server.pfad().unwrap()).unwrap();
 
         assert_eq!(sprich(&a, "set deck1.play 1"), "ok deck1.play 1");
         // Der zweite Bediener sieht, was der erste getan hat.
@@ -286,7 +485,7 @@ mod tests {
         let p = pfad("abo");
         let server = Server::starten(&p, Arc::clone(&pult)).unwrap();
 
-        let strom = UnixStream::connect(server.pfad()).unwrap();
+        let strom = UnixStream::connect(server.pfad().unwrap()).unwrap();
         assert_eq!(sprich(&strom, "sub deck1.play"), "ok sub 1 neu, 1 gesamt");
 
         let mut leser = BufReader::new(strom.try_clone().unwrap());
@@ -424,8 +623,8 @@ mod zwei_verbindungen {
             }
         });
 
-        let mut a = Draht::neu(server.pfad());
-        let mut b = Draht::neu(server.pfad());
+        let mut a = Draht::neu(server.pfad().unwrap());
+        let mut b = Draht::neu(server.pfad().unwrap());
 
         a.sagt("sub master.events");
         assert!(a.wartet_auf("ok sub", Duration::from_secs(2)).is_some());
@@ -448,5 +647,130 @@ mod zwei_verbindungen {
             gemeldet.is_some(),
             "über den Socket kam keine Ablösung an — der Verlierer bleibt blind"
         );
+    }
+}
+
+/// Der Weg über die Rückschleife — geprüft ohne Unix-Sockets, damit er auch
+/// dort gilt, wo es keine gibt.
+#[cfg(test)]
+mod tcp {
+    use super::*;
+    use crate::testing::pult_mit_zwei_decks;
+    use std::io::BufRead;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn pult() -> Arc<Mutex<Steuerpult>> {
+        let (pult, runner) = pult_mit_zwei_decks();
+        // Der Runner muss am Leben bleiben, sonst bricht die Kommandoschlange
+        // und jeder Befehl liefe ins Nichts — die Tests würden grün, obwohl
+        // nichts ankommt.
+        std::mem::forget(runner);
+        Arc::new(Mutex::new(pult))
+    }
+
+    /// Ein Port, den nur dieser Lauf benutzt: 0 heißt „such dir einen".
+    fn irgendwo() -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)
+    }
+
+    struct Draht {
+        schreiben: TcpStream,
+        lesen: BufReader<TcpStream>,
+    }
+
+    impl Draht {
+        fn neu(adresse: &str) -> Draht {
+            let strom = TcpStream::connect(adresse).expect("verbinden");
+            let lesen = BufReader::new(strom.try_clone().expect("klonen"));
+            Draht {
+                schreiben: strom,
+                lesen,
+            }
+        }
+
+        fn sag(&mut self, zeile: &str) -> String {
+            writeln!(self.schreiben, "{zeile}").expect("schreiben");
+            self.schreiben.flush().expect("leeren");
+            let mut antwort = String::new();
+            self.lesen.read_line(&mut antwort).expect("lesen");
+            antwort.trim_end().to_string()
+        }
+    }
+
+    /// **Die Anlage wird nicht ins Netz gestellt.**
+    ///
+    /// Ein Tippfehler in der Adresse — `0.0.0.0` statt `127.0.0.1` — würde
+    /// jeden im selben WLAN ans Pult lassen. Das muss abgelehnt werden, und
+    /// zwar *bevor* gebunden wird: Zwischen Öffnen und Schließen läge sonst
+    /// genau das Fenster, das man nicht haben will.
+    #[test]
+    fn eine_adresse_ausserhalb_der_rueckschleife_wird_abgelehnt() {
+        let offen = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+        let fehler = Server::starten_tcp(offen, pult())
+            .err()
+            .expect("darf nicht binden");
+        assert!(
+            matches!(fehler, ServerFehler::NichtLokal(_)),
+            "falscher Fehler: {fehler}"
+        );
+        assert!(
+            TcpStream::connect(offen).is_err(),
+            "es wurde trotzdem gebunden"
+        );
+    }
+
+    /// **Ohne Schlüssel geschieht nichts** — auch nichts Lesendes.
+    #[test]
+    fn ohne_anmeldung_wird_kein_befehl_ausgefuehrt() {
+        let server = Server::starten_tcp(irgendwo(), pult()).expect("starten");
+        let mut draht = Draht::neu(server.adresse());
+
+        let antwort = draht.sag("set deck1.play 1");
+        assert!(antwort.starts_with("err nicht angemeldet"), "{antwort}");
+
+        // Auch fragen ist Auskunft. Wer nicht hereindarf, soll nicht erfahren,
+        // was gerade läuft.
+        let antwort = draht.sag("get deck1.play");
+        assert!(antwort.starts_with("err nicht angemeldet"), "{antwort}");
+    }
+
+    #[test]
+    fn ein_falscher_schluessel_hilft_nicht() {
+        let server = Server::starten_tcp(irgendwo(), pult()).expect("starten");
+        let mut draht = Draht::neu(server.adresse());
+        let antwort = draht.sag("auth 00000000000000000000000000000000");
+        assert!(antwort.starts_with("err nicht angemeldet"), "{antwort}");
+    }
+
+    #[test]
+    fn mit_dem_richtigen_schluessel_laesst_sich_bedienen() {
+        let server = Server::starten_tcp(irgendwo(), pult()).expect("starten");
+        let schluessel = server.schluessel().expect("Schlüssel").to_string();
+        let mut draht = Draht::neu(server.adresse());
+
+        assert_eq!(draht.sag(&format!("auth {schluessel}")), "ok angemeldet");
+        assert_eq!(draht.sag("set deck1.play 1"), "ok deck1.play 1");
+        assert_eq!(draht.sag("get deck1.play"), "value deck1.play 1");
+    }
+
+    /// Jeder Start bekommt einen eigenen Schlüssel. Ein fester wäre nach dem
+    /// ersten Mal keiner mehr.
+    #[test]
+    fn jeder_start_hat_einen_eigenen_schluessel() {
+        let a = Server::starten_tcp(irgendwo(), pult()).expect("starten");
+        let b = Server::starten_tcp(irgendwo(), pult()).expect("starten");
+        assert_ne!(a.schluessel(), b.schluessel());
+        assert_eq!(a.schluessel().map(str::len), Some(32));
+    }
+
+    #[test]
+    fn der_vergleich_haengt_nicht_an_der_laenge_allein() {
+        let s = "abcdef".to_string();
+        assert!(anmeldung_pruefen("auth abcdef", Some(&s)));
+        assert!(!anmeldung_pruefen("auth abcde", Some(&s)));
+        assert!(!anmeldung_pruefen("auth abcdefg", Some(&s)));
+        assert!(!anmeldung_pruefen("abcdef", Some(&s)));
+        // Ohne Schlüssel ist alles angemeldet — der Unix-Socket.
+        assert!(anmeldung_pruefen("was auch immer", None));
     }
 }

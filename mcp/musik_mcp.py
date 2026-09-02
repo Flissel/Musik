@@ -63,6 +63,33 @@ def socket_pfad() -> Path:
     return Path(tempfile.gettempdir()) / "musik.sock"
 
 
+def tcp_ziel() -> tuple[str, int] | None:
+    """Wohin über die Rückschleife verbunden wird, falls überhaupt.
+
+    `MUSIK_TCP` ist entweder ein Port (`7657`) oder `host:port`. Auf Windows
+    gibt es keine Unix-Sockets, deshalb ist die Rückschleife dort der Normalfall
+    und wird auch ohne Angabe versucht.
+    """
+    roh = os.environ.get("MUSIK_TCP")
+    if roh is None:
+        return ("127.0.0.1", 7657) if os.name == "nt" else None
+    roh = roh.strip()
+    if ":" in roh:
+        host, _, port = roh.rpartition(":")
+        return (host or "127.0.0.1", int(port))
+    return ("127.0.0.1", int(roh))
+
+
+def tcp_schluessel() -> str | None:
+    """Der Schlüssel, den die Anwendung beim Start ausgibt.
+
+    Steht in `MUSIK_SCHLUESSEL`. Ohne ihn lässt die Anwendung über die
+    Rückschleife nichts ausführen — das ist Absicht, denn dort kommt jedes
+    Programm auf dem Rechner hin, eine Webseite im Browser eingeschlossen.
+    """
+    return os.environ.get("MUSIK_SCHLUESSEL")
+
+
 class NichtErreichbar(RuntimeError):
     """Die Anwendung läuft nicht oder der Socket stimmt nicht."""
 
@@ -98,21 +125,56 @@ async def sprich(*befehle: str) -> list[list[str]]:
     Mehrere Befehle in einem Rutsch, weil eine Momentaufnahme sonst ein Dutzend
     Verbindungen kostet.
     """
-    pfad = socket_pfad()
-    try:
-        leser, schreiber = await asyncio.wait_for(
-            asyncio.open_unix_connection(str(pfad)), timeout=ZEITLIMIT
-        )
-    except (FileNotFoundError, ConnectionRefusedError) as fehler:
-        raise NichtErreichbar(
-            f"Musik ist unter {pfad} nicht erreichbar. Läuft `musik-app`? "
-            "Der Socketpfad lässt sich mit der Umgebungsvariablen MUSIK_SOCKET "
-            "setzen, in der Anwendung mit --socket."
-        ) from fehler
-    except asyncio.TimeoutError as fehler:
-        raise NichtErreichbar(f"{pfad} antwortet nicht") from fehler
+    ziel = tcp_ziel()
+    if ziel is not None:
+        host, port = ziel
+        wo = f"{host}:{port}"
+        try:
+            leser, schreiber = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=ZEITLIMIT
+            )
+        except (ConnectionRefusedError, OSError) as fehler:
+            raise NichtErreichbar(
+                f"Musik ist unter {wo} nicht erreichbar. Läuft `musik-app --tcp`? "
+                "Das Ziel lässt sich mit MUSIK_TCP setzen."
+            ) from fehler
+        except asyncio.TimeoutError as fehler:
+            raise NichtErreichbar(f"{wo} antwortet nicht") from fehler
+    else:
+        wo = str(socket_pfad())
+        try:
+            leser, schreiber = await asyncio.wait_for(
+                asyncio.open_unix_connection(wo), timeout=ZEITLIMIT
+            )
+        except (FileNotFoundError, ConnectionRefusedError) as fehler:
+            raise NichtErreichbar(
+                f"Musik ist unter {wo} nicht erreichbar. Läuft `musik-app`? "
+                "Der Socketpfad lässt sich mit der Umgebungsvariablen MUSIK_SOCKET "
+                "setzen, in der Anwendung mit --socket."
+            ) from fehler
+        except asyncio.TimeoutError as fehler:
+            raise NichtErreichbar(f"{wo} antwortet nicht") from fehler
 
     try:
+        # Über die Rückschleife steht die Anmeldung vor allem anderen. Erst
+        # danach nimmt die Anwendung überhaupt einen Befehl an.
+        if ziel is not None:
+            schluessel = tcp_schluessel()
+            if not schluessel:
+                raise NichtErreichbar(
+                    "Über die Rückschleife braucht es einen Schlüssel. Er steht "
+                    "beim Start von `musik-app` im Fenster; setz ihn in "
+                    "MUSIK_SCHLUESSEL."
+                )
+            schreiber.write(f"auth {schluessel}\n".encode("utf-8"))
+            await schreiber.drain()
+            antwort = await asyncio.wait_for(_lies_antwort(leser), ZEITLIMIT)
+            if not antwort or not antwort[-1].startswith("ok"):
+                raise NichtErreichbar(
+                    "Der Schlüssel wurde nicht angenommen. Er entsteht bei jedem "
+                    "Start neu — steht in MUSIK_SCHLUESSEL noch der von gestern?"
+                )
+
         antworten: list[list[str]] = []
         for befehl in befehle:
             schreiber.write((befehl + "\n").encode("utf-8"))

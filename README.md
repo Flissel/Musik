@@ -364,6 +364,25 @@ setn channel2.eq_low 0        # normiert, für MIDI
 Bedeutung — der Steuerraum beschreibt sich selbst, ein Handbuch ist dafür nicht
 nötig.
 
+**Auf Windows gibt es keine Unix-Sockets**, und dort lief die Anlage bis vor
+Kurzem ganz ohne Steuerung — also auch ohne MCP und ohne Agenten. `--tcp`
+lauscht stattdessen auf der Rückschleife:
+
+```sh
+$ musik-app --tcp
+Steuerung: 127.0.0.1:7657
+Schlüssel: 50270126063f57dd96e73b655ce56d5a
+
+$ nc 127.0.0.1 7657
+auth 50270126063f57dd96e73b655ce56d5a
+ok angemeldet
+```
+
+Gebunden wird **nur** an `127.0.0.1` oder `::1` — eine andere Adresse wird
+abgelehnt, damit ein Tippfehler die Anlage nicht ins WLAN stellt. Der Schlüssel
+entsteht bei jedem Start neu und ist kein Zierrat: Die Rückschleife erreicht
+jedes Programm auf dem Rechner, eine Webseite im Browser eingeschlossen.
+
 Ein Übergang ist aber keine Folge von Reglerstellungen, sondern eine Bewegung
 über Takte. Dafür gibt es Verben für Zeit:
 

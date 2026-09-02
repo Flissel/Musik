@@ -39,6 +39,27 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
 `MUSIK_SOCKET` ist optional; ohne die Variable wird
 `$XDG_RUNTIME_DIR/musik.sock` genommen — der Standard von `musik-app`.
 
+### Auf Windows: über die Rückschleife
+
+Unix-Sockets gibt es dort nicht. `musik-app --tcp` lauscht stattdessen auf
+`127.0.0.1` und gibt beim Start einen Schlüssel aus; die Brücke braucht beides:
+
+```json
+{
+  "env": {
+    "MUSIK_TCP": "7657",
+    "MUSIK_SCHLUESSEL": "50270126063f57dd96e73b655ce56d5a"
+  }
+}
+```
+
+`MUSIK_TCP` nimmt einen Port oder `host:port`; auf Windows wird die
+Rückschleife auch ohne die Variable versucht. **Der Schlüssel entsteht bei jedem
+Start neu** — steht dort noch der von gestern, meldet die Brücke das und rät
+nicht herum. Ohne Schlüssel führt die Anwendung über diesen Weg gar nichts aus,
+auch nichts Lesendes; der Grund steht in
+[`docs/STEUERUNG.md`](../docs/STEUERUNG.md).
+
 ## Werkzeuge
 
 | Werkzeug | Wofür |

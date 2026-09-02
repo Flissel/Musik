@@ -40,6 +40,12 @@ struct Args {
     screenshot: Option<PathBuf>,
     screenshot_nach: std::time::Duration,
     socket: PathBuf,
+    /// Auf welchem Port die Steuerung über die Rückschleife lauscht.
+    ///
+    /// `None` heißt: über den Unix-Socket. Wo es die nicht gibt — Windows —,
+    /// ist das die einzige Art, überhaupt eine Steuerung zu haben, und deshalb
+    /// dort die Vorgabe.
+    tcp: Option<u16>,
     /// Woher der AUX-Kanal sein Audio bekommt.
     ///
     /// `None` heißt: gar nicht — dann bleibt AUX still wie bisher. `Some("")`
@@ -47,6 +53,12 @@ struct Args {
     /// Namens.
     aux_in: Option<String>,
 }
+
+/// Der Port für den Weg über die Rückschleife.
+///
+/// Frei gewählt und hoch genug, dass er niemandem im Weg steht; wem er im Weg
+/// steht, der nimmt `--tcp-port`.
+const STANDARD_PORT: u16 = 7657;
 
 /// Wo die Steuerung lauscht. Im Laufzeitverzeichnis des Benutzers, nicht in
 /// `/tmp` — dort könnte jeder andere Benutzer des Rechners mitsteuern.
@@ -265,9 +277,23 @@ fn main() -> Result<()> {
 
     // Ab hier ist die Anlage von außen bedienbar. Scheitert das, läuft die
     // Oberfläche trotzdem — nur eben allein.
-    let steuerung = match Server::starten(&args.socket, Arc::clone(&pult)) {
+    let gestartet = match args.tcp {
+        Some(port) => {
+            let adresse = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            Server::starten_tcp(adresse, Arc::clone(&pult))
+        }
+        None => Server::starten(&args.socket, Arc::clone(&pult)),
+    };
+    let steuerung = match gestartet {
         Ok(server) => {
-            println!("Steuerung: {}", server.pfad().display());
+            println!("Steuerung: {}", server.adresse());
+            if let Some(schluessel) = server.schluessel() {
+                // Der Schlüssel steht nur hier. Er in eine Datei zu schreiben
+                // hieße, ihn dort liegen zu lassen, wo ihn jeder findet — und
+                // genau davor soll er schützen.
+                println!("Schlüssel: {schluessel}");
+                println!("  Erste Zeile jeder Verbindung: auth {schluessel}");
+            }
             Some(server)
         }
         Err(e) => {
@@ -333,6 +359,10 @@ fn parse_args() -> Result<Args> {
         // gezeichnet ist.
         screenshot_nach: std::time::Duration::from_millis(600),
         socket: standard_socket(),
+        // Ohne Unix-Sockets bleibt nur die Rückschleife. Lieber eine Steuerung
+        // mit Schlüssel als gar keine — ohne sie fehlt auf Windows der ganze
+        // Teil, um dessentwillen das Projekt gebaut wird.
+        tcp: (!cfg!(unix)).then_some(STANDARD_PORT),
         aux_in: None,
     };
 
@@ -346,6 +376,14 @@ fn parse_args() -> Result<Args> {
             "--b" => args.b = Some(PathBuf::from(wert()?)),
             "--screenshot" => args.screenshot = Some(PathBuf::from(wert()?)),
             "--socket" => args.socket = PathBuf::from(wert()?),
+            "--tcp" => args.tcp = Some(STANDARD_PORT),
+            "--tcp-port" => {
+                args.tcp = Some(
+                    wert()?
+                        .parse()
+                        .context("--tcp-port braucht eine Portnummer")?,
+                )
+            }
             "--aux-in" => args.aux_in = Some(String::new()),
             "--aux-gerät" | "--aux-geraet" => args.aux_in = Some(wert()?),
             "--aux-liste" => {
@@ -371,10 +409,15 @@ fn parse_args() -> Result<Args> {
                 println!("                  [--cache <dir>] [--screenshot <bild.png>]");
                 println!("                  [--socket <pfad>] [--screenshot-nach <sekunden>]");
                 println!("                  [--aux-in] [--aux-gerät <name>] [--aux-liste]");
+                println!("                  [--tcp] [--tcp-port <n>]");
                 println!();
                 println!("--aux-in       legt den AUX-Kanal auf das Standard-Aufnahmegerät");
                 println!("--aux-gerät    wählt eines über einen Teil seines Namens");
                 println!("--aux-liste    zeigt, welche es gibt");
+                println!();
+                println!("--tcp          Steuerung über 127.0.0.1 statt über den Socket,");
+                println!("               mit Schlüssel. Auf Windows die Vorgabe, weil es");
+                println!("               dort keine Unix-Sockets gibt.");
                 std::process::exit(0);
             }
             other => anyhow::bail!("unbekannte Option: {other}"),
