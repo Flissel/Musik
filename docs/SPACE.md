@@ -151,8 +151,20 @@ Dieses Repo als Submodul, nach dem Muster der bestehenden Einträge:
     required: false
 ```
 
-`required: false`, weil ein VibeMind ohne DJ-Anlage vollständig ist. Der Pin
-wird beim Anlegen gesetzt und nicht geraten.
+`required: false`, weil ein VibeMind ohne DJ-Anlage vollständig ist.
+
+**Der Eintrag wartet auf den Merge, und das ist kein Versäumnis.** Beim Versuch,
+ihn anzulegen, hat `tools.v1_governance manifest validate` ihn abgelehnt:
+`invalid-evidence-state`. Das Manifest kennt für ein Kind des Superprojekts nur
+zwei Evidenzformen — `local-git`/`local` mit echtem Gitlink, oder
+`pinned-remote-tree`/`pinned-not-live` mit dem Pin des Elternteils. „Angemeldet,
+noch nicht gepinnt" gibt es nicht.
+
+Und ein richtiger Pin ginge auch nicht: `main` dieses Repos steht bei
+`3f4faf7`, dem Stand **vor** PR #1 — eine Anlage ohne Brücke, ohne Gatter, ohne
+Repertoire. Den PR-Branch zu pinnen hieße, einen Commit festzuhalten, den ein
+Squash-Merge verwaist. Der Eintrag gehört also in den Commit nach dem Merge, und
+`submodule_policy: pin_change_requires_separate_commit` sagt genau das.
 
 ## Reihenfolge und Abnahme
 
