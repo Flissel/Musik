@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/analysis","crates/audio-core", "crates/audio-engine", "crates/control", "crates/library", "crates/musik-app", "crates/musik-cli"]
+
+[workspace.package]
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+analysis = { path = "crates/analysis" }
+audio-core = { path = "crates/audio-core" }
+audio-engine = { path = "crates/audio-engine" }
+library = { path = "crates/library" }

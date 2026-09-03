@@ -1,0 +1,9 @@
+[package]
+name = "audio-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cpal = "0.18.1"
+symphonia = { version = "0.6.0", default-features = false, features = ["mp3", "flac", "wav", "pcm", "isomp4", "aac", "vorbis", "ogg"] }
+thiserror = "2.0.20"

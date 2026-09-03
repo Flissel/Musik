@@ -1,0 +1,12 @@
+[package]
+name = "musik-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+analysis = { version = "0.1.0", path = "../analysis" }
+anyhow = "1.0.104"
+audio-core = { version = "0.1.0", path = "../audio-core" }
+audio-engine = { version = "0.1.0", path = "../audio-engine" }
+control = { version = "0.1.0", path = "../control" }
+library = { version = "0.1.0", path = "../library" }

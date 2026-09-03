@@ -1,0 +1,24 @@
+# Vorlage für die Wahrheitsdatei des Prüfstands.
+#
+# Leg sie neben die Musik und trag ein, was du hörst — dann sagt
+#
+#     musik-pruefstand wahrheit.txt
+#
+# wo die Analyse zustimmt und wo nicht. Gemeldet werden Abstände mit
+# Vorzeichen, kein Urteil: Eine Angabe von Hand ist eine Meinung, und ab wann
+# etwas kaputt ist, entscheidest du.
+#
+# Eine Zeile je Track. Zeiten als m:ss oder in Sekunden.
+# Jede Angabe ist einzeln freiwillig — wer nur das Tempo weiß, schreibt nur
+# das Tempo. Weglassen ist besser als raten.
+#
+#   datei   bpm <zahl>   tonart <Am|F#|8A>   <abschnitt> <zeit>  ...
+#
+# Abschnitte heißen intro, aufbau, drop, break, outro oder teil und stehen mit
+# ihrem ANFANG, nicht als Bereich — das Ende ist der Anfang des nächsten.
+# `teil` ist für Strecken, die schlicht laufen; sie „drop" zu nennen, damit ein
+# Name dasteht, macht die Prüfung wertlos.
+
+Nachtschicht.mp3   bpm 124   tonart Am   intro 0:00  aufbau 0:32  drop 1:04  break 2:40  drop 3:12  outro 5:12
+Alpenglühen.wav    bpm 126   tonart C
+EinAnderer.mp3     outro 4:48
