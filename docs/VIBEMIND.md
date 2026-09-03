@@ -130,13 +130,131 @@ Feature-Flag, ASIO. Für den getrennten Cue-Ausgang aus
 führt unter Windows praktisch kein Weg an ASIO vorbei — das ist beim Kauf des
 Interfaces mitzudenken.
 
-## Was jetzt zu tun ist
+## Die Voraussetzungen, nachgemessen
 
-Nichts. Die Entscheidung, ob und wann angeschlossen wird, kann später fallen,
-solange zwei Dinge eingehalten werden:
+Die beiden Bedingungen von oben sind erfüllt, und zwar geprüft statt behauptet.
 
-1. **Keine (A)GPL-Abhängigkeiten aufnehmen**, solange die Frage offen ist.
-2. **Die Steuerung des Decks als Schnittstelle denken**, nicht als UI-Innenleben
-   — dann ist der MCP-Server später eine dünne Hülle statt eines Umbaus.
+**Lizenzen.** Über alle 474 Pakete der `Cargo.lock`, aufgelöst gegen die
+entpackten Quellen: 203× `MIT OR Apache-2.0`, 95× `MIT`, 43× `Apache-2.0 OR
+MIT`, 12× `MPL-2.0` (Symphonia; dateiweises Copyleft, in einem MIT-Projekt
+unproblematisch). **Kein einziges Copyleft ohne permissiven Zweig.** Drei
+Pakete tragen „GPL" im Lizenzfeld — `r-efi` und `self_cell` —, alle drei
+mehrfachlizenziert (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`, `Apache-2.0 OR
+GPL-2.0-only`); man nimmt den permissiven Zweig.
 
-Beides ist heute erfüllt.
+**Schnittstelle statt UI-Innenleben.** Der Steuerraum ist die einzige Art, die
+Anlage zu bedienen — auch die Oberfläche geht durch ihn. Die MCP-Brücke ist
+deshalb heute schon eine dünne Hülle.
+
+## Was zwischen hier und einem Space liegt
+
+Vier Dinge, im echten `Vibemind_V1` nachgesehen, nicht aus diesem Dokument
+abgeleitet:
+
+| | Stand |
+| --- | --- |
+| `spaces/musik/` | existiert nicht — es gibt nur `marketing` |
+| Eintrag in `repo-manifest.yaml` | keiner |
+| Freigabe-Gatter für schreibende Werkzeuge | **fehlt ganz** — alle 16 laufen frei |
+| FastMCP-Herkunft | hier `fastmcp`, dort `mcp.server.fastmcp` |
+
+Das dritte ist das einzige mit Substanz; die anderen drei sind Umzug.
+
+### Das Freigabe-Modell für ein Pult
+
+VibeMind lässt lesende Werkzeuge frei und schickt schreibende durch
+`approval.require_approval` — bei `mcp/docker/` mit Default-Deny und einer
+Erlaubnisliste in der Umgebung. Für ein DJ-Pult ist „jeder Schreibzugriff
+einzeln" unbrauchbar: Sechzehn Takte sind bei 128 BPM dreißig Sekunden, und
+niemand bestätigt mitten in einer Blende.
+
+Die Auflösung ist keine Ausnahme vom Modell, sondern eine andere Körnung —
+**Freigabe als Bereich für die Dauer eines Sets**, nicht je Aufruf:
+
+| Stufe | Was | Warum |
+| --- | --- | --- |
+| **Frei** | `musik_status`, `musik_search`, `list`, `get`, `plan`, `master.events` | Auskunft ändert nichts |
+| **Set-Freigabe** | Fader, EQ, Filter, Crossfader, Loop, Cue, `uebergang`, `ramp`, `schedule`, `when` | Zeitkritisch; einmal erteilt, gilt für das Set |
+| **Einzeln** | `record`/`record_stop`, `queue_add <pfad>`, `deckN.load <pfad>`, `master.arc` | Berührt Dateisystem oder die Dramaturgie |
+| **Nie ohne Mensch** | Generator-Aufrufe | Kosten Geld, und zwar je Aufruf |
+
+Die Set-Freigabe hat einen Anfang und ein Ende und gehört ins Protokoll: Wer
+sie erteilt hat und wann sie ausläuft, steht in der Mitschrift wie jede andere
+Zeile. Ein Set ohne Ende wäre eine Dauererlaubnis mit anderem Namen.
+
+## Was der Musik-App zum Ziel fehlt
+
+Ziel ist, dass Agenten die Musik machen. Gemessen daran fehlt Folgendes — die
+Liste ist nach Abhängigkeit sortiert, nicht nach Aufwand.
+
+**1. Der Generator ist nicht angefangen.** In `crates/` steht dazu keine Zeile.
+Der ganze rechte Ast des Entwurfs in [AGENTEN.md](AGENTEN.md) — `[Generator] →
+Suno/ElevenLabs` — ist Papier. Das ist die größte Lücke zwischen dem, was das
+Projekt tut, und dem, wofür es gebaut wird.
+
+**2. Suno gibt es nicht zu haben.** Kein öffentlicher Endpunkt, keine Doku, kein
+Preismodell, kein Termin — siehe [APIS.md](APIS.md). Das Partner-Programm ist
+seit Juli 2026 offen und die Bewerbung einen Versuch wert, aber darauf lässt
+sich nicht planen. Reverse-engineerte Dritt-„APIs" scheiden aus; das realistische
+Risiko ist ein gesperrter Account.
+
+**Konsequenz:** Der Generator kommt hinter eine Adapter-Schnittstelle, und der
+erste Adapter ist **ElevenLabs Music** — dokumentierter `/music/compose`, die
+klarste Lizenzlage im Feld. Suno wird später ein weiterer Adapter, kein Umbau.
+Das steht so schon in [ARCHITEKTUR.md](ARCHITEKTUR.md); neu ist nur, dass es
+jetzt gebaut werden müsste.
+
+**3. Die Signale haben keine Quelle.** Der Raum steuert Bogen und Auswahl, aber
+gemeldet wird von Hand. Der Crowd-Sensor aus dem Entwurf existiert nicht. Für
+einen Space ist das weniger schlimm als es klingt: VibeMind bringt Kanäle mit,
+und ein Signal von dort ist ein `set master.room signal1 …` wie jedes andere.
+
+**4. Zwei Decks sind fest verdrahtet.** Der Plan will vier. Solange Stems nicht
+von Platte streamen (rund 500 MB je Deck), wäre der vierte ohnehin nicht
+finanzierbar — die beiden hängen zusammen.
+
+**5. Die Analyse ist nie gegen echte Musik mit gehörter Wahrheit gelaufen.**
+Gebautes Material hat zuletzt zehn von 23 Namen gefunden; es ersetzt kein Ohr.
+Ein Agent, der auf `section` und `energie` plant, plant auf ungeprüften Zahlen.
+
+**6. Zwei unabhängige Modelle haben noch nie zugleich aufgelegt** (P2 Stufe 2).
+Braucht API-Zugang und kostet Geld — das ist eine Entscheidung, keine Aufgabe.
+
+Nicht auf dieser Liste, weil sie nichts blockieren: Pitch Bend, Reverb, FLAC,
+MIDI, und eine Named Pipe für Windows statt der Rückschleife.
+
+## Die Reihenfolge
+
+Sicherheit zuerst, dann Umzug, dann die Agenten, deren Werkzeuge schon stehen,
+und zuletzt der, der Geld kostet.
+
+| | Schritt | Wo | Hängt an |
+| --- | --- | --- | --- |
+| **1** | Freigabe-Gatter mit den vier Stufen, Default-Deny, Set-Freigabe mit Ablauf | dieses Repo, `mcp/` | — |
+| **2** | Brücke auf `mcp.server.fastmcp` und in die Form `mcp/musik/` mit `server.py`, `approval.py`, `tests/` | dieses Repo | 1 |
+| **3** | `spaces/musik/` mit `README.md`, `AGENTS.md`, `STATUS.md`, `agents/`, `api/` | VibeMind | 2 |
+| **4** | Eintrag in `repo-manifest.yaml`, dieses Repo als Submodul mit Pin | VibeMind | 3 |
+| **5** | **Mix-Engineer** als erster Agent | Space | 4 |
+| **6** | **Track-Wähler** | Space | 5 |
+| **7** | **Set-Planer** und **Guardrail** | Space | 6 |
+| **8** | Generator-Adapter, erster Anbieter ElevenLabs | dieses Repo | Budget |
+
+**Warum der Mix-Engineer zuerst.** Seine Werkzeuge sind fertig und gemessen: das
+Repertoire aus fünf Griffen, der Zeitplan auf dem Beatgrid, die Zurückhaltung,
+die Mitschrift und der Kritiker, der jeden Übergang nachmisst. Er ist der
+einzige Agent, dessen Arbeit sich am selben Abend prüfen lässt — und er ist der
+erste Fall, an dem sich zeigt, ob die Set-Freigabe im Betrieb trägt.
+
+**Warum der Generator zuletzt.** Er hängt an einem Anbieter, an Geld und an
+einer Lizenzfrage, die keiner von uns entscheidet. Und die harte Grenze aus
+[AGENTEN.md](AGENTEN.md) bleibt: Ein generierter Track braucht Zehner von
+Sekunden bis Minuten, ein Dancefloor entscheidet in Sekunden. Generiert wird
+**vorausschauend** — Kandidaten für wahrscheinliche nächste Zustände —, und die
+Crowd steuert die Auswahl aus fertigem Material. Wer auf Echtzeit-Generierung
+wartet, baut ein System, das immer zu spät kommt.
+
+**Zwei Dinge, die dabei nicht vergessen werden dürfen.** Generierte Tracks
+brauchen einen Ort samt ihrem Prompt — sonst weiß hinterher niemand, wie ein
+Stück entstanden ist. Und Kosten und Rate-Limits gehören sichtbar gemacht, im
+Steuerraum wie alles andere; ein Agent, der unbemerkt Geld ausgibt, ist ein
+Fehler mit Rechnung.

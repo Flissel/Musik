@@ -565,6 +565,20 @@ deutlicher als zwei Tracks einer Platte. Die Streuung hier ist deshalb eher die
 **untere Schranke** des Fehlers als sein Erwartungswert. Was sie trägt, ist das
 Vorzeichen, der Zusammenhang mit der Länge und der blinde Fleck bei 16 s.
 
+## Der Anschluss an VibeMind
+
+Der Plan dafür steht in [VIBEMIND.md](VIBEMIND.md) und nicht hier, weil er zwei
+Repos betrifft. Kurz: Die Voraussetzungen sind nachgemessen erfüllt — kein
+Copyleft ohne permissiven Zweig über alle 474 Pakete, und die Steuerung ist seit
+jeher Schnittstelle statt UI-Innenleben. Es fehlen ein Freigabe-Gatter mit
+Set-Freigabe, der Umzug der Brücke in die dortige Form, der Space und ein
+Eintrag im Manifest.
+
+**Und der Generator ist nicht angefangen** — keine Zeile in `crates/`. Suno hat
+weiterhin keine öffentliche API; erster Adapter wäre ElevenLabs Music. Das ist
+die größte Lücke zwischen dem, was das Projekt tut, und dem, wofür es gebaut
+wird.
+
 ## Kleine Schulden
 
 Nichts davon blockiert etwas; sie stehen hier, damit sie nicht vergessen werden.
