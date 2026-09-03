@@ -29,7 +29,8 @@ In einem MCP-Client (Claude Desktop, VibeMind, …):
   "mcpServers": {
     "musik": {
       "command": "/pfad/zu/.venv/bin/python",
-      "args": ["/pfad/zu/musik/mcp/musik_mcp.py"],
+      "args": ["-m", "musik.server"],
+      "cwd": "/pfad/zu/musik/mcp",
       "env": { "MUSIK_SOCKET": "/run/user/1000/musik.sock" }
     }
   }
@@ -262,7 +263,7 @@ stehen mit ihrer Erklärung schon in der Beschreibung von `musik_do`.
 
 ```sh
 cargo run --release -p musik-app -- --socket /tmp/musik.sock
-MUSIK_SOCKET=/tmp/musik.sock .venv/bin/python test_musik_mcp.py
+MUSIK_SOCKET=/tmp/musik.sock .venv/bin/python musik/tests/test_server.py
 ```
 
 Der Test spricht den Server über einen echten MCP-Client an — `tools/list` und

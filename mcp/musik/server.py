@@ -28,11 +28,23 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
-import freigabe
-from fastmcp import FastMCP
+from . import freigabe
+
+# **Eine Weiche statt einer Wette auf eine Major-Version.**
+#
+# Im MCP-SDK heißt die Klasse bis 1.x `FastMCP` unter `mcp.server.fastmcp`, ab
+# 2.x `MCPServer` unter `mcp.server.mcpserver`. Nachgemessen an 1.29.1 und
+# 2.1.1: `tool()`, der Konstruktor und `run()` sind gleich geblieben, nur Name
+# und Modulpfad nicht. VibeMinds eigener `mcp/docker/` importiert heute den
+# alten Pfad und hängt an einem ungepinnten `mcp` — der bricht, sobald jemand
+# frisch installiert. Diese Weiche nimmt beides.
+try:  # mcp >= 2
+    from mcp.server.mcpserver import MCPServer as _Server
+except ModuleNotFoundError:  # mcp < 2
+    from mcp.server.fastmcp import FastMCP as _Server
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-mcp = FastMCP("musik_mcp")
+mcp = _Server("musik_mcp")
 
 # --------------------------------------------------------------------------
 # Verbindung
@@ -2189,5 +2201,15 @@ async def musik_queue_next(params: AuflegenEingabe) -> str:
     return "\n".join(zeilen)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Einstiegspunkt für `musik-mcp`, siehe `pyproject.toml`.
+
+    Ein benannter Einstieg und nicht nur `__main__`: So lässt sich das Paket
+    installieren und aufrufen, ohne den Pfad zur Datei zu kennen — das ist die
+    Form, die `mcp/docker/` in VibeMind hat.
+    """
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

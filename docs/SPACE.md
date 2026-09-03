@@ -95,13 +95,27 @@ Test hinterlegt, der sonst rot wird.
 
 Umzug der heutigen Brücke, in die dortige Form:
 
-| Heute | Künftig |
+**Erledigt** — die Brücke liegt seit `mcp/musik/` in dieser Form.
+
+| Vorher | Jetzt |
 | --- | --- |
 | `mcp/musik_mcp.py` | `mcp/musik/server.py` |
 | — | `mcp/musik/freigabe.py` (aus [FREIGABE.md](FREIGABE.md)) |
 | `mcp/test_musik_mcp.py` | `mcp/musik/tests/test_server.py` |
 | `mcp/requirements.txt` | `mcp/musik/pyproject.toml` |
-| `from fastmcp import FastMCP` | `from mcp.server.fastmcp import FastMCP` |
+| `from fastmcp import FastMCP` | eine Weiche über beide SDK-Generationen |
+
+**Warum eine Weiche und nicht der Pfad aus dem Vorbild.** Im MCP-SDK heißt die
+Klasse bis 1.x `FastMCP` unter `mcp.server.fastmcp`, ab 2.x `MCPServer` unter
+`mcp.server.mcpserver`. VibeMinds eigener `mcp/docker/` importiert den alten
+Pfad und deklariert `dependencies = ["mcp"]` — **ungepinnt**. Bei der nächsten
+frischen Installation zieht das 2.x und bricht. Nachgemessen an 1.29.1 und
+2.1.1: `tool()`, Konstruktor und `run()` sind gleich geblieben, nur Name und
+Modulpfad nicht; sechs Zeilen `try/except` nehmen darum beides, und der Server
+ist unter beiden geprüft.
+
+Das ist zugleich ein Fund für VibeMind: `mcp/docker/pyproject.toml` sollte
+`mcp<2` pinnen oder dieselbe Weiche bekommen.
 
 Die sechzehn Werkzeuge bleiben, was sie sind. **Kein neues Werkzeug für den
 Space** — wer für VibeMind etwas hinzufügt, das über den Socket nicht geht, baut

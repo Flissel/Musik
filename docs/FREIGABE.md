@@ -4,7 +4,7 @@ Spezifikation, kein Bericht. Sie beschreibt, was gebaut werden soll, und ist so
 geschrieben, dass sich hinterher prüfen lässt, ob es gebaut wurde.
 
 Stand: **gebaut**, September 2026. Was hier steht, steht auch im Code —
-`mcp/freigabe.py`, `mcp/test_freigabe.py`, `note` in
+`mcp/musik/freigabe.py`, `mcp/musik/tests/test_freigabe.py`, `note` in
 `crates/control/src/protokoll.rs`.
 
 Am laufenden Programm nachgefahren: ohne Freigabe abgewiesen, mit einer für
@@ -174,17 +174,17 @@ schiefging.
 
 | Datei | Inhalt |
 | --- | --- |
-| `mcp/freigabe.py` | Klassen, Datei lesen, `pruefen(...)`, `pruefen_control(...)`, `verweigert(...)` |
-| `mcp/controls.txt` | alle 194 Controls, erzeugt aus `list`; ein Test hält dagegen, dass jedes eine Klasse hat |
-| `mcp/musik_mcp.py` | je Werkzeug eine Klasse; Aufruf des Gatters vor `sprich(...)` |
+| `mcp/musik/freigabe.py` | Klassen, Datei lesen, `pruefen(...)`, `pruefen_control(...)`, `verweigert(...)` |
+| `mcp/musik/controls.txt` | alle 194 Controls, erzeugt aus `list`; ein Test hält dagegen, dass jedes eine Klasse hat |
+| `mcp/musik/server.py` | je Werkzeug eine Klasse; Aufruf des Gatters vor `sprich(...)` |
 | `crates/control/src/protokoll.rs` | `note <text>` |
 | `crates/control/src/katalog.rs` | `note` im Katalog, damit `list` ihn kennt |
-| `mcp/test_freigabe.py` | die Tests unten |
+| `mcp/musik/tests/test_freigabe.py` | die Tests unten |
 
 ## Tests, die dafür stehen
 
 Ohne diese Liste wäre die Spezifikation eine Absichtserklärung. Sie laufen in
-der CI (`mcp/test_freigabe.py`, 18 Stück — die zwölf unten, die Ablehnung
+der CI (`mcp/musik/tests/test_freigabe.py`, 18 Stück — die zwölf unten, die Ablehnung
 selbst und fünf über die Zuordnung der Controls).
 
 **Fail-closed:**

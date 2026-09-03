@@ -357,7 +357,7 @@ abonniert, sollte deshalb getrennt lesen und schreiben.
 
 ## Anschluss für Agenten: MCP
 
-Für Agenten liegt eine Brücke bei — [`mcp/`](../mcp/README.md), ein
+Für Agenten liegt eine Brücke bei — [`mcp/musik/`](../mcp/musik/README.md), ein
 MCP-Server, der dieses Protokoll in Werkzeuge übersetzt. Vierzehn Werkzeuge statt
 zweihundert: `musik_set` und `musik_do` erreichen alles, `musik_status` und
 `musik_search` sparen die häufigsten Wege, `musik_ramp`, `musik_schedule` und

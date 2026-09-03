@@ -42,4 +42,4 @@ jobs:
       - name: Freigabe-Gatter
         run: |
           python3 -m pip install --quiet pytest
-          python3 -m pytest -q mcp/test_freigabe.py
+          python3 -m pytest -q mcp/musik/tests/test_freigabe.py

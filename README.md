@@ -43,7 +43,7 @@ es nichts, was Agenten steuern könnten.
 | [docs/FREIGABE.md](docs/FREIGABE.md) | Spec: was ein Agent von sich aus darf |
 | [docs/SPACE.md](docs/SPACE.md) | Spec: der Space `musik` in VibeMind |
 | [docs/GENERATOR.md](docs/GENERATOR.md) | Spec: Tracks erzeugen lassen |
-| [mcp/README.md](mcp/README.md) | MCP-Brücke für Agenten — Werkzeuge aus dem Katalog erzeugt |
+| [mcp/musik/README.md](mcp/musik/README.md) | MCP-Brücke für Agenten — Werkzeuge aus dem Katalog erzeugt |
 | [docs/BAUSTEINE.md](docs/BAUSTEINE.md) | Fertige Bibliotheken für Audio, Analyse, Stems — inkl. Lizenzfallen |
 | [docs/APIS.md](docs/APIS.md) | Generierungs-APIs und Sample-Quellen, Zugangsstatus |
 | **[docs/DJ.md](docs/DJ.md)** | **Plan für einen AI-DJ, der nicht herzlos klingt — Reihenfolge und Begründung** |
@@ -441,7 +441,7 @@ ist die Auskunft, nach der sich handeln lässt. Deshalb merkt sich ein Signal
 seine jüngste Vergangenheit.
 
 Das ist die Grundlage für die Agenten-Schicht und für den Anschluss an
-VibeMind — für die liegt in [`mcp/`](mcp/README.md) eine MCP-Brücke bereit,
+VibeMind — für die liegt in [`mcp/musik/`](mcp/musik/README.md) eine MCP-Brücke bereit,
 deren Werkzeugbeschreibungen aus demselben Katalog erzeugt werden. Details in
 [docs/STEUERUNG.md](docs/STEUERUNG.md).
 

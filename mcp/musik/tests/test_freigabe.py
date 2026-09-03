@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import freigabe  # noqa: E402
+from musik import freigabe  # noqa: E402
 
 SCHREIBEND = ("mischen", "spielen", "zeit", "datei", "dramaturgie")
 
@@ -182,7 +182,7 @@ def test_die_ablehnung_nennt_den_befehl_und_verraet_sonst_nichts():
 
 
 def _controls() -> list[str]:
-    pfad = Path(__file__).parent / "controls.txt"
+    pfad = Path(__file__).resolve().parents[1] / "controls.txt"
     return [
         z.strip()
         for z in pfad.read_text(encoding="utf-8").splitlines()

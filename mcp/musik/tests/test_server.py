@@ -23,11 +23,11 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from fastmcp import Client  # noqa: E402
 
-import musik_mcp  # noqa: E402
+from musik import server as musik_mcp  # noqa: E402
 
 ERWARTETE_WERKZEUGE = {
     "musik_status",
