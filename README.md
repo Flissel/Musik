@@ -40,6 +40,9 @@ es nichts, was Agenten steuern könnten.
 | [docs/TRAKTOR-REFERENZ.md](docs/TRAKTOR-REFERENZ.md) | Was Traktor Pro 4 kann, was wir davon übernehmen |
 | [docs/MIXXX.md](docs/MIXXX.md) | Mixxx als Referenz — was übernehmbar ist, warum es nicht eingebettet werden kann |
 | **[docs/STEUERUNG.md](docs/STEUERUNG.md)** | **Fernsteuerung: Socket, Protokoll, selbstbeschreibender Steuerraum** |
+| [docs/FREIGABE.md](docs/FREIGABE.md) | Spec: was ein Agent von sich aus darf |
+| [docs/SPACE.md](docs/SPACE.md) | Spec: der Space `musik` in VibeMind |
+| [docs/GENERATOR.md](docs/GENERATOR.md) | Spec: Tracks erzeugen lassen |
 | [mcp/README.md](mcp/README.md) | MCP-Brücke für Agenten — Werkzeuge aus dem Katalog erzeugt |
 | [docs/BAUSTEINE.md](docs/BAUSTEINE.md) | Fertige Bibliotheken für Audio, Analyse, Stems — inkl. Lizenzfallen |
 | [docs/APIS.md](docs/APIS.md) | Generierungs-APIs und Sample-Quellen, Zugangsstatus |

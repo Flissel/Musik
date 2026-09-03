@@ -225,6 +225,16 @@ MIDI, und eine Named Pipe für Windows statt der Rückschleife.
 
 ## Die Reihenfolge
 
+Die Einzelheiten stehen in drei Spezifikationen, nicht hier:
+
+- **[FREIGABE.md](FREIGABE.md)** — das Gatter: sieben Klassen, die Set-Freigabe
+  als Datei, zwölf Tests, die dafür stehen müssen.
+- **[SPACE.md](SPACE.md)** — Aufbau des Space, sieben Hard Rules, der Umzug der
+  Brücke, der Manifest-Eintrag.
+- **[GENERATOR.md](GENERATOR.md)** — der Adapter, die Ablage samt Prompt, die
+  Kostenbremse.
+
+
 Sicherheit zuerst, dann Umzug, dann die Agenten, deren Werkzeuge schon stehen,
 und zuletzt der, der Geld kostet.
 
