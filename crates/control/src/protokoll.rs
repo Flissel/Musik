@@ -130,6 +130,7 @@ pub fn behandle(pult: &mut Steuerpult, sitzung: &mut Sitzung, zeile: &str) -> St
         "when" => wenn(pult, erstes, zweites),
         "plan" => plan_zeigen(pult),
         "cancel" => streichen(pult, erstes),
+        "note" => notieren(zeile),
         "help" => HILFE.to_string(),
         andere => format!("err unbekannter Befehl: {andere} (help hilft)"),
     };
@@ -154,7 +155,10 @@ pub fn behandle(pult: &mut Steuerpult, sitzung: &mut Sitzung, zeile: &str) -> St
 fn aendert(befehl: &str) -> bool {
     matches!(
         befehl,
-        "set" | "setn" | "do" | "ramp" | "in" | "when" | "cancel"
+        // `note` ändert nichts und steht trotzdem hier: Diese Liste entscheidet,
+        // was in die Mitschrift kommt, und eine Notiz, die nicht mitgeschrieben
+        // wird, ist keine.
+        "set" | "setn" | "do" | "ramp" | "in" | "when" | "cancel" | "note"
     )
 }
 
@@ -190,7 +194,26 @@ ok Befehle:
   when <control> < <wert> <befehl>   Befehl, sobald ein Wert die Schwelle reisst
   plan              was vorgemerkt ist
   cancel [id]       Vorgemerktes zurücknehmen; ohne Argument alles
+  note <text>       eine Zeile in die Mitschrift schreiben, sonst nichts
   help              diese Übersicht";
+
+/// `note <text>` — eine Zeile in die Mitschrift, und weiter nichts.
+///
+/// Sie ändert an der Anlage nichts; sie hält fest, was sonst nirgends stünde.
+/// Gebaut wurde sie für die Freigabe eines Agenten: Unter welcher Vollmacht ein
+/// Set gefahren wurde, ist genau die Frage, die man hinterher stellt, und ohne
+/// diesen Befehl wäre sie nicht zu beantworten.
+///
+/// Die Zeile landet in der Mitschrift, weil [`aendert`] `note` mitzählt — nicht
+/// weil hier etwas geschrieben würde. Das ist der ganze Trick: Der Befehl tut
+/// nichts und wird trotzdem festgehalten.
+fn notieren(zeile: &str) -> String {
+    let text = zeile.strip_prefix("note").unwrap_or("").trim();
+    if text.is_empty() {
+        return "err note braucht einen Text".to_string();
+    }
+    format!("ok note {text}")
+}
 
 /// `ramp <control> <ziel> <beats> [deck]`
 ///
@@ -1070,6 +1093,30 @@ mod plan_tests {
             let antwort = behandle(&mut pult, &mut s, zeile);
             assert!(antwort.starts_with("err"), "'{zeile}' → {antwort}");
         }
+    }
+
+    /// **Eine Notiz ändert nichts und steht trotzdem in der Mitschrift.**
+    ///
+    /// Sie ist der einzige Befehl, der genau dafür da ist. Unter welcher
+    /// Vollmacht ein Agent ein Set gefahren hat, stünde sonst nirgends.
+    #[test]
+    fn eine_notiz_wird_angenommen_und_mitgeschrieben() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        let antwort = behandle(&mut pult, &mut s, "note freigabe mischen von felix");
+        assert_eq!(antwort, "ok note freigabe mischen von felix");
+        assert!(
+            aendert("note"),
+            "eine Notiz, die nicht mitgeschrieben wird, ist keine"
+        );
+    }
+
+    #[test]
+    fn eine_leere_notiz_wird_abgewiesen() {
+        let (mut pult, _runner) = pult_mit_zwei_decks();
+        let mut s = Sitzung::neu();
+        assert!(behandle(&mut pult, &mut s, "note").starts_with("err"));
+        assert!(behandle(&mut pult, &mut s, "note    ").starts_with("err"));
     }
 
     #[test]

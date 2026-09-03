@@ -35,3 +35,11 @@ jobs:
 
       - name: Tests
         run: cargo test --all
+
+      # Das Freigabe-Gatter ist Python und braucht keine laufende Anlage —
+      # geprüft wird das Gatter, nicht die Anwendung. Ohne diesen Schritt wären
+      # seine Wächter Dekoration: Sie liefen nur, wenn jemand daran denkt.
+      - name: Freigabe-Gatter
+        run: |
+          python3 -m pip install --quiet pytest
+          python3 -m pytest -q mcp/test_freigabe.py

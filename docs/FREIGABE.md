@@ -3,7 +3,15 @@
 Spezifikation, kein Bericht. Sie beschreibt, was gebaut werden soll, und ist so
 geschrieben, dass sich hinterher prüfen lässt, ob es gebaut wurde.
 
-Stand: Entwurf, September 2026. Nichts davon ist implementiert.
+Stand: **gebaut**, September 2026. Was hier steht, steht auch im Code —
+`mcp/freigabe.py`, `mcp/test_freigabe.py`, `note` in
+`crates/control/src/protokoll.rs`.
+
+Am laufenden Programm nachgefahren: ohne Freigabe abgewiesen, mit einer für
+`mischen` durchgelassen, `datei` daneben weiterhin zu; zwei Freigabe-Fenster
+ergaben zwei Notizen in der Mitschrift, fünf Aufrufe unter einem Fenster genau
+eine; und die Datei mitten im Betrieb gelöscht wirkte beim nächsten Aufruf,
+ohne Neustart.
 
 ## Warum überhaupt
 
@@ -166,15 +174,18 @@ schiefging.
 
 | Datei | Inhalt |
 | --- | --- |
-| `mcp/freigabe.py` | Klassen, Datei lesen, `pruefen(klasse, befehl) -> (bool, str)`, `verweigert(...)` |
+| `mcp/freigabe.py` | Klassen, Datei lesen, `pruefen(...)`, `pruefen_control(...)`, `verweigert(...)` |
+| `mcp/controls.txt` | alle 194 Controls, erzeugt aus `list`; ein Test hält dagegen, dass jedes eine Klasse hat |
 | `mcp/musik_mcp.py` | je Werkzeug eine Klasse; Aufruf des Gatters vor `sprich(...)` |
 | `crates/control/src/protokoll.rs` | `note <text>` |
 | `crates/control/src/katalog.rs` | `note` im Katalog, damit `list` ihn kennt |
 | `mcp/test_freigabe.py` | die Tests unten |
 
-## Tests, die dafür stehen müssen
+## Tests, die dafür stehen
 
-Ohne diese Liste ist die Spezifikation eine Absichtserklärung.
+Ohne diese Liste wäre die Spezifikation eine Absichtserklärung. Sie laufen in
+der CI (`mcp/test_freigabe.py`, 18 Stück — die zwölf unten, die Ablehnung
+selbst und fünf über die Zuordnung der Controls).
 
 **Fail-closed:**
 

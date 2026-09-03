@@ -28,6 +28,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+import freigabe
 from fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -88,6 +89,59 @@ def tcp_schluessel() -> str | None:
     Programm auf dem Rechner hin, eine Webseite im Browser eingeschlossen.
     """
     return os.environ.get("MUSIK_SCHLUESSEL")
+
+
+#: Merker, damit die Notiz einmal je Freigabe-Fenster in die Mitschrift geht
+#: und nicht bei jedem Aufruf. Eine Mitschrift, die zehnmal dasselbe sagt, wird
+#: nicht gelesen.
+_gemeldete_freigabe: Optional[str] = None
+
+
+def _torwaechter(klasse: str, befehl: str) -> Optional[str]:
+    """Gibt eine Ablehnung zurück, oder `None`, wenn der Aufruf laufen darf.
+
+    Geprüft wird **vor** dem Verbindungsaufbau: erst ausführen und dann melden
+    wäre kein Gatter.
+    """
+    erlaubt, grund = freigabe.pruefen(klasse, befehl)
+    if not erlaubt:
+        return freigabe.verweigert(klasse, befehl, grund)
+    return None
+
+
+def _torwaechter_control(control: str, befehl: str) -> Optional[str]:
+    """Dasselbe, aber die Klasse kommt aus dem Namen des Controls."""
+    erlaubt, grund = freigabe.pruefen_control(control, befehl)
+    if not erlaubt:
+        klasse = freigabe.klasse_fuer_control(control) or "unbekannt"
+        return freigabe.verweigert(klasse, befehl, grund)
+    return None
+
+
+async def _notiz_wenn_neu() -> None:
+    """Schreibt die Freigabe einmal je Fenster in die Mitschrift.
+
+    Ohne das ist hinterher nicht rekonstruierbar, unter welcher Vollmacht ein
+    Set gefahren wurde — und genau das fragt man, wenn etwas schiefging.
+    """
+    global _gemeldete_freigabe
+    pfad = freigabe.datei_pfad()
+    if pfad is None:
+        return
+    try:
+        gueltig = freigabe.lesen(pfad)
+    except freigabe.FreigabeFehler:
+        return
+    notiz = gueltig.notiz()
+    if notiz == _gemeldete_freigabe:
+        return
+    try:
+        await sprich(notiz)
+    except NichtErreichbar:
+        # Die Notiz ist eine Fußnote. Wenn die Anlage nicht erreichbar ist,
+        # scheitert der eigentliche Aufruf gleich von selbst und sagt es.
+        return
+    _gemeldete_freigabe = notiz
 
 
 class NichtErreichbar(RuntimeError):
@@ -1517,8 +1571,12 @@ async def musik_set(params: SetzenEingabe) -> str:
         'Fehler: <Grund>'.
     """
     verb = "setn" if params.normiert else "set"
+    befehl = f"{verb} {params.control} {params.wert}"
+    if abgewiesen := _torwaechter_control(params.control, befehl):
+        return abgewiesen
+    await _notiz_wenn_neu()
     try:
-        zeilen = await eine_antwort(f"{verb} {params.control} {params.wert}")
+        zeilen = await eine_antwort(befehl)
     except NichtErreichbar as fehler:
         return f"Fehler: {fehler}"
 
@@ -1556,6 +1614,9 @@ async def musik_do(params: AktionEingabe) -> str:
     if params.argument:
         befehl += f" {params.argument}"
 
+    if abgewiesen := _torwaechter_control(params.aktion, befehl):
+        return abgewiesen
+    await _notiz_wenn_neu()
     try:
         zeilen = await eine_antwort(befehl)
     except NichtErreichbar as fehler:
@@ -1646,6 +1707,9 @@ async def musik_ramp(params: RampeEingabe) -> str:
     elif params.in_beats is not None:
         befehl = f"in {_zahl_als_text(params.in_beats)} {befehl}"
 
+    if abgewiesen := _torwaechter("zeit", befehl):
+        return abgewiesen
+    await _notiz_wenn_neu()
     try:
         zeilen = await eine_antwort(befehl)
     except NichtErreichbar as fehler:
@@ -1684,6 +1748,9 @@ async def musik_schedule(params: VormerkEingabe) -> str:
         - Nicht dafür: eine Blende → `musik_ramp` (auch verzögert, mit
           in_beats).
     """
+    if abgewiesen := _torwaechter("zeit", f"in {params.beats} Beats: {params.befehl()}"):
+        return abgewiesen
+    await _notiz_wenn_neu()
     try:
         bezug = _zahl_als_text(params.beats)
         if params.ab_phrase:
@@ -1746,6 +1813,9 @@ async def musik_uebergang(params: UebergangEingabe) -> str:
     befehl = f"do master.uebergang {params.griff.value}"
     if params.beats is not None:
         befehl += f" {_zahl_als_text(params.beats)}"
+    if abgewiesen := _torwaechter("zeit", befehl):
+        return abgewiesen
+    await _notiz_wenn_neu()
     try:
         zeilen = await eine_antwort(befehl)
     except NichtErreichbar as fehler:
@@ -1789,6 +1859,9 @@ async def musik_cancel(params: StreichEingabe) -> str:
         - „Alles abbrechen" → alle=true
     """
     befehl = "cancel" if params.alle else f"cancel {params.plan_id}"
+    if abgewiesen := _torwaechter("zeit", befehl):
+        return abgewiesen
+    await _notiz_wenn_neu()
     try:
         zeilen = await eine_antwort(befehl)
     except NichtErreichbar as fehler:
@@ -1839,6 +1912,9 @@ async def musik_signal(params: SignalEingabe) -> str:
         - Auswerten: `musik_status` zeigt Wert, Trend und Alter je Signal;
           `musik_when('master.signal1', 'unter', -0.2, …)` reagiert darauf.
     """
+    if abgewiesen := _torwaechter("dramaturgie", f"set master.signal <{params.name}> {params.wert}"):
+        return abgewiesen
+    await _notiz_wenn_neu()
     namen = [f"master.signal{i}_name" for i in range(1, SIGNALE + 1)]
     try:
         belegt = await _werte(namen)
@@ -1929,6 +2005,9 @@ async def musik_when(params: BedingungEingabe) -> str:
         f"{_zahl_als_text(params.schwelle)} {params.befehl()}"
     )
 
+    if abgewiesen := _torwaechter("zeit", befehl):
+        return abgewiesen
+    await _notiz_wenn_neu()
     try:
         zeilen = await eine_antwort(befehl)
     except NichtErreichbar as fehler:
@@ -2026,6 +2105,9 @@ async def musik_queue_add(params: VormerkenEingabe) -> str:
         - „Merk den für nachher vor" → pfad=…, notiz='ruhiger, nach dem Peak'
         - „Der soll als Nächstes" → als_naechstes=true
     """
+    if abgewiesen := _torwaechter("datei", f"do master.queue_add {params.pfad}"):
+        return abgewiesen
+    await _notiz_wenn_neu()
     try:
         zeilen = await eine_antwort(f"do master.queue_add {params.pfad}")
     except NichtErreichbar as fehler:
@@ -2095,6 +2177,9 @@ async def musik_queue_next(params: AuflegenEingabe) -> str:
     if params.deck:
         befehl += f" {params.deck.value}"
 
+    if abgewiesen := _torwaechter("spielen", befehl):
+        return abgewiesen
+    await _notiz_wenn_neu()
     try:
         zeilen = await eine_antwort(befehl)
     except NichtErreichbar as fehler:
