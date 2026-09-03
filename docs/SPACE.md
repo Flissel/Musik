@@ -3,7 +3,9 @@
 Spezifikation. Sie beschreibt, was in `Flissel/Vibemind_V1` angelegt werden
 soll, damit Agenten diese Anlage bedienen können.
 
-Stand: Entwurf, September 2026. Nichts davon ist angelegt.
+Stand: September 2026. Die Schritte 1, 2, 3 und 5 stehen; 4 wartet auf den
+Merge. Was Schritt 5 gemessen hat, steht in `spaces/musik/docs/ABNAHME.md`
+in [Flissel/Vibemind_V1](https://github.com/Flissel/Vibemind_V1).
 
 Voraussetzung ist [FREIGABE.md](FREIGABE.md) — ohne das Gatter gehört die
 Brücke nicht in einen Space.
@@ -168,13 +170,13 @@ Squash-Merge verwaist. Der Eintrag gehört also in den Commit nach dem Merge, un
 
 ## Reihenfolge und Abnahme
 
-| | Schritt | Fertig, wenn |
-| --- | --- | --- |
-| 1 | Freigabe-Gatter | die zwölf Tests aus [FREIGABE.md](FREIGABE.md) grün sind |
-| 2 | Umzug nach `mcp/musik/` | `tools/list` über einen echten Client dieselben sechzehn Werkzeuge zeigt |
-| 3 | `spaces/musik/` mit den drei Dokumenten | `AGENTS.md` die sieben Hard Rules trägt |
-| 4 | Manifest-Eintrag | `python -m tools.v1_governance` nicht meckert |
-| 5 | Mix-Engineer | er einen Übergang fährt, den `musik-kritik` hinterher wiederfindet |
+| | Schritt | Fertig, wenn | Stand |
+| --- | --- | --- | --- |
+| 1 | Freigabe-Gatter | die zwölf Tests aus [FREIGABE.md](FREIGABE.md) grün sind | **steht** |
+| 2 | Umzug nach `mcp/musik/` | `tools/list` über einen echten Client dieselben sechzehn Werkzeuge zeigt | **steht** |
+| 3 | `spaces/musik/` mit den drei Dokumenten | `AGENTS.md` die sieben Hard Rules trägt | **steht** |
+| 4 | Manifest-Eintrag | `python -m tools.v1_governance` nicht meckert | wartet auf den Merge |
+| 5 | Mix-Engineer | er einen Übergang fährt, den `musik-kritik` hinterher wiederfindet | **steht** |
 
 **Schritt 5 ist der eigentliche Nachweis.** Alles davor ist Verkabelung. Erst
 wenn ein Agent einen Übergang gefahren hat und der Kritiker ihn im Mitschnitt
@@ -183,7 +185,23 @@ trägt. Das Werkzeug dafür steht seit S1 und ist an 24 Sets vermessen: Ein
 harter Schnitt wird auf ein Fenster genau gefunden, eine Blende über 32 Beats
 im Mittel 4,9 s zu spät ([FAHRPLAN.md](FAHRPLAN.md), N3).
 
-## Offene Punkte, die vor Schritt 3 entschieden werden müssen
+**Gefahren, zweimal.** Der Agent wählte `blende` über 32 Beats, nannte seinen
+Grund und benannte die beiden Zahlen, auf die er sich stützte und die niemand
+geprüft hat. Die Anlage setzte ihn 0,04 Beats in die Phrase, fuhr 32,0 von 32
+Beats in 15,0 s, das Tempo hielt (127,99 → 127,96 BPM), kein Frame verworfen —
+und der Kritiker fand ihn wieder und ordnete ihn dem Griff zu. Auf gebautem
+Material, kopflos, ohne dass jemand zugehört hat; das ist ein echtes Ergebnis
+und ein schmales.
+
+**Und der Lauf hat einen Fehler gefunden, den keine Testsuite hatte.** Der
+Pegelbericht des Kritikers las eine Sekunde als zwei und beschrieb damit eine
+Stelle bei halber Zeit — „64 % Einbruch in der Mitte" meinte den Break des
+ausgehenden Tracks, fünfzehn Sekunden vor dem Griff, an dem kein Regler bewegt
+worden war. Behoben (`PEGEL_SEK`, `pegel_um`), und die Warnung darüber trennt
+jetzt zwei Ursachen, die gleich aussehen: eine Kurve, die Leistung verliert,
+und zwei Tracks, die verschieden laut sind.
+
+## Offene Punkte
 
 - **Läuft die Anlage auf demselben Rechner wie VibeMind?** Der Socket setzt das
   voraus. Über Netz ginge nur der Weg über die Rückschleife, und der endet an

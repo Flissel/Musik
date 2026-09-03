@@ -402,9 +402,25 @@ fn schaetzfehler_bericht(uebergaenge: &[Uebergang], a: &Absicht) {
     println!("  den eine lange Blende erzwingt, weil ihr Anfang unhörbar ist.");
 }
 
-/// Pegel über den ganzen Mitschnitt, in Sekundenfenstern.
+/// Wie breit ein Pegelwert ist, in Sekunden.
+///
+/// Steht hier als Konstante, weil zwei Stellen sie brauchen: das Rechnen und
+/// das Suchen nach einer Sekunde im Ergebnis. **Sie standen auseinander** —
+/// gerechnet wurde ein Wert je Sekunde, gesucht wurde mit zwei Sekunden je
+/// Wert —, und damit beschrieb der Pegelbericht einer Blende eine Stelle bei
+/// halber Zeit. Am laufenden Programm fiel es auf: Der Kritiker meldete
+/// „64 % Einbruch in der Mitte" eines gefahrenen Übergangs und beschrieb
+/// damit den Break des ausgehenden Tracks, fünfzehn Sekunden früher, an dem
+/// kein Regler bewegt worden war. Der Befund darüber — „das ist die
+/// Crossfader-Kurve" — war dann Rat zu einer Stelle, die niemand gefahren hat.
+const PEGEL_SEK: f64 = 1.0;
+
+/// Pegel über den ganzen Mitschnitt, ein Wert je [`PEGEL_SEK`].
 fn pegel(track: &Track) -> Vec<f32> {
-    let fenster = track.sample_rate as usize * 2;
+    // Mal `CHANNELS`, weil `samples` verschränkt liegt. Zahlenmäßig dasselbe
+    // wie das frühere `* 2`; ausgeschrieben, damit ein drittes Deck oder ein
+    // Mono-Mitschnitt es nicht stillschweigend verschiebt.
+    let fenster = (track.sample_rate as f64 * PEGEL_SEK) as usize * audio_core::track::CHANNELS;
     track
         .samples
         .chunks(fenster)
@@ -431,6 +447,95 @@ fn pegel_bericht(track: &Track) {
     println!("Pegel: Mittel {mittel:.3}, von {min:.3} bis {max:.3}");
     if max > 0.99 {
         println!("  ⚠ Der Begrenzer hat gearbeitet — die Summe stand am Anschlag.");
+    }
+}
+
+/// Wie ein Pegelloch in einer Blende zu erklären ist.
+///
+/// Zwei Ursachen sehen im Mitschnitt gleich aus und wollen Verschiedenes: eine
+/// Kurve, die in der Mitte Leistung verliert — und zwei Tracks, die schlicht
+/// verschieden laut sind. Trennen lassen sie sich an den Rändern: Steht der
+/// Pegel *nach* dem Übergang deutlich anders als davor, war es das Material,
+/// und eine härtere Kurve verdeckt den Unterschied nur.
+///
+/// Bis dahin sagte der Kritiker in beiden Fällen „das ist die Crossfader-Kurve"
+/// — an einem gefahrenen Übergang gemessen war das falsch: Ein Drop mit Kick
+/// und Bass ging in ein reines Akkord-Intro über, zwölf Dezibel leiser, und
+/// keine Kurve der Welt ändert daran etwas.
+#[derive(Debug, PartialEq, Eq)]
+enum Loch {
+    /// Kein nennenswerter Einbruch.
+    Keins,
+    /// Die Ränder sind verschieden laut — eine Stufe, keine Delle.
+    Stufe,
+    /// Die Ränder sind gleich laut, die Mitte nicht.
+    Kurve,
+    /// Auf einer Seite gibt es nichts zu vergleichen.
+    ///
+    /// Ein Übergang in den ersten Sekunden eines Mitschnitts hat kein Davor,
+    /// und einer am Ende kein Danach. Dann ist der Einbruch echt, seine
+    /// Ursache aber von hier aus nicht zu bestimmen — und das zu sagen ist
+    /// besser, als die häufigere der beiden zu raten.
+    Unklar,
+}
+
+/// Ab wie viel Prozent ein Einbruch überhaupt genannt wird.
+const EINBRUCH_PROZENT: f32 = 15.0;
+
+/// Ab welchem Verhältnis der Ränder es eine Stufe heißt.
+///
+/// 0,7 sind gut drei Dezibel — hörbar verschieden, und mehr als der Abstand
+/// zwischen zwei Abschnitten desselben Stücks. Gewählt und nicht gemessen;
+/// gemessen ist nur der Fall, der dazu führte (0,20 gegen 0,38, also 0,53),
+/// und der liegt weit auf der einen Seite.
+const STUFE_ANTEIL: f32 = 0.7;
+
+/// Wie viele Pegelwerte links und rechts als „außen" gelten.
+const RAND_WERTE: usize = 4;
+
+/// Die Pegelwerte um einen Übergang: das Minimum darin, das Lauteste davor,
+/// das Lauteste danach.
+///
+/// Eigene Funktion, weil hier eine Sekunde in einen Index umgerechnet wird und
+/// genau diese Umrechnung schon einmal um den Faktor zwei danebenlag. In einer
+/// `println!`-Strecke sieht man das nie.
+fn pegel_um(p: &[f32], beginn: f64, ende: f64) -> Option<(f32, f32, f32)> {
+    let idx = |s: f64| (s / PEGEL_SEK) as usize;
+    let (a, b) = (idx(beginn), idx(ende).min(p.len()));
+    if b <= a || b > p.len() {
+        return None;
+    }
+    let innen = p[a..b].iter().copied().fold(f32::MAX, f32::min);
+    let davor = p[a.saturating_sub(RAND_WERTE)..a]
+        .iter()
+        .copied()
+        .fold(0.0f32, f32::max);
+    let danach = p[b..(b + RAND_WERTE).min(p.len())]
+        .iter()
+        .copied()
+        .fold(0.0f32, f32::max);
+    Some((innen, davor, danach))
+}
+
+fn loch(innen: f32, davor: f32, danach: f32) -> (f32, Loch) {
+    let aussen = davor.max(danach);
+    if aussen <= 0.001 {
+        return (0.0, Loch::Keins);
+    }
+    let verlust = 100.0 * (1.0 - innen / aussen);
+    if verlust <= EINBRUCH_PROZENT {
+        return (verlust, Loch::Keins);
+    }
+    if davor <= 0.001 || danach <= 0.001 {
+        return (verlust, Loch::Unklar);
+    }
+    // Symmetrisch: Ob der eingehende Track leiser ist oder der ausgehende war,
+    // ändert nichts daran, dass die Kurve nicht die Ursache ist.
+    let leiser = davor.min(danach);
+    if leiser < aussen * STUFE_ANTEIL {
+        (verlust, Loch::Stufe)
+    } else {
+        (verlust, Loch::Kurve)
     }
 }
 
@@ -511,27 +616,32 @@ fn uebergang_bericht(track: &Track, u: &Uebergang, absicht: Option<&Absicht>) {
 
     // --- Pegelloch ------------------------------------------------------
     let p = pegel(track);
-    let idx = |s: f64| (s / 2.0) as usize;
-    let (a, b) = (idx(u.beginn), idx(u.ende).min(p.len()));
-    if b > a && b <= p.len() {
-        let innen = p[a..b].iter().copied().fold(f32::MAX, f32::min);
-        let davor = p[a.saturating_sub(4)..a]
-            .iter()
-            .copied()
-            .fold(0.0f32, f32::max);
-        let danach = p[b..(b + 4).min(p.len())]
-            .iter()
-            .copied()
-            .fold(0.0f32, f32::max);
+    if let Some((innen, davor, danach)) = pegel_um(&p, u.beginn, u.ende) {
         let aussen = davor.max(danach);
         if aussen > 0.001 {
-            let verlust = 100.0 * (1.0 - innen / aussen);
+            let (verlust, art) = loch(innen, davor, danach);
             println!("  Pegel in der Blende: {innen:.3} gegen {aussen:.3} außen");
-            if verlust > 15.0 {
-                println!("  ⚠ {verlust:.0} % Einbruch in der Mitte. Das ist die Crossfader-Kurve;");
-                println!("     `master.crossfader_curve` härter stellen.");
-            } else {
-                println!("  ✓ Pegel hält über die Blende ({verlust:.0} % Abweichung).");
+            match art {
+                Loch::Keins => {
+                    println!("  ✓ Pegel hält über die Blende ({verlust:.0} % Abweichung).")
+                }
+                Loch::Kurve => {
+                    println!("  ⚠ {verlust:.0} % Einbruch in der Mitte, und beide Seiten sind");
+                    println!("     gleich laut ({davor:.3} / {danach:.3}). Das ist die Kurve;");
+                    println!("     `master.crossfader_curve` härter stellen.");
+                }
+                Loch::Unklar => {
+                    println!("  ⚠ {verlust:.0} % Einbruch — aber auf einer Seite fehlt der");
+                    println!("     Vergleich (davor {davor:.3}, danach {danach:.3}). Ob das die");
+                    println!("     Kurve war oder zwei verschieden laute Tracks, sagt dieser");
+                    println!("     Mitschnitt nicht.");
+                }
+                Loch::Stufe => {
+                    println!("  ⚠ {verlust:.0} % Einbruch — aber die Ränder sind verschieden");
+                    println!("     laut: davor {davor:.3}, danach {danach:.3}. Dann liegt es am");
+                    println!("     Material und nicht an der Kurve — Gain, oder eine andere");
+                    println!("     Stelle zum Einsteigen.");
+                }
             }
         }
     }
@@ -668,6 +778,81 @@ mod tests {
         let mut text = String::from("# musik-mitschrift 1\n# mitschnitt set.wav\n# rate 48000\n");
         text.push_str(&zeilen.join("\n"));
         mitschrift::aus_text(&text).expect("Mitschrift lesbar")
+    }
+
+    /// Ein Wert je Sekunde — die Zahl, an der der Pegelbericht hängt.
+    ///
+    /// Stand hier einmal ein Fenster von `rate * 2` **Samples**, war ein Wert
+    /// eine halbe Sekunde breit, während `uebergang_bericht` mit zwei
+    /// Sekunden je Wert suchte. Der Bericht beschrieb dann eine Stelle bei
+    /// halber Zeit, ohne dass irgendetwas nach einem Fehler aussah.
+    #[test]
+    fn ein_pegelwert_ist_eine_sekunde_breit() {
+        let rate = 48_000u32;
+        let sekunden = 10;
+        let track = Track {
+            samples: vec![0.5f32; rate as usize * audio_core::track::CHANNELS * sekunden],
+            sample_rate: rate,
+            stems: Vec::new(),
+        };
+        assert_eq!(track.duration_secs(), sekunden as f64);
+        assert_eq!(pegel(&track).len(), sekunden);
+        assert_eq!(PEGEL_SEK, 1.0);
+    }
+
+    /// Eine Sekunde ist ein Wert — auch beim Suchen.
+    ///
+    /// Der Fehler, den diese Prüfung fängt, war unsichtbar: Der Bericht sah
+    /// vollständig aus und nannte plausible Zahlen, nur stammten sie aus der
+    /// halben Zeit. Deshalb ein Verlauf, in dem jede Sekunde anders klingt —
+    /// dann sagt die Zahl, wo geschaut wurde.
+    #[test]
+    fn die_pegelwerte_kommen_aus_der_richtigen_sekunde() {
+        let p: Vec<f32> = (0..40).map(|i| i as f32 / 100.0).collect();
+        let (innen, davor, danach) = pegel_um(&p, 20.0, 30.0).expect("Fenster liegt im Verlauf");
+        assert!((innen - 0.20).abs() < 1e-6, "innen {innen}");
+        assert!((davor - 0.19).abs() < 1e-6, "davor {davor}");
+        assert!((danach - 0.33).abs() < 1e-6, "danach {danach}");
+
+        // Am Anfang gibt es kein Davor, und das ist kein Fehler.
+        let (_, davor, _) = pegel_um(&p, 0.0, 10.0).expect("Fenster liegt im Verlauf");
+        assert_eq!(davor, 0.0);
+
+        // Über das Ende hinaus wird nichts erfunden.
+        assert_eq!(pegel_um(&p, 39.0, 39.0), None);
+        assert_eq!(pegel_um(&p, 50.0, 60.0), None);
+    }
+
+    /// Der Befund, der am gefahrenen Übergang entstand.
+    #[test]
+    fn ein_leiserer_track_ist_keine_kurve() {
+        // Drop mit Kick und Bass hinein, reines Akkord-Intro heraus.
+        let (verlust, art) = loch(0.081, 0.381, 0.200);
+        assert_eq!(art, Loch::Stufe);
+        assert!(verlust > 70.0, "{verlust}");
+
+        // Gleich laute Ränder, Delle in der Mitte: dann ist es die Kurve.
+        assert_eq!(loch(0.20, 0.40, 0.38).1, Loch::Kurve);
+
+        // Und andersherum ist es genauso wenig die Kurve.
+        assert_eq!(loch(0.081, 0.200, 0.381).1, Loch::Stufe);
+    }
+
+    /// Ohne Rand kein Urteil: lieber „weiß nicht" als die häufigere Ursache.
+    #[test]
+    fn ein_fehlender_rand_ist_keine_stufe() {
+        // Ein Übergang gleich zu Beginn: kein Davor.
+        assert_eq!(loch(0.081, 0.0, 0.381).1, Loch::Unklar);
+        // Und einer am Ende: kein Danach.
+        assert_eq!(loch(0.081, 0.381, 0.0).1, Loch::Unklar);
+    }
+
+    /// Ein Pegel, der hält, ist kein Befund — auch nicht mit Rauschen drauf.
+    #[test]
+    fn ohne_einbruch_wird_nichts_gemeldet() {
+        assert_eq!(loch(0.36, 0.40, 0.39).1, Loch::Keins);
+        // Stille auf beiden Seiten: nichts zu vergleichen, nichts zu melden.
+        assert_eq!(loch(0.0, 0.0, 0.0), (0.0, Loch::Keins));
     }
 
     #[test]

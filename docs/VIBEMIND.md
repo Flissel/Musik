@@ -149,16 +149,17 @@ deshalb heute schon eine dünne Hülle.
 ## Was zwischen hier und einem Space liegt
 
 Vier Dinge, im echten `Vibemind_V1` nachgesehen, nicht aus diesem Dokument
-abgeleitet:
+abgeleitet. Drei sind inzwischen erledigt; die Zeilen bleiben stehen, weil der
+Ausgangspunkt zur Begründung gehört:
 
-| | Stand |
-| --- | --- |
-| `spaces/musik/` | existiert nicht — es gibt nur `marketing` |
-| Eintrag in `repo-manifest.yaml` | keiner |
-| Freigabe-Gatter für schreibende Werkzeuge | **fehlt ganz** — alle 16 laufen frei |
-| FastMCP-Herkunft | hier `fastmcp`, dort `mcp.server.fastmcp` |
+| | Stand damals | Stand jetzt |
+| --- | --- | --- |
+| `spaces/musik/` | existiert nicht — es gibt nur `marketing` | angelegt, mit Mix-Engineer und Abnahmelauf |
+| Eintrag in `repo-manifest.yaml` | keiner | wartet auf den Merge dieses Zweigs |
+| Freigabe-Gatter für schreibende Werkzeuge | **fehlt ganz** — alle 16 laufen frei | sieben Klassen, 18 Tests, in der CI |
+| FastMCP-Herkunft | hier `fastmcp`, dort `mcp.server.fastmcp` | eine Weiche über 1.x und 2.x, unter beiden geprüft |
 
-Das dritte ist das einzige mit Substanz; die anderen drei sind Umzug.
+Das dritte war das einzige mit Substanz; die anderen drei waren Umzug.
 
 ### Das Freigabe-Modell für ein Pult
 
@@ -240,11 +241,11 @@ und zuletzt der, der Geld kostet.
 
 | | Schritt | Wo | Hängt an |
 | --- | --- | --- | --- |
-| **1** | Freigabe-Gatter mit den vier Stufen, Default-Deny, Set-Freigabe mit Ablauf | dieses Repo, `mcp/` | — |
-| **2** | Brücke auf `mcp.server.fastmcp` und in die Form `mcp/musik/` mit `server.py`, `approval.py`, `tests/` | dieses Repo | 1 |
-| **3** | `spaces/musik/` mit `README.md`, `AGENTS.md`, `STATUS.md`, `agents/`, `api/` | VibeMind | 2 |
-| **4** | Eintrag in `repo-manifest.yaml`, dieses Repo als Submodul mit Pin | VibeMind | 3 |
-| **5** | **Mix-Engineer** als erster Agent | Space | 4 |
+| **1** ✅ | Freigabe-Gatter mit den vier Stufen, Default-Deny, Set-Freigabe mit Ablauf | dieses Repo, `mcp/` | — |
+| **2** ✅ | Brücke auf `mcp.server.fastmcp` und in die Form `mcp/musik/` mit `server.py`, `approval.py`, `tests/` | dieses Repo | 1 |
+| **3** ✅ | `spaces/musik/` mit `README.md`, `AGENTS.md`, `STATUS.md`, `agents/`, `api/` | VibeMind | 2 |
+| **4** | Eintrag in `repo-manifest.yaml`, dieses Repo als Submodul mit Pin | VibeMind | Merge |
+| **5** ✅ | **Mix-Engineer** als erster Agent | Space | 3 |
 | **6** | **Track-Wähler** | Space | 5 |
 | **7** | **Set-Planer** und **Guardrail** | Space | 6 |
 | **8** | Generator-Adapter, erster Anbieter ElevenLabs | dieses Repo | Budget |
@@ -254,6 +255,13 @@ Repertoire aus fünf Griffen, der Zeitplan auf dem Beatgrid, die Zurückhaltung,
 die Mitschrift und der Kritiker, der jeden Übergang nachmisst. Er ist der
 einzige Agent, dessen Arbeit sich am selben Abend prüfen lässt — und er ist der
 erste Fall, an dem sich zeigt, ob die Set-Freigabe im Betrieb trägt.
+
+Sie trägt: Der Lauf ist zweimal gefahren, die Freigabe stand über ein Fenster
+von einer Stunde, und die Kette hielt von der Entscheidung bis zum Mitschnitt.
+Schritt 4 wurde dabei **übersprungen und nicht vergessen** — der Manifest-
+Eintrag braucht einen Pin, und den gibt es erst nach dem Merge; der Agent
+braucht ihn nicht. Zahlen in `spaces/musik/docs/ABNAHME.md`, Fund in
+[FAHRPLAN.md](FAHRPLAN.md), N4.
 
 **Warum der Generator zuletzt.** Er hängt an einem Anbieter, an Geld und an
 einer Lizenzfrage, die keiner von uns entscheidet. Und die harte Grenze aus

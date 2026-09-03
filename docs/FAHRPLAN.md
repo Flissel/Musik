@@ -565,14 +565,48 @@ deutlicher als zwei Tracks einer Platte. Die Streuung hier ist deshalb eher die
 **untere Schranke** des Fehlers als sein Erwartungswert. Was sie trägt, ist das
 Vorzeichen, der Zusammenhang mit der Länge und der blinde Fleck bei 16 s.
 
+**N4 — Die ganze Kette einmal durch ✅.** Nicht der Kritiker gegen ein
+gebautes Set, sondern ein Agent gegen die laufende Anlage: Mix-Engineer → MCP →
+Gatter → Protokoll → Mixer → Mitschnitt → Kritiker. Der Agent liegt in
+`spaces/musik/` in [Flissel/Vibemind_V1][vm], der Lauf ebenfalls; die Zahlen
+stehen dort in `docs/ABNAHME.md`.
+
+Zweimal gefahren, gleiches Ergebnis: gewählt wurde `blende` über 32 Beats mit
+genanntem Grund, gesetzt 0,04 Beats in die Phrase, gefahren 32,0 von 32 Beats
+in 15,0 s, Tempo 127,99 → 127,96 BPM, kein Frame verworfen. Der Kritiker fand
+den Übergang wieder und ordnete ihn dem Griff zu.
+
+**Der Fund war ein Fehler im Kritiker.** Sein Pegelbericht rechnet einen Wert
+je Sekunde, suchte den passenden aber mit zwei Sekunden je Wert — und beschrieb
+damit systematisch eine Stelle bei halber Zeit. Konkret: gemeldet wurden „64 %
+Einbruch in der Mitte" der Blende samt Rat zur Crossfader-Kurve; gemeint war
+der Break des *ausgehenden* Tracks, fünfzehn Sekunden vor dem Griff, an dem
+kein Regler bewegt worden war. Nichts daran sah nach einem Fehler aus: Der
+Bericht war vollständig und die Zahlen plausibel. Behoben über `PEGEL_SEK` und
+`pegel_um`, letzteres eigens herausgezogen, damit eine Prüfung die Umrechnung
+überhaupt sehen kann.
+
+Mit dem richtigen Fenster sind es 79 % — und die Ursache ist eine andere: Die
+Ränder sind verschieden laut (0,381 davor, 0,200 danach), ein Drop mit Kick und
+Bass ging in ein reines Akkord-Intro. Der Kritiker trennt die beiden Fälle
+jetzt und nennt beide Ränder, statt in beiden „das ist die Kurve" zu sagen.
+
+**Vier Anläufe davor haben nichts gemessen**, und drei davon waren die Anlage,
+die sich weigerte, etwas zu behaupten: eine Freigabe im falschen Format, ein
+Mitschnitt bei geschlossenen Kanalzügen („der Mitschnitt ist still"), zwei
+Stücke in derselben Tonart (der Kritiker vergleicht Chroma — für ihn ein
+Stück), und ein Mitschnitt, der kürzer war als der Rückblick von 16 s.
+
+[vm]: https://github.com/Flissel/Vibemind_V1
+
 ## Der Anschluss an VibeMind
 
 Der Plan dafür steht in [VIBEMIND.md](VIBEMIND.md) und nicht hier, weil er zwei
 Repos betrifft. Kurz: Die Voraussetzungen sind nachgemessen erfüllt — kein
 Copyleft ohne permissiven Zweig über alle 474 Pakete, und die Steuerung ist seit
-jeher Schnittstelle statt UI-Innenleben. Es fehlen ein Freigabe-Gatter mit
-Set-Freigabe, der Umzug der Brücke in die dortige Form, der Space und ein
-Eintrag im Manifest.
+jeher Schnittstelle statt UI-Innenleben. Freigabe-Gatter, Umzug der Brücke,
+Space und Mix-Engineer stehen (siehe N4); es fehlt der Eintrag im Manifest, und
+der wartet auf den Merge dieses Zweigs.
 
 **Und der Generator ist nicht angefangen** — keine Zeile in `crates/`. Suno hat
 weiterhin keine öffentliche API; erster Adapter wäre ElevenLabs Music. Das ist
@@ -596,7 +630,7 @@ als zwei Decks (heute fest verdrahtet); MIDI-Controller (Phase 10).
 | P5 ✅ | Der Raum | Braucht den Bogen, sonst gibt es nichts zu lenken | P4, Quelle |
 | P6 ✅ | Stems | Größter Klanggewinn; Streaming von Platte steht noch aus | — |
 | M1–M6 | Musik, Gerät, Ohren | Nicht von hier aus zu erledigen | dir |
-| N1–N3 | Nachweise | Läuft nebenher | P1 |
+| N1–N4 | Nachweise | Läuft nebenher | P1 |
 
 **P1 und P2 sind zusammen die kleinste Menge, nach der das Projekt das prüfen
 kann, wofür es gebaut ist.** Sie kommen zuerst, obwohl P3 schneller klingt — und
